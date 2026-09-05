@@ -402,9 +402,14 @@
 const REPO      = 'darshworkplcae/storage';
 const DB_FILE   = 'db.json';
 const BRANCH    = 'main';
-const SK        = 'td_s_v2';   // settings localStorage key
-const SES       = 'td_ses_v1'; // session sessionStorage key
-const CHUNK_MB  = 19;          // Telegram Bot API real limit: 50MB upload, 20MB getFile download
+const SK        = 'td_s_v2';
+const SES       = 'td_ses_v1';
+
+// ---- Local Bot API Server (runs on Render — gives 2GB upload limit!) ----
+const LOCAL_API = 'https://teledrive-api.onrender.com';
+
+// Chunk size: 1.9 GB — local bot API allows up to 2 GB per file
+const CHUNK_MB  = 1900;
 const CHUNK_B   = CHUNK_MB * 1024 * 1024;
 
 // ---- Pre-configured credentials ----
@@ -494,8 +499,8 @@ async function saveDB() {
   } catch(e) { console.error('saveDB',e); return false; }
 }
 
-// ---- Telegram API ----
-function tgUrl(ep) { return `https://api.telegram.org/bot${S.cfg.botToken}/${ep}`; }
+// ---- Telegram API (via Local Bot API on Render — 2GB limit!) ----
+function tgUrl(ep) { return `${LOCAL_API}/bot${S.cfg.botToken}/${ep}`; }
 
 function uploadChunk(blob, name, onProgress) {
   return new Promise((res,rej) => {
@@ -504,6 +509,7 @@ function uploadChunk(blob, name, onProgress) {
     fd.append('document', blob, name);
     const xhr = new XMLHttpRequest();
     xhr.open('POST', tgUrl('sendDocument'));
+    xhr.timeout = 0; // no timeout for large file uploads
     xhr.upload.onprogress = e => { if(e.lengthComputable && onProgress) onProgress(e.loaded, e.total); };
     xhr.onload = () => {
       try {
@@ -514,7 +520,6 @@ function uploadChunk(blob, name, onProgress) {
     };
     xhr.onerror = () => rej(new Error('Network error'));
     xhr.send(fd);
-    // Store xhr for cancellation
     S._xhr = xhr;
   });
 }
@@ -523,8 +528,11 @@ async function tgFileUrl(fileId) {
   try {
     const r = await fetch(tgUrl(`getFile?file_id=${fileId}`));
     const d = await r.json();
-    if (d.ok && d.result.file_path)
-      return `https://api.telegram.org/file/bot${S.cfg.botToken}/${d.result.file_path}`;
+    if (d.ok && d.result.file_path) {
+      const fp = d.result.file_path;
+      // Works for both local mode (absolute path) and relay mode (relative path)
+      return `${LOCAL_API}/file/bot${S.cfg.botToken}/${fp}`;
+    }
   } catch{}
   return null;
 }
