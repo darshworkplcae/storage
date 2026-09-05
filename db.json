@@ -9,6 +9,14 @@
       "color": "#0a84ff",
       "passwordHash": null,
       "createdAt": "2026-09-05T15:07:40.425Z"
+    },
+    {
+      "id": "mtoipafzhgrw",
+      "letter": "O",
+      "name": "om",
+      "color": "#64d2ff",
+      "passwordHash": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
+      "createdAt": "2026-09-05T15:08:19.103Z"
     }
   ],
   "folders": [],
