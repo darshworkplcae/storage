@@ -1,0 +1,16 @@
+{
+  "v": 2,
+  "adminHash": "fb4ba5040fe2f17c12db862a5a73dfe49f0370106dfd43b4afade1778c974965",
+  "drives": [
+    {
+      "id": "mtoioglluw0r",
+      "letter": "T",
+      "name": "Telegram Drive",
+      "color": "#0a84ff",
+      "passwordHash": null,
+      "createdAt": "2026-09-05T15:07:40.425Z"
+    }
+  ],
+  "folders": [],
+  "files": []
+}
