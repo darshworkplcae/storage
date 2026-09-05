@@ -1,0 +1,1483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+  <title>TeleDrive</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/css/inter@latest/latin.css">
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    :root{
+      --bg:#0a0e1a;--bg2:#0f1424;--card:rgba(22,28,45,0.65);--card-solid:#161c2d;
+      --primary:#0a84ff;--primary2:#5e5ce6;--accent:#64d2ff;
+      --success:#30d158;--danger:#ff453a;--warning:#ffd60a;
+      --text:#f5f5f7;--text2:#8e8e93;--text3:#636366;
+      --border:rgba(255,255,255,0.08);--border2:rgba(255,255,255,0.14);
+      --hover:rgba(255,255,255,0.05);--sidebar:rgba(15,20,32,0.72);
+      --rsm:10px;--rmd:16px;--rlg:22px;--rxl:28px;
+      --sh-sm:0 2px 8px rgba(0,0,0,.2);--sh-md:0 8px 24px rgba(0,0,0,.25);
+      --sh-lg:0 20px 60px rgba(0,0,0,.45);--sh-glow:0 0 40px rgba(10,132,255,.25);
+    }
+    html,body{font-family:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden;-webkit-font-smoothing:antialiased;letter-spacing:-.01em;}
+
+    /* Background */
+    .bg-canvas{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;}
+    .orb{position:absolute;border-radius:50%;filter:blur(80px);opacity:.55;animation:float 20s infinite ease-in-out;}
+    .orb-1{width:500px;height:500px;background:#0a84ff;top:-150px;left:-100px;}
+    .orb-2{width:400px;height:400px;background:#bf5af2;bottom:-100px;right:-50px;animation-delay:-5s;}
+    .orb-3{width:350px;height:350px;background:#64d2ff;top:40%;left:50%;animation-delay:-10s;opacity:.35;}
+    .orb-4{width:300px;height:300px;background:#ff375f;bottom:20%;left:20%;animation-delay:-15s;opacity:.3;}
+    @keyframes float{0%,100%{transform:translate(0,0) scale(1);}33%{transform:translate(60px,-40px) scale(1.1);}66%{transform:translate(-40px,50px) scale(.95);}}
+    .noise{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.025;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+
+    /* App */
+    #app{position:relative;z-index:2;height:100vh;display:flex;flex-direction:column;}
+
+    /* Top Bar */
+    .top-bar{height:52px;background:var(--sidebar);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:1rem;padding:0 1.5rem;flex-shrink:0;z-index:10;}
+    .top-logo{display:flex;align-items:center;gap:.6rem;cursor:pointer;text-decoration:none;}
+    .top-logo-icon{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--primary),var(--primary2));display:flex;align-items:center;justify-content:center;color:#fff;font-size:.9rem;box-shadow:0 4px 12px rgba(10,132,255,.4);}
+    .top-logo-text{font-size:1.05rem;font-weight:700;letter-spacing:-.02em;background:linear-gradient(135deg,var(--text),var(--text2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+    .top-search{flex:1;max-width:340px;display:flex;align-items:center;background:var(--hover);border:1px solid var(--border);border-radius:10px;padding:.38rem .8rem;gap:.5rem;transition:all .2s;}
+    .top-search:focus-within{border-color:var(--primary);box-shadow:0 0 0 3px rgba(10,132,255,.15);}
+    .top-search i{color:var(--text3);font-size:.82rem;}
+    .top-search input{background:none;border:none;color:var(--text);font-family:inherit;font-size:.86rem;width:100%;outline:none;}
+    .top-search input::placeholder{color:var(--text3);}
+    .top-spacer{flex:1;}
+    .top-acts{display:flex;align-items:center;gap:.4rem;}
+    .icon-btn{width:34px;height:34px;border-radius:8px;background:var(--hover);border:1px solid var(--border);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;font-size:.88rem;}
+    .icon-btn:hover{background:var(--border);transform:translateY(-1px);}
+    .admin-btn{background:rgba(255,214,10,.1);border-color:rgba(255,214,10,.3);color:var(--warning);}
+    .admin-btn:hover{background:rgba(255,214,10,.18);}
+    .admin-badge{position:relative;}
+    .admin-badge::after{content:'';position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--warning);border:2px solid var(--bg);}
+
+    /* Main area split */
+    .app-body{flex:1;display:flex;overflow:hidden;}
+
+    /* === HOME SCREEN === */
+    #homeScreen{flex:1;overflow-y:auto;padding:2rem 2.5rem;}
+    #homeScreen::-webkit-scrollbar{width:6px;}
+    #homeScreen::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
+    .home-hero{display:flex;align-items:center;gap:.8rem;margin-bottom:.4rem;}
+    .home-title{font-size:1.7rem;font-weight:700;letter-spacing:-.02em;}
+    .home-sub{color:var(--text2);font-size:.88rem;margin-bottom:2rem;}
+    .section-label{font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);margin-bottom:.9rem;}
+
+    /* Drive Cards - Windows This PC style */
+    .drives-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:1rem;margin-bottom:2.5rem;}
+    .drive-card{background:var(--card);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:var(--rlg);padding:1.1rem 1.2rem;cursor:pointer;transition:all .3s cubic-bezier(.4,0,.2,1);position:relative;overflow:hidden;display:flex;align-items:center;gap:.9rem;}
+    .drive-card::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--dc,var(--primary)),transparent 60%);opacity:0;transition:opacity .3s;}
+    .drive-card:hover{transform:translateY(-3px);border-color:var(--dc,var(--primary));box-shadow:0 8px 30px rgba(0,0,0,.35);}
+    .drive-card:hover::after{opacity:.06;}
+    .drive-card.locked .drive-icon{filter:saturate(.4);}
+    .drive-icon{position:relative;flex-shrink:0;}
+    .drive-icon i{font-size:2.4rem;color:var(--dc,var(--primary));display:block;}
+    .drive-letter{position:absolute;bottom:-1px;right:-3px;width:17px;height:17px;border-radius:4px;background:var(--dc,var(--primary));color:#fff;font-size:.55rem;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid var(--bg);}
+    .drive-info{flex:1;min-width:0;position:relative;z-index:1;}
+    .drive-name{font-weight:600;font-size:.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:.55rem;}
+    .drive-bar-bg{height:5px;background:var(--border);border-radius:20px;overflow:hidden;margin-bottom:.3rem;}
+    .drive-bar-fill{height:100%;background:linear-gradient(90deg,var(--dc,var(--primary)),var(--accent));border-radius:20px;transition:width .6s;}
+    .drive-space{font-size:.7rem;color:var(--text2);}
+    .drive-lock{position:absolute;top:.8rem;right:.8rem;color:var(--text3);font-size:.78rem;}
+    .drive-add{background:transparent;border:2px dashed var(--border);border-radius:var(--rlg);padding:1.1rem 1.2rem;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:.7rem;color:var(--text2);}
+    .drive-add:hover{border-color:var(--primary);color:var(--primary);background:rgba(10,132,255,.05);}
+
+    /* === EXPLORER === */
+    #explorerView{flex:1;display:flex;overflow:hidden;}
+
+    /* Sidebar */
+    .ex-sidebar{width:210px;background:var(--sidebar);backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;}
+    .ex-sidebar-hd{padding:.7rem 1rem .4rem;font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.09em;color:var(--text3);}
+    .ex-tree{flex:1;overflow-y:auto;padding:0 .4rem .8rem;}
+    .ex-tree::-webkit-scrollbar{width:3px;}
+    .ex-tree::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+    .tree-node{display:flex;align-items:center;gap:.45rem;padding:.38rem .5rem;border-radius:7px;cursor:pointer;font-size:.82rem;color:var(--text2);transition:all .15s;user-select:none;white-space:nowrap;overflow:hidden;}
+    .tree-node:hover{background:var(--hover);color:var(--text);}
+    .tree-node.active{background:rgba(10,132,255,.14);color:var(--primary);font-weight:500;}
+    .tree-node i{font-size:.78rem;flex-shrink:0;width:13px;text-align:center;}
+    .tree-label{overflow:hidden;text-overflow:ellipsis;flex:1;}
+
+    /* Explorer main */
+    .ex-main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+
+    /* Toolbar */
+    .ex-toolbar{padding:.45rem .9rem;border-bottom:1px solid var(--border);background:var(--sidebar);display:flex;align-items:center;gap:.3rem;flex-shrink:0;flex-wrap:nowrap;}
+    .tb-grp{display:flex;align-items:center;gap:.25rem;}
+    .tb-sep{width:1px;height:18px;background:var(--border);margin:0 .2rem;}
+    .tb-btn{height:28px;padding:0 .65rem;border-radius:6px;background:transparent;border:none;color:var(--text2);cursor:pointer;font-size:.8rem;font-family:inherit;display:flex;align-items:center;gap:.3rem;transition:all .15s;white-space:nowrap;}
+    .tb-btn:hover:not(:disabled){background:var(--hover);color:var(--text);}
+    .tb-btn:disabled{opacity:.35;cursor:not-allowed;}
+    .tb-btn.prim{background:linear-gradient(135deg,var(--primary),var(--primary2));color:#fff;}
+    .tb-btn.prim:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(10,132,255,.35);}
+    .tb-sel{background:var(--hover);color:var(--text);border:1px solid var(--border);border-radius:6px;height:28px;padding:0 .6rem;font-family:inherit;font-size:.78rem;cursor:pointer;outline:none;}
+
+    /* Address bar */
+    .addr-bar{height:34px;background:var(--sidebar);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 1rem;gap:.2rem;flex-shrink:0;overflow-x:auto;}
+    .addr-bar::-webkit-scrollbar{display:none;}
+    .bc-item{display:flex;align-items:center;gap:.2rem;font-size:.82rem;flex-shrink:0;}
+    .bc-item span{cursor:pointer;color:var(--text2);transition:color .15s;padding:.15rem .35rem;border-radius:5px;}
+    .bc-item span:hover{color:var(--text);background:var(--hover);}
+    .bc-item.cur span{color:var(--text);font-weight:500;cursor:default;}
+    .bc-item.cur span:hover{background:none;}
+    .bc-sep{color:var(--text3);font-size:.68rem;margin:0 .05rem;}
+
+    /* Content */
+    .ex-content{flex:1;overflow-y:auto;padding:1.1rem 1.4rem;position:relative;}
+    .ex-content::-webkit-scrollbar{width:7px;}
+    .ex-content::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
+
+    /* File grid */
+    .file-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:.8rem;}
+    .f-item{background:var(--card);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:var(--rmd);padding:.9rem .7rem;cursor:pointer;transition:all .2s cubic-bezier(.4,0,.2,1);text-align:center;position:relative;user-select:none;animation:fadeUp .3s ease;}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+    .f-item:hover{transform:translateY(-2px);border-color:var(--border2);box-shadow:var(--sh-md);}
+    .f-item.sel{border-color:var(--primary);background:rgba(10,132,255,.12);}
+    .f-item-ico{font-size:2rem;margin-bottom:.5rem;line-height:1;}
+    .f-item-name{font-size:.73rem;font-weight:500;word-break:break-word;line-height:1.3;color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+    .f-item-sub{font-size:.65rem;color:var(--text3);margin-top:.22rem;}
+
+    /* File list */
+    .file-list{display:flex;flex-direction:column;gap:2px;}
+    .f-list-item{display:flex;align-items:center;gap:.75rem;padding:.5rem .7rem;border-radius:7px;cursor:pointer;transition:all .15s;border:1px solid transparent;}
+    .f-list-item:hover{background:var(--hover);border-color:var(--border);}
+    .f-list-item.sel{background:rgba(10,132,255,.12);border-color:var(--primary);}
+    .f-list-ico{font-size:1rem;width:22px;text-align:center;flex-shrink:0;}
+    .f-list-name{flex:1;font-size:.85rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .f-list-size{font-size:.75rem;color:var(--text2);min-width:68px;text-align:right;flex-shrink:0;}
+    .f-list-date{font-size:.75rem;color:var(--text3);min-width:88px;text-align:right;flex-shrink:0;}
+
+    /* Status bar */
+    .status-bar{height:25px;background:var(--sidebar);border-top:1px solid var(--border);padding:0 1rem;display:flex;align-items:center;gap:.8rem;font-size:.72rem;color:var(--text3);flex-shrink:0;}
+
+    /* Drop overlay */
+    .drop-ov{position:absolute;inset:0;background:rgba(10,132,255,.12);border:3px dashed var(--primary);border-radius:var(--rlg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;gap:.5rem;animation:fadeIn .2s;}
+    .drop-ov i{font-size:3rem;color:var(--primary);}
+    .drop-ov span{font-size:.9rem;font-weight:500;color:var(--primary);}
+    @keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
+
+    /* Upload bar */
+    .upload-bar{position:fixed;bottom:0;left:0;right:0;background:var(--card-solid);border-top:1px solid var(--border);padding:.55rem 1.5rem;z-index:500;display:flex;align-items:center;gap:1rem;animation:slideUp .3s ease;}
+    @keyframes slideUp{from{transform:translateY(100%);}to{transform:translateY(0);}}
+    .up-icon{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--primary),var(--primary2));display:flex;align-items:center;justify-content:center;color:#fff;font-size:.82rem;flex-shrink:0;}
+    .up-info{flex:1;min-width:0;}
+    .up-name{font-size:.82rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:.2rem;}
+    .up-status{font-size:.72rem;color:var(--text2);}
+    .up-bar-bg{width:160px;height:5px;background:var(--border);border-radius:10px;overflow:hidden;flex-shrink:0;}
+    .up-bar-fill{height:100%;background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:10px;transition:width .15s;position:relative;overflow:hidden;}
+    .up-bar-fill::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);animation:shimmer 1.5s infinite;}
+    @keyframes shimmer{0%{transform:translateX(-100%);}100%{transform:translateX(100%);}}
+    .up-pct{font-size:.82rem;font-weight:700;color:var(--primary);min-width:40px;text-align:right;flex-shrink:0;}
+
+    /* === MODAL BASE === */
+    .modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);display:flex;align-items:center;justify-content:center;z-index:800;padding:1rem;animation:fadeIn .2s;}
+    .modal-box{background:var(--card-solid);border:1px solid var(--border2);border-radius:var(--rxl);box-shadow:var(--sh-lg);animation:modalIn .3s cubic-bezier(.34,1.56,.64,1);max-width:480px;width:100%;}
+    @keyframes modalIn{from{opacity:0;transform:scale(.9);}to{opacity:1;transform:scale(1);}}
+    .modal-hd{display:flex;align-items:center;justify-content:space-between;padding:1.1rem 1.4rem;border-bottom:1px solid var(--border);}
+    .modal-ttl{font-size:.95rem;font-weight:600;}
+    .modal-cls{width:26px;height:26px;border-radius:50%;background:var(--hover);border:none;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;font-size:.8rem;}
+    .modal-cls:hover{background:var(--border);transform:rotate(90deg);}
+    .modal-bd{padding:1.1rem 1.4rem;}
+    .modal-ft{padding:.8rem 1.4rem;border-top:1px solid var(--border);display:flex;gap:.5rem;justify-content:flex-end;}
+
+    /* Form */
+    .f-grp{margin-bottom:.9rem;}
+    .f-lbl{font-size:.77rem;font-weight:600;color:var(--text2);margin-bottom:.35rem;display:block;}
+    .f-inp{width:100%;background:var(--hover);border:1px solid var(--border);border-radius:9px;padding:.65rem .9rem;color:var(--text);font-family:inherit;font-size:.87rem;outline:none;transition:all .2s;}
+    .f-inp:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(10,132,255,.15);}
+    .f-inp::placeholder{color:var(--text3);}
+    .f-hint{font-size:.73rem;color:var(--text3);margin-top:.28rem;}
+    .f-err{font-size:.73rem;color:var(--danger);margin-top:.28rem;}
+
+    /* Buttons */
+    .btn-p{background:linear-gradient(135deg,var(--primary),var(--primary2));color:#fff;border:none;padding:.7rem 1.4rem;border-radius:10px;font-weight:600;font-size:.87rem;cursor:pointer;font-family:inherit;transition:all .2s;display:inline-flex;align-items:center;justify-content:center;gap:.4rem;}
+    .btn-p:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(10,132,255,.4);}
+    .btn-p:disabled{opacity:.5;cursor:not-allowed;transform:none;}
+    .btn-s{background:var(--hover);border:1px solid var(--border);color:var(--text);padding:.7rem 1.2rem;border-radius:10px;font-weight:500;font-size:.87rem;cursor:pointer;font-family:inherit;transition:all .2s;}
+    .btn-s:hover{background:var(--border);}
+    .btn-d{background:var(--danger);color:#fff;border:none;padding:.7rem 1.2rem;border-radius:10px;font-weight:600;font-size:.87rem;cursor:pointer;font-family:inherit;transition:all .2s;}
+    .btn-d:hover{background:#d63630;transform:translateY(-1px);}
+    .btn-sm{padding:.3rem .65rem;border-radius:6px;font-size:.75rem;font-weight:600;cursor:pointer;font-family:inherit;border:1px solid var(--border);background:var(--hover);color:var(--text);transition:all .15s;}
+    .btn-sm:hover{background:var(--border);}
+    .btn-sm.p{background:var(--primary);color:#fff;border-color:var(--primary);}
+    .btn-sm.p:hover{background:#0070d6;}
+    .btn-sm.d{color:var(--danger);border-color:rgba(255,69,58,.3);}
+    .btn-sm.d:hover{background:rgba(255,69,58,.1);}
+
+    /* Info box */
+    .info-box{background:rgba(10,132,255,.07);border:1px solid rgba(10,132,255,.18);border-radius:9px;padding:.8rem .95rem;margin-bottom:.9rem;font-size:.8rem;color:var(--text2);line-height:1.55;}
+    .info-box strong{color:var(--accent);}
+
+    /* === SETUP WIZARD === */
+    .wiz-ov{position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);display:flex;align-items:center;justify-content:center;z-index:999;padding:1rem;}
+    .wiz-box{background:var(--card-solid);border:1px solid var(--border2);border-radius:var(--rxl);max-width:500px;width:100%;padding:2rem;box-shadow:var(--sh-lg);max-height:90vh;overflow-y:auto;}
+    .wiz-logo{display:flex;align-items:center;gap:.7rem;margin-bottom:1.4rem;}
+    .wiz-logo-icon{width:44px;height:44px;border-radius:13px;background:linear-gradient(135deg,var(--primary),var(--primary2));display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#fff;box-shadow:0 4px 14px rgba(10,132,255,.4);}
+    .wiz-logo h1{font-size:1.4rem;font-weight:700;letter-spacing:-.02em;}
+    .wiz-prog{display:flex;gap:.35rem;margin-bottom:1.4rem;}
+    .wiz-dot{height:4px;flex:1;border-radius:2px;background:var(--border);transition:background .3s;}
+    .wiz-dot.active{background:var(--primary);}
+    .wiz-dot.done{background:var(--success);}
+    .wiz-step{display:none;}
+    .wiz-step.active{display:block;}
+    .wiz-ttl{font-size:1.05rem;font-weight:600;margin-bottom:.25rem;}
+    .wiz-sub{color:var(--text2);font-size:.84rem;margin-bottom:1.2rem;}
+    .wiz-acts{display:flex;gap:.6rem;margin-top:1.3rem;}
+
+    /* === MEDIA VIEWER === */
+    .media-ov{position:fixed;inset:0;background:rgba(0,0,0,.92);backdrop-filter:blur(50px);z-index:900;display:flex;flex-direction:column;animation:fadeIn .2s;}
+    .media-hd{height:54px;display:flex;align-items:center;justify-content:space-between;padding:0 1.4rem;background:rgba(0,0,0,.4);flex-shrink:0;gap:1rem;}
+    .media-hd-title{font-size:.88rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
+    .media-hd-acts{display:flex;align-items:center;gap:.4rem;flex-shrink:0;}
+    .media-body{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;}
+    .media-img{max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;transition:transform .3s;border-radius:4px;}
+    .media-img.zoomed{cursor:zoom-out;}
+    .media-vid{max-width:90%;max-height:90%;border-radius:8px;}
+    .media-ft{padding:.65rem 1.4rem;background:rgba(0,0,0,.4);display:flex;align-items:center;gap:.8rem;font-size:.79rem;color:var(--text2);flex-shrink:0;flex-wrap:wrap;}
+
+    /* === CONTEXT MENU === */
+    .ctx-menu{position:fixed;background:var(--card-solid);border:1px solid var(--border2);border-radius:var(--rmd);box-shadow:var(--sh-lg);z-index:1000;min-width:175px;padding:.35rem 0;animation:ctxIn .15s ease;}
+    @keyframes ctxIn{from{opacity:0;transform:scale(.95);}to{opacity:1;transform:scale(1);}}
+    .ctx-item{display:flex;align-items:center;gap:.65rem;padding:.45rem .85rem;font-size:.82rem;cursor:pointer;color:var(--text2);transition:all .1s;}
+    .ctx-item:hover{background:var(--hover);color:var(--text);}
+    .ctx-item.danger:hover{color:var(--danger);background:rgba(255,69,58,.08);}
+    .ctx-item i{width:15px;text-align:center;font-size:.78rem;}
+    .ctx-sep{height:1px;background:var(--border);margin:.25rem 0;}
+
+    /* === ADMIN PANEL === */
+    .admin-box{max-width:680px;width:100%;display:flex;flex-direction:column;max-height:85vh;}
+    .admin-tabs{display:flex;border-bottom:1px solid var(--border);}
+    .admin-tab{padding:.6rem 1.1rem;font-size:.82rem;font-weight:500;cursor:pointer;color:var(--text2);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .2s;}
+    .admin-tab.active{color:var(--primary);border-color:var(--primary);}
+    .admin-tab-bd{flex:1;overflow-y:auto;padding:1.1rem 1.4rem;}
+    .admin-tab-bd::-webkit-scrollbar{width:5px;}
+    .admin-tab-bd::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
+    .drive-row{display:flex;align-items:center;gap:.75rem;padding:.75rem;background:var(--hover);border-radius:var(--rsm);margin-bottom:.5rem;border:1px solid var(--border);}
+    .drive-row-badge{width:32px;height:32px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:.88rem;flex-shrink:0;}
+    .drive-row-info{flex:1;}
+    .drive-row-name{font-size:.85rem;font-weight:600;}
+    .drive-row-sub{font-size:.72rem;color:var(--text2);}
+    .drive-row-acts{display:flex;gap:.35rem;}
+
+    /* Color picker */
+    .color-grid{display:flex;gap:.4rem;flex-wrap:wrap;}
+    .c-swatch{width:26px;height:26px;border-radius:50%;cursor:pointer;border:3px solid transparent;transition:border-color .15s;}
+    .c-swatch.active{border-color:#fff;}
+
+    /* Password dialog */
+    .pass-box{max-width:340px;}
+    .pass-lock{width:54px;height:54px;border-radius:50%;background:rgba(255,214,10,.1);color:var(--warning);display:flex;align-items:center;justify-content:center;font-size:1.35rem;margin:0 auto .9rem;}
+
+    /* Toast */
+    .toast-wrap{position:fixed;top:1rem;right:1rem;z-index:9999;display:flex;flex-direction:column;gap:.4rem;}
+    .toast{background:var(--card-solid);border:1px solid var(--border2);border-radius:11px;padding:.6rem .9rem;box-shadow:var(--sh-lg);display:flex;align-items:center;gap:.6rem;font-size:.84rem;font-weight:500;animation:toastIn .3s cubic-bezier(.34,1.56,.64,1);min-width:230px;max-width:340px;}
+    @keyframes toastIn{from{opacity:0;transform:translateX(30px);}to{opacity:1;transform:translateX(0);}}
+    .toast.hide{animation:toastOut .25s ease forwards;}
+    @keyframes toastOut{to{opacity:0;transform:translateX(30px);}}
+    .toast-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+    .toast.success .toast-dot{background:var(--success);}
+    .toast.error .toast-dot{background:var(--danger);}
+    .toast.info .toast-dot{background:var(--primary);}
+    .toast.warning .toast-dot{background:var(--warning);}
+
+    /* Empty state */
+    .empty{text-align:center;padding:4rem 2rem;color:var(--text2);}
+    .empty i{font-size:2.8rem;margin-bottom:.9rem;opacity:.35;display:block;}
+    .empty h3{color:var(--text);margin-bottom:.3rem;font-size:1.05rem;}
+
+    /* Spinner */
+    .spin{animation:spin .8s linear infinite;}
+    @keyframes spin{to{transform:rotate(360deg);}}
+
+    /* Util */
+    .hidden{display:none!important;}
+    ::-webkit-scrollbar{width:6px;height:6px;}
+    ::-webkit-scrollbar-track{background:transparent;}
+    ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
+
+    /* Responsive */
+    @media(max-width:768px){
+      .ex-sidebar{display:none;}
+      .drives-grid{grid-template-columns:repeat(auto-fill,minmax(170px,1fr));}
+      .f-list-date{display:none;}
+      #homeScreen{padding:1.2rem;}
+    }
+    @media(max-width:480px){
+      .top-search{display:none;}
+      .file-grid{grid-template-columns:repeat(auto-fill,minmax(110px,1fr));}
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-canvas"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div><div class="orb orb-4"></div></div>
+  <div class="noise"></div>
+
+  <div id="app">
+    <!-- Top Bar -->
+    <header class="top-bar">
+      <div class="top-logo" onclick="goHome()">
+        <div class="top-logo-icon"><i class="fas fa-hard-drive"></i></div>
+        <span class="top-logo-text">TeleDrive</span>
+      </div>
+      <div class="top-search">
+        <i class="fas fa-search"></i>
+        <input type="text" id="globalSearch" placeholder="Search files and folders...">
+      </div>
+      <div class="top-spacer"></div>
+      <div class="top-acts">
+        <button class="icon-btn" id="backupBtn" title="Backup &amp; Restore"><i class="fas fa-database"></i></button>
+        <button class="icon-btn admin-btn admin-badge" id="adminBtn" title="Admin Panel"><i class="fas fa-crown"></i></button>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <!-- Home Screen -->
+      <div id="homeScreen" class="hidden">
+        <div class="home-hero"><i class="fas fa-desktop" style="font-size:1.5rem;color:var(--primary)"></i><div class="home-title">This PC</div></div>
+        <div class="home-sub">Telegram-powered unlimited cloud storage · Hosted free on Cloudflare</div>
+        <div class="section-label">Drives</div>
+        <div class="drives-grid" id="drivesGrid"></div>
+      </div>
+
+      <!-- Explorer View -->
+      <div id="explorerView" class="hidden">
+        <div class="ex-sidebar">
+          <div class="ex-sidebar-hd">Quick Access</div>
+          <div class="ex-tree" id="sidebarTree"></div>
+        </div>
+        <div class="ex-main">
+          <div class="ex-toolbar">
+            <div class="tb-grp">
+              <button class="tb-btn" id="navBack" title="Back"><i class="fas fa-chevron-left"></i></button>
+              <button class="tb-btn" id="navFwd" title="Forward"><i class="fas fa-chevron-right"></i></button>
+              <button class="tb-btn" id="navUp" title="Up"><i class="fas fa-arrow-up"></i></button>
+            </div>
+            <div class="tb-sep"></div>
+            <div class="tb-grp">
+              <button class="tb-btn prim" id="uploadBtn"><i class="fas fa-upload"></i> Upload</button>
+              <button class="tb-btn" id="newFolderBtn"><i class="fas fa-folder-plus"></i> New Folder</button>
+            </div>
+            <div class="tb-sep"></div>
+            <div class="tb-grp" style="margin-left:auto;">
+              <button class="tb-btn" id="viewToggleBtn" title="Toggle view"><i class="fas fa-th"></i></button>
+              <select class="tb-sel" id="sortSel">
+                <option value="name">Name</option>
+                <option value="date">Date</option>
+                <option value="size">Size</option>
+              </select>
+            </div>
+          </div>
+          <div class="addr-bar" id="addrBar"></div>
+          <div class="ex-content" id="exContent"></div>
+          <div class="status-bar" id="statusBar"><span>0 items</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden file input -->
+  <input type="file" id="fileInput" multiple hidden>
+
+  <!-- Toast container -->
+  <div class="toast-wrap" id="toastWrap"></div>
+
+  <!-- Upload progress bar -->
+  <div id="upBar" class="upload-bar hidden">
+    <div class="up-icon"><i class="fas fa-arrow-up"></i></div>
+    <div class="up-info">
+      <div class="up-name" id="upName">Uploading...</div>
+      <div class="up-status" id="upStatus">Preparing...</div>
+    </div>
+    <div class="up-bar-bg"><div class="up-bar-fill" id="upFill" style="width:0%"></div></div>
+    <div class="up-pct" id="upPct">0%</div>
+    <button class="icon-btn" id="upCancelBtn" title="Cancel" style="flex-shrink:0"><i class="fas fa-times"></i></button>
+  </div>
+
+<script>
+// ================================================================
+//  TELEDRIVE - Complete App
+// ================================================================
+
+const REPO      = 'darshworkplcae/storage';
+const DB_FILE   = 'db.json';
+const BRANCH    = 'main';
+const SK        = 'td_s_v2';   // settings localStorage key
+const SES       = 'td_ses_v1'; // session sessionStorage key
+const CHUNK_MB  = 490;         // default chunk size in MB (safe for most Bot API configs)
+const CHUNK_B   = CHUNK_MB * 1024 * 1024;
+
+// ---- State ----
+const S = {
+  db: { v:2, adminHash:'', drives:[], folders:[], files:[] },
+  cfg: { botToken:'', chatId:'', ghToken:'' },
+  ses: { isAdmin:false, unlocked:[] },
+  driveId: null, folderId: null,
+  navHist: [], navIdx: -1,
+  view: 'grid', sort: 'name',
+  uploading: false, cancelUpload: false,
+  dbSha: null,
+  selectedId: null,
+};
+
+// ---- Crypto ----
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// ---- ID ----
+function uid() { return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+
+// ---- Settings ----
+function loadCfg() {
+  try { Object.assign(S.cfg, JSON.parse(localStorage.getItem(SK)||'{}')); } catch{}
+}
+function saveCfg() { localStorage.setItem(SK, JSON.stringify(S.cfg)); }
+function loadSes() {
+  try { Object.assign(S.ses, JSON.parse(sessionStorage.getItem(SES)||'{}')); } catch{}
+}
+function saveSes() { sessionStorage.setItem(SES, JSON.stringify(S.ses)); }
+
+// ---- GitHub API ----
+async function ghReq(path, method='GET', body=null) {
+  const opts = { method, headers:{
+    'Authorization':`token ${S.cfg.ghToken}`,
+    'Accept':'application/vnd.github.v3+json',
+    'Content-Type':'application/json'
+  }};
+  if (body) opts.body = JSON.stringify(body);
+  return fetch(`https://api.github.com/repos/${REPO}/contents/${path}`, opts);
+}
+
+async function loadDB() {
+  try {
+    const r = await ghReq(DB_FILE);
+    if (r.status === 404) { S.dbSha = null; return true; }
+    if (!r.ok) throw new Error('GitHub '+r.status);
+    const d = await r.json();
+    S.dbSha = d.sha;
+    S.db = JSON.parse(atob(d.content.replace(/\n/g,'')));
+    return true;
+  } catch(e) { console.error('loadDB',e); return false; }
+}
+
+async function saveDB() {
+  try {
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(S.db, null, 2))));
+    const body = { message:`TeleDrive ${new Date().toISOString()}`, content, branch:BRANCH };
+    if (S.dbSha) body.sha = S.dbSha;
+    const r = await ghReq(DB_FILE,'PUT',body);
+    if (r.ok) { const d=await r.json(); S.dbSha=d.content.sha; }
+    return r.ok;
+  } catch(e) { console.error('saveDB',e); return false; }
+}
+
+// ---- Telegram API ----
+function tgUrl(ep) { return `https://api.telegram.org/bot${S.cfg.botToken}/${ep}`; }
+
+function uploadChunk(blob, name, onProgress) {
+  return new Promise((res,rej) => {
+    const fd = new FormData();
+    fd.append('chat_id', S.cfg.chatId);
+    fd.append('document', blob, name);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', tgUrl('sendDocument'));
+    xhr.upload.onprogress = e => { if(e.lengthComputable && onProgress) onProgress(e.loaded, e.total); };
+    xhr.onload = () => {
+      try {
+        const d = JSON.parse(xhr.responseText);
+        if (d.ok) res(d.result);
+        else rej(new Error(d.description||'Telegram error'));
+      } catch(e) { rej(e); }
+    };
+    xhr.onerror = () => rej(new Error('Network error'));
+    xhr.send(fd);
+    // Store xhr for cancellation
+    S._xhr = xhr;
+  });
+}
+
+async function tgFileUrl(fileId) {
+  try {
+    const r = await fetch(tgUrl(`getFile?file_id=${fileId}`));
+    const d = await r.json();
+    if (d.ok && d.result.file_path)
+      return `https://api.telegram.org/file/bot${S.cfg.botToken}/${d.result.file_path}`;
+  } catch{}
+  return null;
+}
+
+async function tgDelete(msgId) {
+  try {
+    const r = await fetch(tgUrl(`deleteMessage?chat_id=${S.cfg.chatId}&message_id=${msgId}`));
+    const d = await r.json(); return d.ok;
+  } catch { return false; }
+}
+
+// ---- Upload Files ----
+async function uploadFiles(files) {
+  if (S.uploading) { toast('Upload already in progress', 'warning'); return; }
+  if (!S.cfg.botToken||!S.cfg.chatId) { toast('Bot not configured', 'error'); return; }
+  if (!S.driveId) { toast('Open a drive first', 'error'); return; }
+
+  S.uploading = true; S.cancelUpload = false;
+  const bar = $('upBar'); bar.classList.remove('hidden');
+  $('upCancelBtn').onclick = () => { S.cancelUpload=true; S._xhr?.abort(); toast('Cancelling...','warning'); };
+
+  for (const file of Array.from(files)) {
+    if (S.cancelUpload) break;
+    try { await uploadOne(file); }
+    catch(e) { toast(`Failed: ${file.name} — ${e.message}`, 'error'); }
+  }
+
+  S.uploading = false;
+  bar.classList.add('hidden');
+  $('fileInput').value = '';
+  await saveDB();
+  renderExplorer();
+}
+
+async function uploadOne(file) {
+  const setUI = (name, status, pct, width) => {
+    $('upName').textContent = name;
+    $('upStatus').textContent = status;
+    $('upPct').textContent = pct+'%';
+    $('upFill').style.width = width+'%';
+  };
+
+  const fid = uid();
+  const isChunked = file.size > CHUNK_B;
+  const totalChunks = isChunked ? Math.ceil(file.size / CHUNK_B) : 1;
+  const chunks = [];
+
+  for (let i = 0; i < totalChunks; i++) {
+    if (S.cancelUpload) throw new Error('Cancelled');
+    const start = i * CHUNK_B;
+    const end = Math.min(start + CHUNK_B, file.size);
+    const blob = file.slice(start, end);
+    const cname = isChunked ? `${file.name}.part${String(i+1).padStart(3,'0')}of${totalChunks}` : file.name;
+
+    const result = await uploadChunk(blob, cname, (loaded, total) => {
+      const cp = loaded/total;
+      const overall = ((i+cp)/totalChunks)*100;
+      const mb = (loaded/(1024*1024)).toFixed(1);
+      const tmb = (total/(1024*1024)).toFixed(1);
+      setUI(file.name, `${isChunked?`Chunk ${i+1}/${totalChunks} · `:''}${mb}/${tmb} MB`, Math.round(overall), Math.round(overall));
+    });
+
+    const doc = result.document || result.video || result.audio ||
+                (result.photo ? result.photo[result.photo.length-1] : null);
+    chunks.push({ idx:i, msgId:result.message_id, fileId:doc?.file_id||'', size:blob.size });
+  }
+
+  S.db.files.push({
+    id:fid, driveId:S.driveId, folderId:S.folderId,
+    name:file.name, size:file.size, type:file.type||'application/octet-stream',
+    date:new Date().toISOString(), isChunked, chunks
+  });
+
+  toast(`${file.name} uploaded${isChunked?` (${totalChunks} chunks)`:''}`, 'success');
+}
+
+// ---- Download ----
+async function downloadFile(f) {
+  if (!f.isChunked) {
+    const url = await tgFileUrl(f.chunks[0].fileId);
+    if (url) { dlLink(url, f.name); return; }
+    toast('Could not get download URL','error'); return;
+  }
+
+  toast(`Merging ${f.chunks.length} chunks — please wait...`, 'info');
+  try {
+    const blobs = [];
+    for (let i=0; i<f.chunks.length; i++) {
+      toast(`Fetching chunk ${i+1}/${f.chunks.length}...`, 'info');
+      const url = await tgFileUrl(f.chunks[i].fileId);
+      if (!url) throw new Error(`No URL for chunk ${i+1}`);
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`Chunk ${i+1} download failed`);
+      blobs.push(await r.blob());
+    }
+    const merged = new Blob(blobs, {type:f.type});
+    const url = URL.createObjectURL(merged);
+    dlLink(url, f.name);
+    setTimeout(()=>URL.revokeObjectURL(url), 8000);
+    toast(`${f.name} downloaded`, 'success');
+  } catch(e) { toast(`Download failed: ${e.message}`, 'error'); }
+}
+
+function dlLink(url, name) {
+  const a = document.createElement('a');
+  a.href=url; a.download=name; a.target='_blank'; a.click();
+}
+
+// ---- Delete File ----
+async function deleteFile(f) {
+  for (const c of f.chunks) await tgDelete(c.msgId);
+  S.db.files = S.db.files.filter(x=>x.id!==f.id);
+  await saveDB(); renderExplorer();
+  toast(`${f.name} deleted`, 'success');
+}
+
+// ---- Delete Folder ----
+async function deleteFolder(folder) {
+  const ids = getAllFolderIds(folder.id);
+  const toDelete = S.db.files.filter(f=>ids.includes(f.folderId));
+  for (const f of toDelete) for (const c of f.chunks) await tgDelete(c.msgId);
+  S.db.files = S.db.files.filter(f=>!ids.includes(f.folderId));
+  S.db.folders = S.db.folders.filter(f=>!ids.includes(f.id));
+  await saveDB(); renderExplorer();
+  toast(`${folder.name} deleted`, 'success');
+}
+
+function getAllFolderIds(fid) {
+  const ids = [fid];
+  S.db.folders.filter(f=>f.parentId===fid).forEach(f=>ids.push(...getAllFolderIds(f.id)));
+  return ids;
+}
+
+// ---- Media Viewer ----
+async function openMedia(f) {
+  const t = f.type||'';
+  const isImg = t.startsWith('image/');
+  const isVid = t.startsWith('video/');
+  const isAud = t.startsWith('audio/');
+  if (!isImg && !isVid && !isAud) { toast('No preview for this file type','info'); return; }
+
+  let url = null;
+  if (!f.isChunked) url = await tgFileUrl(f.chunks[0].fileId);
+
+  const ov = document.createElement('div');
+  ov.className = 'media-ov';
+  ov.innerHTML = `
+    <div class="media-hd">
+      <div class="media-hd-title">${esc(f.name)}</div>
+      <div class="media-hd-acts">
+        <button class="icon-btn" id="mdlDl" title="Download"><i class="fas fa-download"></i></button>
+        <button class="icon-btn" id="mdlCls" title="Close"><i class="fas fa-times"></i></button>
+      </div>
+    </div>
+    <div class="media-body" id="mediaBody">
+      ${url ? '' : '<div style="color:var(--text2);text-align:center"><i class="fas fa-spinner spin" style="font-size:2rem;color:var(--primary)"></i></div>'}
+    </div>
+    <div class="media-ft">
+      <span>${esc(f.name)}</span><span>·</span><span>${fmt(f.size)}</span>
+      ${f.isChunked?'<span>·</span><span style="color:var(--warning)">⚡ Chunked file — download to watch if streaming fails</span>':''}
+    </div>
+  `;
+  document.body.appendChild(ov);
+
+  const body = ov.querySelector('#mediaBody');
+  if (url) {
+    if (isImg) {
+      const img = document.createElement('img');
+      img.className='media-img'; img.src=url; img.alt=f.name;
+      let z=false;
+      img.onclick=()=>{ z=!z; img.classList.toggle('zoomed',z); img.style.transform=z?'scale(2.2)':''; };
+      body.innerHTML=''; body.appendChild(img);
+    } else if (isVid) {
+      const v = document.createElement('video');
+      v.className='media-vid'; v.controls=v.autoplay=true; v.src=url;
+      body.innerHTML=''; body.appendChild(v);
+    } else if (isAud) {
+      body.innerHTML=`<div style="text-align:center;padding:2rem">
+        <i class="fas fa-music" style="font-size:4rem;color:var(--primary);margin-bottom:1.5rem;display:block"></i>
+        <audio controls style="width:80%;max-width:400px" src="${url}"></audio>
+      </div>`;
+    }
+  } else if (f.isChunked && isVid) {
+    body.innerHTML=`<div style="text-align:center;padding:2rem;max-width:360px;margin:0 auto">
+      <i class="fas fa-film" style="font-size:4rem;color:var(--warning);display:block;margin-bottom:1rem"></i>
+      <h3 style="color:var(--text);margin-bottom:.5rem">Large Video — ${fmt(f.size)}</h3>
+      <p style="color:var(--text2);font-size:.88rem;margin-bottom:1.5rem">Split into ${f.chunks.length} chunks. Click download to watch.</p>
+      <button class="btn-p" onclick="downloadFile(window.__mf__)"><i class="fas fa-download"></i> Download to Watch</button>
+    </div>`;
+    window.__mf__ = f;
+  }
+
+  ov.querySelector('#mdlCls').onclick = () => { ov.remove(); delete window.__mf__; };
+  ov.querySelector('#mdlDl').onclick = () => downloadFile(f);
+  ov.addEventListener('keydown', e => { if(e.key==='Escape') ov.remove(); });
+  ov.tabIndex=0; ov.focus();
+}
+
+// ---- Navigation ----
+function nav(driveId, folderId=null) {
+  if (S.navIdx < S.navHist.length-1) S.navHist = S.navHist.slice(0, S.navIdx+1);
+  S.navHist.push({driveId, folderId});
+  S.navIdx = S.navHist.length-1;
+  S.driveId=driveId; S.folderId=folderId; S.selectedId=null;
+  showExplorer();
+}
+function navBack() {
+  if (S.navIdx>0) { S.navIdx--; const n=S.navHist[S.navIdx]; S.driveId=n.driveId; S.folderId=n.folderId; showExplorer(); }
+}
+function navFwd() {
+  if (S.navIdx<S.navHist.length-1) { S.navIdx++; const n=S.navHist[S.navIdx]; S.driveId=n.driveId; S.folderId=n.folderId; showExplorer(); }
+}
+function navUp() {
+  if (!S.driveId) return;
+  if (!S.folderId) { goHome(); return; }
+  const f = S.db.folders.find(x=>x.id===S.folderId);
+  nav(S.driveId, f?.parentId||null);
+}
+
+// ---- Render: Home ----
+function goHome() {
+  S.driveId=null; S.folderId=null; S.selectedId=null;
+  $('homeScreen').classList.remove('hidden');
+  $('explorerView').classList.add('hidden');
+  renderHome();
+}
+function showExplorer() {
+  $('homeScreen').classList.add('hidden');
+  $('explorerView').classList.remove('hidden');
+  renderExplorer();
+}
+
+function renderHome() {
+  const grid = $('drivesGrid');
+  const q = $('globalSearch').value.toLowerCase();
+  const drives = q ? S.db.drives.filter(d=>d.name.toLowerCase().includes(q)||d.letter.toLowerCase().includes(q)) : S.db.drives;
+  grid.innerHTML = '';
+
+  drives.forEach(d => {
+    const locked = d.passwordHash && !S.ses.unlocked.includes(d.id) && !S.ses.isAdmin;
+    const sz = S.db.files.filter(f=>f.driveId===d.id).reduce((a,f)=>a+f.size,0);
+    const fc = S.db.files.filter(f=>f.driveId===d.id).length;
+    const pct = Math.min(100, (sz/(200*1024*1024*1024))*100).toFixed(1);
+
+    const card = document.createElement('div');
+    card.className = `drive-card${locked?' locked':''}`;
+    card.style.setProperty('--dc', d.color||'var(--primary)');
+    card.innerHTML = `
+      ${locked?'<i class="fas fa-lock drive-lock"></i>':''}
+      <div class="drive-icon">
+        <i class="fas fa-hard-drive"></i>
+        <div class="drive-letter">${esc(d.letter)}</div>
+      </div>
+      <div class="drive-info">
+        <div class="drive-name">${esc(d.name)} (${esc(d.letter)}:)</div>
+        <div class="drive-bar-bg"><div class="drive-bar-fill" style="width:${pct}%"></div></div>
+        <div class="drive-space">${fmt(sz)} used · ${fc} file${fc!==1?'s':''} · Unlimited</div>
+      </div>
+    `;
+    card.onclick = async () => {
+      if (locked) await promptPass(d);
+      else nav(d.id);
+    };
+    card.oncontextmenu = e => {
+      e.preventDefault();
+      if (!S.ses.isAdmin) return;
+      showCtx(e,[
+        {i:'fa-folder-open',l:'Open',a:()=>nav(d.id)},
+        {sep:true},
+        {i:'fa-edit',l:'Edit Drive',a:()=>editDriveDialog(d)},
+        {sep:true},
+        {i:'fa-trash',l:'Delete Drive',danger:true,a:()=>confirmDeleteDrive(d)},
+      ]);
+    };
+    grid.appendChild(card);
+  });
+
+  if (S.ses.isAdmin) {
+    const add = document.createElement('div');
+    add.className='drive-add';
+    add.innerHTML='<i class="fas fa-plus-circle" style="font-size:1.4rem"></i><span style="font-size:.88rem;font-weight:500">New Drive</span>';
+    add.onclick = () => createDriveDialog();
+    grid.appendChild(add);
+  }
+}
+
+// ---- Render: Explorer ----
+function renderExplorer() {
+  renderSidebar(); renderAddrBar(); renderContent(); syncNavBtns(); syncStatus();
+}
+
+function renderSidebar() {
+  const tree = $('sidebarTree');
+  tree.innerHTML = '';
+  if (!S.driveId) return;
+  const d = S.db.drives.find(x=>x.id===S.driveId);
+  if (!d) return;
+  const root = mkTreeNode('fa-hard-drive', `${d.letter}: ${d.name}`, !S.folderId, ()=>nav(S.driveId,null));
+  tree.appendChild(root);
+  renderTreeLevel(tree, null, 1);
+}
+function renderTreeLevel(container, parentId, depth) {
+  S.db.folders.filter(f=>f.driveId===S.driveId && f.parentId===parentId).forEach(f=>{
+    const n = mkTreeNode('fa-folder', f.name, S.folderId===f.id, ()=>nav(S.driveId,f.id));
+    n.style.paddingLeft=(0.5+depth*0.75)+'rem';
+    container.appendChild(n);
+    renderTreeLevel(container, f.id, depth+1);
+  });
+}
+function mkTreeNode(icon, label, active, onClick) {
+  const n = document.createElement('div');
+  n.className=`tree-node${active?' active':''}`;
+  n.innerHTML=`<i class="fas ${icon}"></i><span class="tree-label">${esc(label)}</span>`;
+  n.onclick=onClick; return n;
+}
+
+function renderAddrBar() {
+  const bar = $('addrBar');
+  bar.innerHTML = '';
+  if (!S.driveId) return;
+  const d = S.db.drives.find(x=>x.id===S.driveId);
+  if (!d) return;
+  const crumbs = [{name:`${d.letter}:`, action:()=>nav(S.driveId,null)}];
+  if (S.folderId) getFolderPath(S.folderId).forEach(f=>crumbs.push({name:f.name, action:()=>nav(S.driveId,f.id)}));
+  crumbs.forEach((c,i)=>{
+    if(i>0){const sep=document.createElement('span');sep.className='bc-sep';sep.innerHTML='<i class="fas fa-chevron-right" style="font-size:.6rem"></i>';bar.appendChild(sep);}
+    const bc=document.createElement('div');bc.className=`bc-item${i===crumbs.length-1?' cur':''}`;
+    bc.innerHTML=`<span>${esc(c.name)}</span>`;
+    if(i<crumbs.length-1) bc.querySelector('span').onclick=c.action;
+    bar.appendChild(bc);
+  });
+}
+function getFolderPath(fid) {
+  const p=[]; let cur=S.db.folders.find(f=>f.id===fid);
+  while(cur){p.unshift(cur);cur=cur.parentId?S.db.folders.find(f=>f.id===cur.parentId):null;}
+  return p;
+}
+
+function renderContent() {
+  const content = $('exContent');
+  content.innerHTML = '';
+  if (!S.driveId) return;
+
+  const q = $('globalSearch').value.toLowerCase();
+  let folders = S.db.folders.filter(f=>f.driveId===S.driveId && f.parentId===S.folderId);
+  let files = S.db.files.filter(f=>f.driveId===S.driveId && f.folderId===S.folderId);
+  if (q) { folders=folders.filter(f=>f.name.toLowerCase().includes(q)); files=files.filter(f=>f.name.toLowerCase().includes(q)); }
+
+  // Sort
+  const sortFn = (a,b) => {
+    if(S.sort==='name') return a.name.localeCompare(b.name);
+    if(S.sort==='date') return new Date(b.date||b.createdAt)-new Date(a.date||a.createdAt);
+    if(S.sort==='size') return (b.size||0)-(a.size||0);
+    return 0;
+  };
+  folders.sort(sortFn); files.sort(sortFn);
+
+  if (!folders.length && !files.length) {
+    content.innerHTML=`<div class="empty"><i class="fas fa-folder-open"></i><h3>${q?'No results':'Empty'}</h3><p>${q?'Try a different search':'Drop files here or click Upload'}</p></div>`;
+    setupDrop(content); return;
+  }
+
+  if (S.view==='grid') {
+    const g=document.createElement('div'); g.className='file-grid';
+    folders.forEach(f=>g.appendChild(mkFolderGrid(f)));
+    files.forEach(f=>g.appendChild(mkFileGrid(f)));
+    content.appendChild(g);
+  } else {
+    const l=document.createElement('div'); l.className='file-list';
+    folders.forEach(f=>l.appendChild(mkFolderList(f)));
+    files.forEach(f=>l.appendChild(mkFileList(f)));
+    content.appendChild(l);
+  }
+  setupDrop(content);
+}
+
+function mkFolderGrid(f) {
+  const el=document.createElement('div'); el.className='f-item folder';
+  const cnt=S.db.files.filter(x=>x.folderId===f.id).length;
+  el.innerHTML=`<div class="f-item-ico">📁</div><div class="f-item-name">${esc(f.name)}</div><div class="f-item-sub">${cnt} item${cnt!==1?'s':''}</div>`;
+  el.onclick=()=>nav(S.driveId,f.id);
+  el.oncontextmenu=e=>{e.preventDefault();showFolderCtx(e,f);};
+  return el;
+}
+function mkFileGrid(f) {
+  const el=document.createElement('div'); el.className=`f-item${S.selectedId===f.id?' sel':''}`;
+  const cfg=ftCfg(f.type);
+  el.innerHTML=`<div class="f-item-ico">${cfg.em}</div><div class="f-item-name" title="${esc(f.name)}">${esc(f.name)}</div><div class="f-item-sub">${fmt(f.size)}${f.isChunked?' 🔗':''}</div>`;
+  el.onclick=()=>{S.selectedId=f.id;renderContent();};
+  el.ondblclick=()=>openMedia(f);
+  el.oncontextmenu=e=>{e.preventDefault();showFileCtx(e,f);};
+  return el;
+}
+function mkFolderList(f) {
+  const el=document.createElement('div'); el.className='f-list-item';
+  const cnt=S.db.files.filter(x=>x.folderId===f.id).length;
+  el.innerHTML=`<div class="f-list-ico" style="color:#ffd60a"><i class="fas fa-folder"></i></div><div class="f-list-name">${esc(f.name)}</div><div class="f-list-size">${cnt} items</div><div class="f-list-date">${fmtDate(f.createdAt)}</div>`;
+  el.onclick=()=>nav(S.driveId,f.id);
+  el.oncontextmenu=e=>{e.preventDefault();showFolderCtx(e,f);};
+  return el;
+}
+function mkFileList(f) {
+  const el=document.createElement('div'); el.className=`f-list-item${S.selectedId===f.id?' sel':''}`;
+  const cfg=ftCfg(f.type);
+  el.innerHTML=`<div class="f-list-ico" style="color:${cfg.color}">${cfg.ico}</div><div class="f-list-name" title="${esc(f.name)}">${esc(f.name)}${f.isChunked?'<span style="color:var(--warning);font-size:.65rem;margin-left:.3rem" title="Chunked large file">🔗</span>':''}</div><div class="f-list-size">${fmt(f.size)}</div><div class="f-list-date">${fmtDate(f.date)}</div>`;
+  el.onclick=()=>{S.selectedId=f.id;renderContent();};
+  el.ondblclick=()=>openMedia(f);
+  el.oncontextmenu=e=>{e.preventDefault();showFileCtx(e,f);};
+  return el;
+}
+
+// ---- Context Menus ----
+function showCtx(e, items) {
+  document.querySelectorAll('.ctx-menu').forEach(m=>m.remove());
+  const menu=document.createElement('div'); menu.className='ctx-menu';
+  items.forEach(item=>{
+    if(item.sep){const s=document.createElement('div');s.className='ctx-sep';menu.appendChild(s);return;}
+    const el=document.createElement('div'); el.className=`ctx-item${item.danger?' danger':''}`;
+    el.innerHTML=`<i class="fas ${item.i}"></i><span>${item.l}</span>`;
+    el.onclick=()=>{menu.remove();item.a();};
+    menu.appendChild(el);
+  });
+  document.body.appendChild(menu);
+  const x=Math.min(e.clientX, window.innerWidth-190), y=Math.min(e.clientY, window.innerHeight-menu.scrollHeight-10);
+  menu.style.left=x+'px'; menu.style.top=y+'px';
+  setTimeout(()=>document.addEventListener('click',()=>menu.remove(),{once:true}),0);
+}
+function showFileCtx(e,f) {
+  showCtx(e,[
+    {i:'fa-eye',l:'Preview / Play',a:()=>openMedia(f)},
+    {i:'fa-download',l:'Download',a:()=>downloadFile(f)},
+    {sep:true},
+    {i:'fa-link',l:'Copy Link',a:async()=>{
+      const u=await tgFileUrl(f.chunks[0].fileId);
+      if(u){navigator.clipboard.writeText(u);toast('Link copied','success');}
+      else toast('Could not get link','error');
+    }},
+    {sep:true},
+    {i:'fa-trash',l:'Delete',danger:true,a:()=>confirmDeleteFile(f)},
+  ]);
+}
+function showFolderCtx(e,f) {
+  showCtx(e,[
+    {i:'fa-folder-open',l:'Open',a:()=>nav(S.driveId,f.id)},
+    {i:'fa-edit',l:'Rename',a:()=>renameFolderDlg(f)},
+    {sep:true},
+    {i:'fa-trash',l:'Delete',danger:true,a:()=>confirmDeleteFolder(f)},
+  ]);
+}
+
+// ---- Modal helper ----
+function modal(html, cls='') {
+  const ov=document.createElement('div'); ov.className='modal-ov';
+  const box=document.createElement('div'); box.className=`modal-box ${cls}`; box.innerHTML=html;
+  ov.appendChild(box); document.body.appendChild(ov);
+  const close=()=>ov.remove();
+  box.querySelector('.modal-cls')?.addEventListener('click',close);
+  ov.addEventListener('click',e=>{if(e.target===ov)close();});
+  document.addEventListener('keydown',function h(e){if(e.key==='Escape'){close();document.removeEventListener('keydown',h);}});
+  return {ov,box,close};
+}
+
+// ---- Dialogs ----
+function confirmDeleteFile(f) {
+  const {box,close}=modal(`
+    <div class="modal-hd"><div class="modal-ttl">Delete File</div><button class="modal-cls"><i class="fas fa-times"></i></button></div>
+    <div class="modal-bd" style="text-align:center;padding:1.4rem">
+      <div style="width:50px;height:50px;border-radius:50%;background:rgba(255,69,58,.12);color:var(--danger);display:flex;align-items:center;justify-content:center;font-size:1.2rem;margin:0 auto .8rem"><i class="fas fa-trash"></i></div>
+      <h3 style="margin-bottom:.4rem;font-size:1rem">Delete "${esc(f.name)}"?</h3>
+      <p style="color:var(--text2);font-size:.84rem">This will permanently remove the file from Telegram.</p>
+    </div>
+    <div class="modal-ft"><button class="btn-s modal-cls">Cancel</button><button id="cfDel" class="btn-d">Delete</button></div>
+  `);
+  box.querySelector('#cfDel').onclick=async()=>{close();await deleteFile(f);};
+}
+
+function confirmDeleteFolder(f) {
+  const {box,close}=modal(`
+    <div class="modal-hd"><div class="modal-ttl">Delete Folder</div><button class="modal-cls"><i class="fas fa-times"></i></button></div>
+    <div class="modal-bd" style="text-align:center;padding:1.4rem">
+      <div style="width:50px;height:50px;border-radius:50%;background:rgba(255,69,58,.12);color:var(--danger);display:flex;align-items:center;justify-content:center;font-size:1.2rem;margin:0 auto .8rem"><i class="fas fa-folder"></i></div>
+      <h3 style="margin-bottom:.4rem;font-size:1rem">Delete "${esc(f.name)}"?</h3>
+      <p style="color:var(--text2);font-size:.84rem">All files inside will be deleted from Telegram too.</p>
+    </div>
+    <div class="modal-ft"><button class="btn-s modal-cls">Cancel</button><button id="cfFldel" class="btn-d">Delete All</button></div>
+  `);
+  box.querySelector('#cfFldel').onclick=async()=>{close();await deleteFolder(f);};
+}
+
+function confirmDeleteDrive(d) {
+  const {box,close}=modal(`
+    <div class="modal-hd"><div class="modal-ttl">Delete Drive</div><button class="modal-cls"><i class="fas fa-times"></i></button></div>
+    <div class="modal-bd" style="text-align:center;padding:1.4rem">
+      <div style="width:50px;height:50px;border-radius:50%;background:rgba(255,69,58,.12);color:var(--danger);display:flex;align-items:center;justify-content:center;font-size:1.2rem;margin:0 auto .8rem"><i class="fas fa-hard-drive"></i></div>
+      <h3 style="margin-bottom:.4rem;font-size:1rem">Delete "${esc(d.name)} (${esc(d.letter)}:)"?</h3>
+      <p style="color:var(--text2);font-size:.84rem">ALL files on this drive will be deleted from Telegram.</p>
+    </div>
+    <div class="modal-ft"><button class="btn-s modal-cls">Cancel</button><button id="cfDrv" class="btn-d">Delete Drive</button></div>
+  `);
+  box.querySelector('#cfDrv').onclick=async()=>{close();await deleteDrive(d);};
+}
+
+async function deleteDrive(d) {
+  const files=S.db.files.filter(f=>f.driveId===d.id);
+  for(const f of files) for(const c of f.chunks) await tgDelete(c.msgId);
+  S.db.files=S.db.files.filter(f=>f.driveId!==d.id);
+  S.db.folders=S.db.folders.filter(f=>f.driveId!==d.id);
+  S.db.drives=S.db.drives.filter(x=>x.id!==d.id);
+  await saveDB(); renderHome(); toast(`Drive ${d.letter}: deleted`,'success');
+}
+
+function newFolderDlg() {
+  const {box,close}=modal(`
+    <div class="modal-hd"><div class="modal-ttl"><i class="fas fa-folder-plus" style="color:var(--warning);margin-right:.4rem"></i>New Folder</div><button class="modal-cls"><i class="fas fa-times"></i></button></div>
+    <div class="modal-bd"><div class="f-grp"><label class="f-lbl">Folder Name</label><input id="nfName" class="f-inp" placeholder="e.g. Documents" autofocus></div></div>
+    <div class="modal-ft"><button class="btn-s modal-cls">Cancel</button><button id="nfCreate" class="btn-p">Create</button></div>
+  `);
+  const create=async()=>{
+    const name=box.querySelector('#nfName').value.trim();
+    if(!name){toast('Enter a name','error');return;}
+    S.db.folders.push({id:uid(),driveId:S.driveId,parentId:S.folderId,name,createdAt:new Date().toISOString()});
+    close(); await saveDB(); renderExplorer(); toast(`"${name}" created`,'success');
+  };
+  box.querySelector('#nfCreate').onclick=create;
+  box.querySelector('#nfName').onkeydown=e=>{if(e.key==='Enter')create();};
+}
+
+function renameFolderDlg(folder) {
+  const {box,close}=modal(`
+    <div class="modal-hd"><div class="modal-ttl">Rename Folder</div><button class="modal-cls"><i class="fas fa-times"></i></button></div>
+    <div class="modal-bd"><div class="f-grp"><label class="f-lbl">New Name</label><input id="rfName" class="f-inp" value="${esc(folder.name)}" autofocus></div></div>
+    <div class="modal-ft"><button class="btn-s modal-cls">Cancel</button><button id="rfSave" class="btn-p">Rename</button></div>
+  `);
+  box.querySelector('#rfSave').onclick=async()=>{
+    const name=box.querySelector('#rfName').value.trim();
+    if(!name)return;
+    const f=S.db.folders.find(x=>x.id===folder.id);
+    if(f)f.name=name;
+    close(); await saveDB(); renderExplorer(); toast('Folder renamed','success');
+  };
+}
+
+async function promptPass(drive) {
+  const {box,close}=modal(`
+    <div class="modal-hd"><div class="modal-ttl">🔒 Drive Locked</div><button class="modal-cls"><i class="fas fa-times"></i></button></div>
+    <div class="modal-bd" style="text-align:center">
+      <div class="pass-lock"><i class="fas fa-lock"></i></div>
+      <h3 style="margin-bottom:.3rem">${esc(drive.name)} (${esc(drive.letter)}:)</h3>
+      <p style="color:var(--text2);font-size:.83rem;margin-bottom:1.2rem">Enter password to unlock this drive</p>
+      <div class="f-grp" style="text-align:left"><input type="password" id="dpass" class="f-inp" placeholder="Password..." autofocus></div>
+      <div id="dpassErr" class="f-err" style="min-height:1rem"></div>
+    </div>
+    <div class="modal-ft"><button class="btn-s modal-cls">Cancel</button><button id="dpassOk" class="btn-p"><i class="fas fa-unlock"></i> Unlock</button></div>
+  `, 'pass-box');
+  const unlock=async()=>{
+    const p=box.querySelector('#dpass').value;
+    const h=await sha256(p);
+    if(h===drive.passwordHash){
+      S.ses.unlocked.push(drive.id); saveSes(); close(); nav(drive.id);
+    } else {
+      box.querySelector('#dpassErr').textContent='Incorrect password.';
+      box.querySelector('#dpass').value='';
+    }
+  };
+  box.querySelector('#dpassOk').onclick=unlock;
+  box.querySelector('#dpass').onkeydown=e=>{if(e.key==='Enter')unlock();};
+}
+
+// ---- Admin Panel ----
+function showAdmin() {
+  if (!S.ses.isAdmin) { promptAdminLogin(); return; }
+  openAdmin();
+}
+
+function promptAdminLogin() {
+  const {box,close}=modal(`
+    <div class="modal-hd"><div class="modal-ttl"><i class="fas fa-crown" style="color:var(--warning);margin-right:.4rem"></i>Admin Login</div><button class="modal-cls"><i class="fas fa-times"></i></button></div>
+    <div class="modal-bd">
+      <div class="f-grp"><label class="f-lbl">Admin Password</label><input type="password" id="apass" class="f-inp" placeholder="Enter admin password..." autofocus></div>
+      <div id="apassErr" class="f-err"></div>
+    </div>
+    <div class="modal-ft"><button class="btn-s modal-cls">Cancel</button><button id="apassOk" class="btn-p">Login</button></div>
+  `);
+  const login=async()=>{
+    const p=box.querySelector('#apass').value;
+    const h=await sha256(p);
+    if(h===S.db.adminHash){
+      S.ses.isAdmin=true; saveSes(); close(); toast('Admin access granted','success'); renderHome(); openAdmin();
+    } else {
+      box.querySelector('#apassErr').textContent='Incorrect password.';
+      box.querySelector('#apass').value='';
+    }
+  };
+  box.querySelector('#apassOk').onclick=login;
+  box.querySelector('#apass').onkeydown=e=>{if(e.key==='Enter')login();};
+}
+
+function openAdmin() {
+  const {ov,box,close}=modal(`
+    <div class="modal-hd"><div class="modal-ttl"><i class="fas fa-crown" style="color:var(--warning);margin-right:.4rem"></i>Admin Panel</div><button class="modal-cls"><i class="fas fa-times"></i></button></div>
+    <div class="admin-tabs">
+      <div class="admin-tab active" data-t="drives">Drives</div>
+      <div class="admin-tab" data-t="settings">Settings</div>
+      <div class="admin-tab" data-t="backup">Backup</div>
+    </div>
+    <div class="admin-tab-bd" id="atbd">${adminDrivesHtml()}</div>
+    <div class="modal-ft">
+      <button class="btn-sm d" id="aLogout"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      <div style="flex:1"></div>
+      <button class="btn-s modal-cls">Close</button>
+    </div>
+  `, 'admin-box');
+  box.style.maxWidth='680px'; box.style.width='100%'; box.style.maxHeight='85vh'; box.style.display='flex'; box.style.flexDirection='column';
+
+  const bd=box.querySelector('#atbd');
+  box.querySelectorAll('.admin-tab').forEach(tab=>{
+    tab.onclick=()=>{
+      box.querySelectorAll('.admin-tab').forEach(t=>t.classList.remove('active'));
+      tab.classList.add('active');
+      const t=tab.dataset.t;
+      bd.innerHTML = t==='drives'?adminDrivesHtml():t==='settings'?adminSettingsHtml():adminBackupHtml();
+      bindAdminTab(t,bd,close,box);
+    };
+  });
+  bindAdminTab('drives',bd,close,box);
+
+  box.querySelector('#aLogout').onclick=()=>{S.ses.isAdmin=false;saveSes();close();renderHome();toast('Logged out','info');};
+}
+
+function adminDrivesHtml() {
+  let h=`<div style="margin-bottom:.9rem"><button class="btn-sm p" id="addDriveBtn"><i class="fas fa-plus"></i> Add Drive</button></div>`;
+  if(!S.db.drives.length) h+=`<div style="text-align:center;padding:2rem;color:var(--text2)">No drives yet. Add one above.</div>`;
+  S.db.drives.forEach(d=>{
+    const fc=S.db.files.filter(f=>f.driveId===d.id).length;
+    h+=`<div class="drive-row"><div class="drive-row-badge" style="background:${d.color||'var(--primary)'}">${esc(d.letter)}</div>
+    <div class="drive-row-info"><div class="drive-row-name">${esc(d.name)} (${esc(d.letter)}:)</div><div class="drive-row-sub">${d.passwordHash?'🔒 Password set':'🔓 No password'} · ${fc} files</div></div>
+    <div class="drive-row-acts"><button class="btn-sm editDrBtn" data-id="${d.id}">Edit</button><button class="btn-sm d delDrBtn" data-id="${d.id}">Delete</button></div></div>`;
+  });
+  return h;
+}
+
+function adminSettingsHtml() {
+  return `
+    <div class="f-grp"><label class="f-lbl">Bot Token</label><input type="password" id="sBt" class="f-inp" value="${esc(S.cfg.botToken)}" placeholder="123456:ABC..."></div>
+    <div class="f-grp"><label class="f-lbl">Chat ID</label><input id="sCid" class="f-inp" value="${esc(S.cfg.chatId)}" placeholder="-100..."></div>
+    <div class="f-grp"><label class="f-lbl">GitHub Token</label><input type="password" id="sGht" class="f-inp" value="${esc(S.cfg.ghToken)}" placeholder="github_pat_..."><div class="f-hint">Stored in browser only, never saved to GitHub</div></div>
+    <div class="f-grp"><label class="f-lbl">Chunk Size (MB)</label><input type="number" id="sChunk" class="f-inp" value="${CHUNK_MB}" placeholder="490"><div class="f-hint">Default: 490 MB. Increase if your Telegram Bot API supports larger uploads.</div></div>
+    <div class="f-grp"><label class="f-lbl">New Admin Password (leave blank to keep)</label><input type="password" id="sAp" class="f-inp" placeholder="New password..."></div>
+    <div style="margin-top:.5rem"><button class="btn-sm p" id="saveSetBtn">Save Settings</button></div>
+  `;
+}
+
+function adminBackupHtml() {
+  const fc=S.db.files.length, fld=S.db.folders.length, db=S.db.drives.length;
+  const sz=(JSON.stringify(S.db).length/1024).toFixed(1);
+  return `
+    <div class="info-box" style="margin-bottom:1rem"><strong>Database:</strong> ${db} drives · ${fld} folders · ${fc} files · ${sz} KB</div>
+    <div style="display:flex;flex-direction:column;gap:.9rem">
+      <div><button class="btn-sm p" id="bkExport"><i class="fas fa-download"></i> Export Backup JSON</button><div class="f-hint">Download all metadata (drive structure, file list). Does not include actual file data — that's on Telegram.</div></div>
+      <div><button class="btn-sm" id="bkImport"><i class="fas fa-upload"></i> Import Backup</button><input type="file" id="bkFile" accept=".json" hidden><div class="f-hint">Restore from a previously exported backup to recover your file structure.</div></div>
+      <div><button class="btn-sm p" id="bkSync"><i class="fas fa-sync"></i> Force Sync to GitHub</button><div class="f-hint">Push current data to GitHub now.</div></div>
+      <div><button class="btn-sm" id="bkReload"><i class="fas fa-cloud-download-alt"></i> Reload from GitHub</button><div class="f-hint">Pull latest data from GitHub (overwrites local state).</div></div>
+    </div>
+  `;
+}
+
+function bindAdminTab(t, bd, closeAdmin, box) {
+  if (t==='drives') {
+    bd.querySelector('#addDriveBtn')?.addEventListener('click',()=>{closeAdmin();setTimeout(()=>createDriveDialog(()=>openAdmin()),200);});
+    bd.querySelectorAll('.editDrBtn').forEach(btn=>btn.addEventListener('click',()=>{
+      const d=S.db.drives.find(x=>x.id===btn.dataset.id);
+      if(d){closeAdmin();setTimeout(()=>editDriveDialog(d,()=>openAdmin()),200);}
+    }));
+    bd.querySelectorAll('.delDrBtn').forEach(btn=>btn.addEventListener('click',async()=>{
+      const d=S.db.drives.find(x=>x.id===btn.dataset.id);
+      if(d&&confirm(`Delete drive "${d.name}" and ALL files?`)){await deleteDrive(d);bd.innerHTML=adminDrivesHtml();bindAdminTab('drives',bd,closeAdmin,box);}
+    }));
+  }
+  if (t==='settings') {
+    bd.querySelector('#saveSetBtn')?.addEventListener('click',async()=>{
+      const bt=bd.querySelector('#sBt').value.trim();
+      const cid=bd.querySelector('#sCid').value.trim();
+      const ght=bd.querySelector('#sGht').value.trim();
+      const ap=bd.querySelector('#sAp').value;
+      if(bt)S.cfg.botToken=bt; if(cid)S.cfg.chatId=cid; if(ght)S.cfg.ghToken=ght;
+      if(ap) S.db.adminHash=await sha256(ap);
+      saveCfg(); const ok=await saveDB();
+      toast(ok?'Settings saved':'Saved locally (GitHub sync failed)',ok?'success':'warning');
+    });
+  }
+  if (t==='backup') {
+    bd.querySelector('#bkExport')?.addEventListener('click',()=>{
+      const blob=new Blob([JSON.stringify(S.db,null,2)],{type:'application/json'});
+      dlLink(URL.createObjectURL(blob),`teledrive_backup_${new Date().toISOString().slice(0,10)}.json`);
+      toast('Backup exported','success');
+    });
+    bd.querySelector('#bkImport')?.addEventListener('click',()=>bd.querySelector('#bkFile').click());
+    bd.querySelector('#bkFile')?.addEventListener('change',async e=>{
+      const file=e.target.files[0]; if(!file)return;
+      try{const d=JSON.parse(await file.text());if(!d.v||!d.drives)throw new Error('Invalid');
+        S.db=d;await saveDB();renderHome();
+        bd.innerHTML=adminBackupHtml();bindAdminTab('backup',bd,closeAdmin,box);
+        toast('Backup restored','success');
+      }catch(e){toast('Import failed: '+e.message,'error');}
+    });
+    bd.querySelector('#bkSync')?.addEventListener('click',async()=>{
+      const btn=bd.querySelector('#bkSync');btn.disabled=true;btn.textContent='Syncing...';
+      S.dbSha=null;const ok=await saveDB();
+      btn.disabled=false;btn.innerHTML='<i class="fas fa-sync"></i> Force Sync to GitHub';
+      toast(ok?'Synced to GitHub':'Sync failed',ok?'success':'error');
+    });
+    bd.querySelector('#bkReload')?.addEventListener('click',async()=>{
+      const ok=await loadDB();renderHome();
+      toast(ok?'Reloaded from GitHub':'Reload failed',ok?'success':'error');
+    });
+  }
+}
+
+// ---- Create/Edit Drive ----
+const COLORS=['#0a84ff','#30d158','#ff9f0a','#bf5af2','#ff453a','#ff375f','#64d2ff','#ffd60a'];
+
+function createDriveDialog(cb) {
+  let color=COLORS[0];
+  const {box,close}=modal(`
+    <div class="modal-hd"><div class="modal-ttl">Create Drive</div><button class="modal-cls"><i class="fas fa-times"></i></button></div>
+    <div class="modal-bd">
+      <div class="f-grp"><label class="f-lbl">Drive Name</label><input id="cdName" class="f-inp" placeholder="e.g. My Drive" autofocus></div>
+      <div class="f-grp"><label class="f-lbl">Drive Letter</label><input id="cdLetter" class="f-inp" placeholder="T" maxlength="1" style="text-transform:uppercase;width:80px"></div>
+      <div class="f-grp"><label class="f-lbl">Color</label><div class="color-grid" id="colorGrid">${COLORS.map((c,i)=>`<div class="c-swatch${i===0?' active':''}" data-c="${c}" style="background:${c}" title="${c}"></div>`).join('')}</div></div>
+      <div class="f-grp"><label class="f-lbl">Password (optional)</label><input type="password" id="cdPass" class="f-inp" placeholder="Leave blank for no password"><div class="f-hint">Friends must enter this to access the drive</div></div>
+    </div>
+    <div class="modal-ft"><button class="btn-s modal-cls">Cancel</button><button id="cdCreate" class="btn-p">Create Drive</button></div>
+  `);
+  box.querySelectorAll('.c-swatch').forEach(s=>{
+    s.onclick=()=>{color=s.dataset.c;box.querySelectorAll('.c-swatch').forEach(x=>x.classList.remove('active'));s.classList.add('active');};
+  });
+  box.querySelector('#cdLetter').oninput=e=>e.target.value=e.target.value.toUpperCase().replace(/[^A-Z]/g,'');
+  box.querySelector('#cdCreate').onclick=async()=>{
+    const name=box.querySelector('#cdName').value.trim();
+    const letter=box.querySelector('#cdLetter').value.trim().toUpperCase();
+    const pass=box.querySelector('#cdPass').value;
+    if(!name||!letter){toast('Fill in name and letter','error');return;}
+    if(S.db.drives.find(d=>d.letter===letter)){toast('Letter already in use','error');return;}
+    S.db.drives.push({id:uid(),letter,name,color,passwordHash:pass?await sha256(pass):null,createdAt:new Date().toISOString()});
+    await saveDB(); close(); renderHome(); toast(`Drive ${letter}: created`,'success');
+    if(cb)cb();
+  };
+}
+
+function editDriveDialog(drive, cb) {
+  const {box,close}=modal(`
+    <div class="modal-hd"><div class="modal-ttl">Edit Drive — ${esc(drive.letter)}:</div><button class="modal-cls"><i class="fas fa-times"></i></button></div>
+    <div class="modal-bd">
+      <div class="f-grp"><label class="f-lbl">Drive Name</label><input id="edName" class="f-inp" value="${esc(drive.name)}" autofocus></div>
+      <div class="f-grp"><label class="f-lbl">${drive.passwordHash?'Change Password (leave blank to keep)':'Set Password (optional)'}</label>
+        <input type="password" id="edPass" class="f-inp" placeholder="${drive.passwordHash?'New password...':'Leave blank for no password'}">
+        ${drive.passwordHash?'<div class="f-hint"><label><input type="checkbox" id="edRemPass" style="margin-right:.3rem"> Remove password</label></div>':''}
+      </div>
+    </div>
+    <div class="modal-ft"><button class="btn-s modal-cls">Cancel</button><button id="edSave" class="btn-p">Save</button></div>
+  `);
+  box.querySelector('#edSave').onclick=async()=>{
+    const name=box.querySelector('#edName').value.trim();
+    const pass=box.querySelector('#edPass').value;
+    const rem=box.querySelector('#edRemPass')?.checked;
+    const d=S.db.drives.find(x=>x.id===drive.id);
+    if(d){
+      if(name)d.name=name;
+      if(rem)d.passwordHash=null;
+      else if(pass)d.passwordHash=await sha256(pass);
+    }
+    await saveDB(); close(); renderHome(); toast('Drive updated','success');
+    if(cb)cb();
+  };
+}
+
+// ---- Setup Wizard ----
+function showWizard() {
+  let step=1;
+  const ov=document.createElement('div'); ov.className='wiz-ov';
+  ov.innerHTML=`
+    <div class="wiz-box">
+      <div class="wiz-logo"><div class="wiz-logo-icon"><i class="fas fa-hard-drive"></i></div><h1>TeleDrive Setup</h1></div>
+      <div class="wiz-prog"><div class="wiz-dot active" id="wd1"></div><div class="wiz-dot" id="wd2"></div><div class="wiz-dot" id="wd3"></div></div>
+
+      <!-- Step 1 -->
+      <div class="wiz-step active" id="ws1">
+        <div class="wiz-ttl">Connect Telegram</div>
+        <div class="wiz-sub">Files are stored on Telegram for free unlimited storage (max 4 GB per file).</div>
+        <div class="info-box"><strong>Get Bot Token:</strong><br>1. Open Telegram → search <strong>@BotFather</strong><br>2. Send <strong>/newbot</strong> → follow steps<br>3. Copy the token</div>
+        <div class="f-grp"><label class="f-lbl">Bot Token</label><input id="wbt" class="f-inp" placeholder="123456789:ABC-DEFGHijk..."></div>
+        <div class="info-box"><strong>Get Chat ID:</strong><br>1. Create a private Telegram <strong>channel</strong><br>2. Add your bot as <strong>Admin</strong><br>3. Forward a message from the channel to <strong>@userinfobot</strong> or send to channel then check <code>api.telegram.org/bot[TOKEN]/getUpdates</code><br>4. Copy the chat id (starts with -100...)</div>
+        <div class="f-grp"><label class="f-lbl">Chat ID</label><input id="wcid" class="f-inp" placeholder="-1001234567890"></div>
+        <div class="wiz-acts"><button class="btn-p" id="wn1" style="flex:1">Next <i class="fas fa-arrow-right"></i></button></div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="wiz-step" id="ws2">
+        <div class="wiz-ttl">GitHub Storage</div>
+        <div class="wiz-sub">File index and drive structure are saved to GitHub (free). Enables sync across all browsers/devices.</div>
+        <div class="info-box"><strong>Saving to:</strong> github.com/darshworkplcae/storage<br>Your GitHub token is stored in <strong>your browser only</strong> — never on GitHub.</div>
+        <div class="f-grp"><label class="f-lbl">GitHub Token (needs repo write access)</label><input type="password" id="wght" class="f-inp" placeholder="github_pat_..."></div>
+        <div class="wiz-acts"><button class="btn-s" id="wb2">Back</button><button class="btn-p" id="wn2">Next <i class="fas fa-arrow-right"></i></button></div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="wiz-step" id="ws3">
+        <div class="wiz-ttl">Admin Password</div>
+        <div class="wiz-sub">This password protects drive management and all admin features.</div>
+        <div class="info-box"><strong>Keep this safe!</strong> Anyone with admin password can manage all drives and files.</div>
+        <div class="f-grp"><label class="f-lbl">Admin Password</label><input type="password" id="wap1" class="f-inp" placeholder="Choose strong password"></div>
+        <div class="f-grp"><label class="f-lbl">Confirm Password</label><input type="password" id="wap2" class="f-inp" placeholder="Repeat password"></div>
+        <div id="werr" class="f-err"></div>
+        <div class="wiz-acts"><button class="btn-s" id="wb3">Back</button><button class="btn-p" id="wfin"><i class="fas fa-check"></i> Finish Setup</button></div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(ov);
+
+  const goStep=n=>{
+    step=n;
+    ov.querySelectorAll('.wiz-step').forEach((s,i)=>s.classList.toggle('active',i+1===n));
+    ov.querySelectorAll('.wiz-dot').forEach((d,i)=>{d.classList.toggle('done',i+1<n);d.classList.toggle('active',i+1===n);});
+  };
+
+  ov.querySelector('#wn1').onclick=()=>{
+    const bt=ov.querySelector('#wbt').value.trim(), cid=ov.querySelector('#wcid').value.trim();
+    if(!bt||!cid){toast('Fill in both fields','error');return;}
+    S.cfg.botToken=bt; S.cfg.chatId=cid; goStep(2);
+  };
+  ov.querySelector('#wb2').onclick=()=>goStep(1);
+  ov.querySelector('#wn2').onclick=()=>{
+    const t=ov.querySelector('#wght').value.trim();
+    if(!t){toast('Enter GitHub token','error');return;}
+    S.cfg.ghToken=t; goStep(3);
+  };
+  ov.querySelector('#wb3').onclick=()=>goStep(2);
+  ov.querySelector('#wfin').onclick=async()=>{
+    const p1=ov.querySelector('#wap1').value, p2=ov.querySelector('#wap2').value;
+    const errEl=ov.querySelector('#werr');
+    if(!p1){errEl.textContent='Enter admin password';return;}
+    if(p1!==p2){errEl.textContent='Passwords do not match';return;}
+    const btn=ov.querySelector('#wfin');
+    btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner spin"></i> Setting up...';
+    S.db.adminHash=await sha256(p1);
+    S.db.drives=[{id:uid(),letter:'T',name:'Telegram Drive',color:'#0a84ff',passwordHash:null,createdAt:new Date().toISOString()}];
+    saveCfg();
+    const ok=await saveDB();
+    if(ok){
+      ov.remove(); S.ses.isAdmin=true; saveSes(); goHome();
+      toast('TeleDrive is ready! 🎉','success');
+    } else {
+      btn.disabled=false; btn.innerHTML='<i class="fas fa-check"></i> Finish Setup';
+      errEl.textContent='Failed to save to GitHub. Check your token and try again.';
+    }
+  };
+}
+
+// ---- Drop Zone ----
+function setupDrop(el) {
+  el.addEventListener('dragover', e=>{
+    e.preventDefault();
+    if(!el.querySelector('.drop-ov')){
+      const ov=document.createElement('div'); ov.className='drop-ov';
+      ov.innerHTML='<i class="fas fa-cloud-upload-alt"></i><span>Drop files to upload</span>';
+      el.style.position='relative'; el.appendChild(ov);
+    }
+  });
+  el.addEventListener('dragleave', e=>{
+    if(!el.contains(e.relatedTarget)) el.querySelector('.drop-ov')?.remove();
+  });
+  el.addEventListener('drop', e=>{
+    e.preventDefault(); el.querySelector('.drop-ov')?.remove();
+    if(e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
+  });
+}
+
+// ---- UI helpers ----
+function syncNavBtns() {
+  $('navBack').disabled=S.navIdx<=0;
+  $('navFwd').disabled=S.navIdx>=S.navHist.length-1;
+  $('navUp').disabled=!S.driveId;
+}
+function syncStatus() {
+  const b=$('statusBar'); if(!b)return;
+  if(!S.driveId){b.innerHTML='';return;}
+  const fc=S.db.folders.filter(f=>f.driveId===S.driveId&&f.parentId===S.folderId).length;
+  const fi=S.db.files.filter(f=>f.driveId===S.driveId&&f.folderId===S.folderId).length;
+  const sz=S.db.files.filter(f=>f.driveId===S.driveId&&f.folderId===S.folderId).reduce((a,f)=>a+f.size,0);
+  b.innerHTML=`<span>${fc+fi} item${fc+fi!==1?'s':''}</span>${sz?`<span>·</span><span>${fmt(sz)}</span>`:''}`;
+}
+
+function toast(msg, type='info') {
+  const wrap=$('toastWrap');
+  const el=document.createElement('div'); el.className=`toast ${type}`;
+  el.innerHTML=`<div class="toast-dot"></div><span>${msg}</span>`;
+  wrap.appendChild(el);
+  setTimeout(()=>{el.classList.add('hide');setTimeout(()=>el.remove(),300);},3200);
+}
+
+function $(id){return document.getElementById(id);}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function fmt(b){if(!b)return'0 B';const k=1024,s=['B','KB','MB','GB','TB'],i=Math.floor(Math.log(b)/Math.log(k));return(b/Math.pow(k,i)).toFixed(2)+' '+s[i];}
+function fmtDate(s){if(!s)return'';const d=new Date(s),now=new Date(),df=(now-d)/1e3;if(df<60)return'Just now';if(df<3600)return Math.floor(df/60)+'m ago';if(df<86400)return Math.floor(df/3600)+'h ago';if(df<604800)return Math.floor(df/86400)+'d ago';return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}
+
+function ftCfg(t=''){
+  if(t.startsWith('image/'))return{em:'🖼️',ico:'<i class="fas fa-image"></i>',color:'#ff375f'};
+  if(t.startsWith('video/'))return{em:'🎬',ico:'<i class="fas fa-video"></i>',color:'#bf5af2'};
+  if(t.startsWith('audio/'))return{em:'🎵',ico:'<i class="fas fa-music"></i>',color:'#ff9f0a'};
+  if(t.includes('pdf'))return{em:'📄',ico:'<i class="fas fa-file-pdf"></i>',color:'#ff453a'};
+  if(t.includes('zip')||t.includes('rar')||t.includes('7z')||t.includes('tar'))return{em:'📦',ico:'<i class="fas fa-file-zipper"></i>',color:'#ffd60a'};
+  if(t.includes('word')||t.includes('document'))return{em:'📝',ico:'<i class="fas fa-file-word"></i>',color:'#0a84ff'};
+  if(t.includes('sheet')||t.includes('excel'))return{em:'📊',ico:'<i class="fas fa-file-excel"></i>',color:'#30d158'};
+  if(t.includes('text/'))return{em:'📃',ico:'<i class="fas fa-file-lines"></i>',color:'#64d2ff'};
+  return{em:'📁',ico:'<i class="fas fa-file"></i>',color:'#8e8e93'};
+}
+
+// ---- Init ----
+async function init() {
+  loadCfg(); loadSes();
+
+  const hasConfig = S.cfg.botToken && S.cfg.chatId && S.cfg.ghToken;
+  if (!hasConfig) { showWizard(); return; }
+
+  $('homeScreen').classList.remove('hidden');
+  $('homeScreen').innerHTML=`<div style="text-align:center;padding:5rem 2rem;color:var(--text2)"><i class="fas fa-spinner spin" style="font-size:2.5rem;color:var(--primary);display:block;margin-bottom:1rem"></i>Loading TeleDrive...</div>`;
+
+  const ok = await loadDB();
+
+  if (!ok) {
+    $('homeScreen').innerHTML=`<div style="text-align:center;padding:5rem 2rem">
+      <i class="fas fa-exclamation-triangle" style="font-size:2.5rem;color:var(--danger);display:block;margin-bottom:1rem"></i>
+      <h3 style="color:var(--text);margin-bottom:.5rem">Connection Failed</h3>
+      <p style="color:var(--text2);margin-bottom:1.5rem">Could not load data from GitHub. Check your internet and token.</p>
+      <div style="display:flex;gap:.8rem;justify-content:center">
+        <button class="btn-p" onclick="init()">Retry</button>
+        <button class="btn-s" onclick="localStorage.clear();sessionStorage.clear();location.reload()">Reset Setup</button>
+      </div>
+    </div>`;
+    return;
+  }
+
+  goHome();
+
+  // Wire events
+  $('adminBtn').onclick=()=>showAdmin();
+  $('backupBtn').onclick=()=>{ if(S.ses.isAdmin)openAdmin(); else promptAdminLogin(); };
+  $('navBack').onclick=navBack;
+  $('navFwd').onclick=navFwd;
+  $('navUp').onclick=navUp;
+  $('uploadBtn').onclick=()=>$('fileInput').click();
+  $('newFolderBtn').onclick=newFolderDlg;
+  $('fileInput').onchange=e=>{if(e.target.files.length)uploadFiles(e.target.files);};
+  $('globalSearch').oninput=()=>{ if(S.driveId)renderContent(); else renderHome(); };
+  $('viewToggleBtn').onclick=()=>{
+    S.view=S.view==='grid'?'list':'grid';
+    $('viewToggleBtn').innerHTML=S.view==='grid'?'<i class="fas fa-th"></i>':'<i class="fas fa-list"></i>';
+    renderContent();
+  };
+  $('sortSel').onchange=e=>{S.sort=e.target.value;renderContent();};
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown',e=>{
+    if(e.altKey&&e.key==='ArrowLeft')navBack();
+    if(e.altKey&&e.key==='ArrowRight')navFwd();
+    if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();$('globalSearch').focus();}
+    if(e.key==='Backspace'&&document.activeElement===document.body)navUp();
+  });
+
+  // Auto-reload every 60s
+  setInterval(async()=>{ if(!S.uploading){ await loadDB(); if(S.driveId)syncStatus(); } },60000);
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
