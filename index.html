@@ -334,6 +334,12 @@
     <div class="app-body">
       <!-- Home Screen -->
       <div id="homeScreen" class="hidden">
+        <!-- Loading overlay — shown during init, hidden after -->
+        <div id="loadingOverlay" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);z-index:10">
+          <i class="fas fa-spinner spin" style="font-size:2.5rem;color:var(--primary);margin-bottom:1rem"></i>
+          <div style="font-size:1rem;font-weight:500;color:var(--text)">Loading TeleDrive...</div>
+          <div style="font-size:.8rem;margin-top:.5rem;color:var(--text2)">Connecting to GitHub &amp; Telegram</div>
+        </div>
         <div class="home-hero"><i class="fas fa-desktop" style="font-size:1.5rem;color:var(--primary)"></i><div class="home-title">This PC</div></div>
         <div class="home-sub">Telegram-powered unlimited cloud storage · Hosted free on Cloudflare</div>
         <div class="section-label">Drives</div>
@@ -1515,12 +1521,10 @@ async function init() {
   loadCfg(); loadSes();
   saveCfg();
 
+  // Show homeScreen with loading overlay (drivesGrid stays intact)
   $('homeScreen').classList.remove('hidden');
-  $('homeScreen').innerHTML = `<div style="text-align:center;padding:5rem 2rem;color:var(--text2)">
-    <i class="fas fa-spinner spin" style="font-size:2.5rem;color:var(--primary);display:block;margin-bottom:1rem"></i>
-    <div style="font-size:1rem;font-weight:500">Loading TeleDrive...</div>
-    <div style="font-size:.8rem;margin-top:.5rem;color:var(--text3)">Connecting to GitHub &amp; Telegram</div>
-  </div>`;
+  const overlay = $('loadingOverlay');
+  if (overlay) overlay.style.display = 'flex';
 
   // Load DB with 15s timeout
   let ok = false;
@@ -1531,20 +1535,26 @@ async function init() {
     ]);
   } catch(e) { ok = false; }
 
+  // Hide loading overlay
+  if (overlay) overlay.style.display = 'none';
+
   if (!ok) {
-    $('homeScreen').innerHTML = `<div style="text-align:center;padding:5rem 2rem">
-      <i class="fas fa-exclamation-triangle" style="font-size:2.5rem;color:var(--danger);display:block;margin-bottom:1rem"></i>
-      <h3 style="color:var(--text);margin-bottom:.5rem">Connection Failed</h3>
-      <p style="color:var(--text2);margin-bottom:1.5rem">Could not reach GitHub. Check internet connection.</p>
-      <div style="display:flex;gap:.8rem;justify-content:center">
-        <button class="btn-p" onclick="init()"><i class="fas fa-redo"></i> Retry</button>
-        <button class="btn-s" onclick="showWizard()"><i class="fas fa-cog"></i> Setup</button>
-      </div>
-    </div>`;
+    // Show error in the overlay instead of replacing homeScreen
+    if (overlay) {
+      overlay.style.display = 'flex';
+      overlay.innerHTML = `
+        <i class="fas fa-exclamation-triangle" style="font-size:2.5rem;color:var(--danger);margin-bottom:1rem"></i>
+        <h3 style="color:var(--text);margin-bottom:.5rem">Connection Failed</h3>
+        <p style="color:var(--text2);margin-bottom:1.5rem;text-align:center">Could not reach GitHub.<br>Check internet connection.</p>
+        <div style="display:flex;gap:.8rem">
+          <button class="btn-p" onclick="location.reload()"><i class="fas fa-redo"></i> Retry</button>
+          <button class="btn-s" onclick="localStorage.clear();location.reload()">Reset</button>
+        </div>`;
+    }
     return;
   }
 
-  // First time — db.json didn't exist or has no admin
+  // First time setup — no adminHash means fresh db
   if (!S.db.adminHash) {
     await autoSetup();
   }
