@@ -411,11 +411,11 @@ const BRANCH    = 'main';
 const SK        = 'td_s_v2';
 const SES       = 'td_ses_v1';
 
-// ---- Local Bot API Server (runs on Render — gives 2GB upload limit!) ----
-const LOCAL_API = 'https://teledrive-api.onrender.com';
+// ---- Telegram Bot API — using official endpoint (CORS supported) ----
+const LOCAL_API = 'https://api.telegram.org';
 
-// Chunk size: 1.9 GB — local bot API allows up to 2 GB per file
-const CHUNK_MB  = 1900;
+// 45 MB chunks — safely under Telegram Bot API's 50MB limit
+const CHUNK_MB  = 45;
 const CHUNK_B   = CHUNK_MB * 1024 * 1024;
 
 // ---- Pre-configured credentials ----
