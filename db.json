@@ -28,5 +28,24 @@
       "createdAt": "2026-09-05T19:47:53.391Z"
     }
   ],
-  "files": []
+  "files": [
+    {
+      "id": "mtosuke46h3c",
+      "driveId": "mtoipafzhgrw",
+      "folderId": "mtosotkffiqz",
+      "name": "20.03.2026_20.02.11_REC.mp4",
+      "size": 1463533,
+      "type": "video/mp4",
+      "date": "2026-09-05T19:52:26.881Z",
+      "isChunked": false,
+      "chunks": [
+        {
+          "idx": 0,
+          "msgId": 4,
+          "fileId": "BAACAgUAAyEGAATq-qK3AAMEapxy-t6Xq-kjC92OA3-U-juCjRoAAq0eAAJnfOFU_MlH-bEYYeU9BA",
+          "size": 1463533
+        }
+      ]
+    }
+  ]
 }
