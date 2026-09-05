@@ -447,20 +447,25 @@ function uid() { return Date.now().toString(36)+Math.random().toString(36).slice
 
 // ---- Settings ----
 function loadCfg() {
+  // Always start from baked-in defaults — stored values only win if non-empty
+  S.cfg = { ...DEFAULT_CFG };
   try {
     const stored = JSON.parse(localStorage.getItem(SK)||'{}');
-    S.cfg = { ...DEFAULT_CFG, ...stored };
-    // Load GitHub token from its own key (kept separate for security)
-    const ght = localStorage.getItem(GH_TOKEN_KEY)||'';
+    if (stored.botToken) S.cfg.botToken = stored.botToken;
+    if (stored.chatId)   S.cfg.chatId   = stored.chatId;
+    if (stored.ghToken)  S.cfg.ghToken  = stored.ghToken;
+    // Dedicated GH token key takes highest priority
+    const ght = localStorage.getItem(GH_TOKEN_KEY);
     if (ght) S.cfg.ghToken = ght;
-    if (!S.cfg.botToken) S.cfg.botToken = DEFAULT_CFG.botToken;
-    if (!S.cfg.chatId)   S.cfg.chatId   = DEFAULT_CFG.chatId;
-  } catch { S.cfg = {...DEFAULT_CFG}; }
+  } catch {}
+  // Final safety: defaults always win over empty string
+  if (!S.cfg.ghToken)  S.cfg.ghToken  = DEFAULT_CFG.ghToken;
+  if (!S.cfg.botToken) S.cfg.botToken = DEFAULT_CFG.botToken;
+  if (!S.cfg.chatId)   S.cfg.chatId   = DEFAULT_CFG.chatId;
 }
 function saveCfg() {
-  const toSave = { botToken: S.cfg.botToken, chatId: S.cfg.chatId };
-  localStorage.setItem(SK, JSON.stringify(toSave));
-  if (S.cfg.ghToken) localStorage.setItem(GH_TOKEN_KEY, S.cfg.ghToken);
+  // Never save ghToken to main key (it's baked in — no need)
+  localStorage.setItem(SK, JSON.stringify({ botToken: S.cfg.botToken, chatId: S.cfg.chatId }));
 }
 function loadSes() {
   try { Object.assign(S.ses, JSON.parse(sessionStorage.getItem(SES)||'{}')); } catch{}
