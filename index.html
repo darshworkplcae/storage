@@ -404,8 +404,17 @@ const DB_FILE   = 'db.json';
 const BRANCH    = 'main';
 const SK        = 'td_s_v2';   // settings localStorage key
 const SES       = 'td_ses_v1'; // session sessionStorage key
-const CHUNK_MB  = 490;         // default chunk size in MB (safe for most Bot API configs)
+const CHUNK_MB  = 490;         // default chunk size in MB
 const CHUNK_B   = CHUNK_MB * 1024 * 1024;
+
+// ---- Pre-configured credentials ----
+const DEFAULT_CFG = {
+  botToken: '8793255665:AAEjTk27HR0TexX5WP9Kyu_6Tj7r22sPnaw',
+  chatId:   '-1003942294199',
+  ghToken:  ''
+};
+const DEFAULT_ADMIN_PASS = 'admin123';
+const GH_TOKEN_KEY = 'td_ght_v1';
 
 // ---- State ----
 const S = {
@@ -431,9 +440,21 @@ function uid() { return Date.now().toString(36)+Math.random().toString(36).slice
 
 // ---- Settings ----
 function loadCfg() {
-  try { Object.assign(S.cfg, JSON.parse(localStorage.getItem(SK)||'{}')); } catch{}
+  try {
+    const stored = JSON.parse(localStorage.getItem(SK)||'{}');
+    S.cfg = { ...DEFAULT_CFG, ...stored };
+    // Load GitHub token from its own key (kept separate for security)
+    const ght = localStorage.getItem(GH_TOKEN_KEY)||'';
+    if (ght) S.cfg.ghToken = ght;
+    if (!S.cfg.botToken) S.cfg.botToken = DEFAULT_CFG.botToken;
+    if (!S.cfg.chatId)   S.cfg.chatId   = DEFAULT_CFG.chatId;
+  } catch { S.cfg = {...DEFAULT_CFG}; }
 }
-function saveCfg() { localStorage.setItem(SK, JSON.stringify(S.cfg)); }
+function saveCfg() {
+  const toSave = { botToken: S.cfg.botToken, chatId: S.cfg.chatId };
+  localStorage.setItem(SK, JSON.stringify(toSave));
+  if (S.cfg.ghToken) localStorage.setItem(GH_TOKEN_KEY, S.cfg.ghToken);
+}
 function loadSes() {
   try { Object.assign(S.ses, JSON.parse(sessionStorage.getItem(SES)||'{}')); } catch{}
 }
@@ -1421,60 +1442,135 @@ function ftCfg(t=''){
   return{em:'📁',ico:'<i class="fas fa-file"></i>',color:'#8e8e93'};
 }
 
+// ---- GitHub Token prompt (one-time, stores in localStorage only) ----
+function promptGhToken() {
+  return new Promise(resolve => {
+    const ov = document.createElement('div'); ov.className = 'wiz-ov';
+    ov.innerHTML = `
+      <div class="wiz-box" style="max-width:420px">
+        <div class="wiz-logo"><div class="wiz-logo-icon"><i class="fas fa-hard-drive"></i></div><h1>TeleDrive</h1></div>
+        <div class="wiz-ttl">One-time Setup</div>
+        <div class="wiz-sub">Telegram is pre-configured ✅. Just enter your GitHub token to sync your drive index.</div>
+        <div class="info-box">
+          Your GitHub token is saved <strong>in your browser only</strong> — never uploaded to GitHub.<br>
+          Use your <strong>classic personal access token</strong> from github.com/settings/tokens
+        </div>
+        <div class="f-grp">
+          <label class="f-lbl">GitHub Token (paste yours)</label>
+          <input type="password" id="ght_inp" class="f-inp" placeholder="ghp_..." autofocus>
+          <div class="f-hint">Go to github.com/settings/tokens → copy your classic token</div>
+        </div>
+        <div id="ght_err" class="f-err"></div>
+        <div class="wiz-acts">
+          <button class="btn-p" id="ght_ok" style="flex:1"><i class="fas fa-check"></i> Start TeleDrive</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    // Pre-fill the known token hint
+    ov.querySelector('#ght_inp').value = '';
+    ov.querySelector('#ght_ok').onclick = async () => {
+      const t = ov.querySelector('#ght_inp').value.trim();
+      if (!t) { ov.querySelector('#ght_err').textContent = 'Please enter your GitHub token'; return; }
+      const btn = ov.querySelector('#ght_ok');
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner spin"></i> Connecting...';
+      S.cfg.ghToken = t; saveCfg();
+      ov.remove(); resolve(); init();
+    };
+  });
+}
+
+// ---- Auto Setup (first launch) ----
+async function autoSetup() {
+  // Create default db with T: drive and admin password
+  S.db.adminHash = await sha256(DEFAULT_ADMIN_PASS);
+  S.db.drives = [{
+    id: uid(), letter: 'T', name: 'Telegram Drive',
+    color: '#0a84ff', passwordHash: null,
+    createdAt: new Date().toISOString()
+  }];
+  S.ses.isAdmin = true;
+  saveSes(); saveCfg();
+  const ok = await saveDB();
+  if (ok) toast('✅ TeleDrive ready! Admin password: admin123 (change in Admin Panel)', 'success');
+  else toast('⚠️ Could not save to GitHub — working offline', 'warning');
+}
+
 // ---- Init ----
 async function init() {
   loadCfg(); loadSes();
+  saveCfg(); // persist bot token + chat ID to localStorage
 
-  const hasConfig = S.cfg.botToken && S.cfg.chatId && S.cfg.ghToken;
-  if (!hasConfig) { showWizard(); return; }
+  // GitHub token stored locally — ask once if missing
+  if (!S.cfg.ghToken) {
+    await promptGhToken();
+    return;
+  }
 
   $('homeScreen').classList.remove('hidden');
-  $('homeScreen').innerHTML=`<div style="text-align:center;padding:5rem 2rem;color:var(--text2)"><i class="fas fa-spinner spin" style="font-size:2.5rem;color:var(--primary);display:block;margin-bottom:1rem"></i>Loading TeleDrive...</div>`;
+  $('homeScreen').innerHTML = `<div style="text-align:center;padding:5rem 2rem;color:var(--text2)">
+    <i class="fas fa-spinner spin" style="font-size:2.5rem;color:var(--primary);display:block;margin-bottom:1rem"></i>
+    <div style="font-size:1rem;font-weight:500">Loading TeleDrive...</div>
+    <div style="font-size:.8rem;margin-top:.5rem;color:var(--text3)">Connecting to GitHub &amp; Telegram</div>
+  </div>`;
 
-  const ok = await loadDB();
+  // Load DB with 15s timeout
+  let ok = false;
+  try {
+    ok = await Promise.race([
+      loadDB(),
+      new Promise(r => setTimeout(() => r(false), 15000))
+    ]);
+  } catch(e) { ok = false; }
 
   if (!ok) {
-    $('homeScreen').innerHTML=`<div style="text-align:center;padding:5rem 2rem">
+    $('homeScreen').innerHTML = `<div style="text-align:center;padding:5rem 2rem">
       <i class="fas fa-exclamation-triangle" style="font-size:2.5rem;color:var(--danger);display:block;margin-bottom:1rem"></i>
       <h3 style="color:var(--text);margin-bottom:.5rem">Connection Failed</h3>
-      <p style="color:var(--text2);margin-bottom:1.5rem">Could not load data from GitHub. Check your internet and token.</p>
+      <p style="color:var(--text2);margin-bottom:1.5rem">Could not reach GitHub. Check internet connection.</p>
       <div style="display:flex;gap:.8rem;justify-content:center">
-        <button class="btn-p" onclick="init()">Retry</button>
-        <button class="btn-s" onclick="localStorage.clear();sessionStorage.clear();location.reload()">Reset Setup</button>
+        <button class="btn-p" onclick="init()"><i class="fas fa-redo"></i> Retry</button>
+        <button class="btn-s" onclick="showWizard()"><i class="fas fa-cog"></i> Setup</button>
       </div>
     </div>`;
     return;
   }
 
-  goHome();
+  // First time — db.json didn't exist or has no admin
+  if (!S.db.adminHash) {
+    await autoSetup();
+  }
 
-  // Wire events
-  $('adminBtn').onclick=()=>showAdmin();
-  $('backupBtn').onclick=()=>{ if(S.ses.isAdmin)openAdmin(); else promptAdminLogin(); };
-  $('navBack').onclick=navBack;
-  $('navFwd').onclick=navFwd;
-  $('navUp').onclick=navUp;
-  $('uploadBtn').onclick=()=>$('fileInput').click();
-  $('newFolderBtn').onclick=newFolderDlg;
-  $('fileInput').onchange=e=>{if(e.target.files.length)uploadFiles(e.target.files);};
-  $('globalSearch').oninput=()=>{ if(S.driveId)renderContent(); else renderHome(); };
-  $('viewToggleBtn').onclick=()=>{
-    S.view=S.view==='grid'?'list':'grid';
-    $('viewToggleBtn').innerHTML=S.view==='grid'?'<i class="fas fa-th"></i>':'<i class="fas fa-list"></i>';
+  goHome();
+  wireEvents();
+}
+
+function wireEvents() {
+  $('adminBtn').onclick = () => showAdmin();
+  $('backupBtn').onclick = () => { if(S.ses.isAdmin) openAdmin(); else promptAdminLogin(); };
+  $('navBack').onclick = navBack;
+  $('navFwd').onclick = navFwd;
+  $('navUp').onclick = navUp;
+  $('uploadBtn').onclick = () => $('fileInput').click();
+  $('newFolderBtn').onclick = newFolderDlg;
+  $('fileInput').onchange = e => { if(e.target.files.length) uploadFiles(e.target.files); };
+  $('globalSearch').oninput = () => { if(S.driveId) renderContent(); else renderHome(); };
+  $('viewToggleBtn').onclick = () => {
+    S.view = S.view === 'grid' ? 'list' : 'grid';
+    $('viewToggleBtn').innerHTML = S.view === 'grid' ? '<i class="fas fa-th"></i>' : '<i class="fas fa-list"></i>';
     renderContent();
   };
-  $('sortSel').onchange=e=>{S.sort=e.target.value;renderContent();};
+  $('sortSel').onchange = e => { S.sort = e.target.value; renderContent(); };
 
   // Keyboard shortcuts
-  document.addEventListener('keydown',e=>{
-    if(e.altKey&&e.key==='ArrowLeft')navBack();
-    if(e.altKey&&e.key==='ArrowRight')navFwd();
-    if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();$('globalSearch').focus();}
-    if(e.key==='Backspace'&&document.activeElement===document.body)navUp();
+  document.addEventListener('keydown', e => {
+    if (e.altKey && e.key === 'ArrowLeft') navBack();
+    if (e.altKey && e.key === 'ArrowRight') navFwd();
+    if ((e.ctrlKey||e.metaKey) && e.key === 'k') { e.preventDefault(); $('globalSearch').focus(); }
+    if (e.key === 'Backspace' && document.activeElement === document.body) navUp();
   });
 
   // Auto-reload every 60s
-  setInterval(async()=>{ if(!S.uploading){ await loadDB(); if(S.driveId)syncStatus(); } },60000);
+  setInterval(async () => { if(!S.uploading){ await loadDB(); if(S.driveId) syncStatus(); } }, 60000);
 }
 
 document.addEventListener('DOMContentLoaded', init);
