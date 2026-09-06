@@ -13,7 +13,31 @@ async function upsSet(key,value){
   catch(e){console.error('upsSet',e);return false;}
 }
 async function loadDB(){
-  try{const data=await upsGet('td:db');if(data&&data.v){S.db=data;return true;}return true;}
-  catch(e){console.error('loadDB',e);return false;}
+  try{
+    const data=await upsGet('td:db');
+    if(data&&data.v){
+      S.db=data;
+      // Ensure new fields exist on old dbs
+      if(!S.db.activityLog)S.db.activityLog=[];
+      return true;
+    }
+    return true;
+  }catch(e){console.error('loadDB',e);return false;}
 }
 async function saveDB(){return await upsSet('td:db',S.db);}
+
+// Activity logging
+function logActivity(type, name, details={}) {
+  if (!S.db.activityLog) S.db.activityLog = [];
+  S.db.activityLog.unshift({
+    id: uid(),
+    type,
+    name,
+    driveId: details.driveId || S.driveId,
+    driveLetter: S.db.drives.find(d=>d.id===(details.driveId||S.driveId))?.letter || '?',
+    size: details.size || 0,
+    ts: new Date().toISOString()
+  });
+  // Keep only last 500 entries
+  if (S.db.activityLog.length > 500) S.db.activityLog = S.db.activityLog.slice(0, 500);
+}
