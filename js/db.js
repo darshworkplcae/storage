@@ -7,26 +7,17 @@ function saveSes(){sessionStorage.setItem(SES,JSON.stringify(S.ses));}
 async function upsGet(key){
   const r=await fetch(`${UPS_URL}/get/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${UPS_TOKEN}`}});
   const d=await r.json();
-  if(d.result===null||d.result===undefined)return null; // key not found
-  // Upstash may return object (if stored as JSON) or string (if stored as string)
+  if(d.result===null||d.result===undefined)return null;
   if(typeof d.result==='object')return d.result;
-  // String — try parse
   let v=d.result;
   try{v=JSON.parse(v);}catch{}
-  // If still string after parse, try once more (double-encoded legacy data)
   if(typeof v==='string'){try{v=JSON.parse(v);}catch{}}
   return v;
 }
-
 async function upsSet(key,value){
   try{
-    const r=await fetch(`${UPS_URL}/set/${encodeURIComponent(key)}`,{
-      method:'POST',
-      headers:{Authorization:`Bearer ${UPS_TOKEN}`,'Content-Type':'application/json'},
-      body:JSON.stringify(value) // Single stringify — Upstash stores as JSON object
-    });
-    const d=await r.json();
-    return d.result==='OK';
+    const r=await fetch(`${UPS_URL}/set/${encodeURIComponent(key)}`,{method:'POST',headers:{Authorization:`Bearer ${UPS_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify(value)});
+    const d=await r.json();return d.result==='OK';
   }catch(e){console.error('upsSet',e);return false;}
 }
 
@@ -34,7 +25,7 @@ async function upsSet(key,value){
 async function loadDB(){
   try{
     const data=await upsGet('td:db');
-    if(data===null)return 'empty'; // key doesn't exist → first run
+    if(data===null)return 'empty';
     if(data&&(data.v||data.adminHash)){
       S.db=data;
       if(!S.db.activityLog)S.db.activityLog=[];
@@ -42,13 +33,8 @@ async function loadDB(){
       if(!S.db.files)S.db.files=[];
       return 'ok';
     }
-    // Data exists but doesn't look like our format
-    console.warn('loadDB: unexpected format',data);
-    return 'empty'; // Treat as first run
-  }catch(e){
-    console.error('loadDB error',e);
-    return 'error'; // Network/parse error — do NOT overwrite!
-  }
+    return 'empty';
+  }catch(e){console.error('loadDB error',e);return 'error';}
 }
 async function saveDB(){
   const ok=await upsSet('td:db',S.db);
@@ -64,10 +50,22 @@ function logActivity(type,name,details={}){
   if(S.db.activityLog.length>500)S.db.activityLog=S.db.activityLog.slice(0,500);
 }
 
-// Transfer manager (localStorage — survives UI refresh)
+// Transfer manager (localStorage — survives page refresh, not Upstash)
 const TM_KEY='td:transfers';
 function tmLoad(){try{return JSON.parse(localStorage.getItem(TM_KEY)||'[]');}catch{return [];}}
 function tmSave(list){localStorage.setItem(TM_KEY,JSON.stringify(list.slice(0,50)));}
-function tmAdd(id,name,size){const list=tmLoad();list.unshift({id,name,size,status:'uploading',progress:0,ts:new Date().toISOString()});tmSave(list);renderTransferPanel();}
-function tmUpdate(id,progress,status='uploading'){const list=tmLoad();const t=list.find(x=>x.id===id);if(t){t.progress=progress;t.status=status;}tmSave(list);renderTransferPanel();}
-function tmDone(id,ok=true){const list=tmLoad();const t=list.find(x=>x.id===id);if(t){t.status=ok?'done':'failed';t.progress=100;}tmSave(list);renderTransferPanel();}
+function tmAdd(id,name,size){
+  const list=tmLoad();
+  list.unshift({id,name,size,status:'uploading',progress:0,speed:0,uploaded:0,ts:new Date().toISOString()});
+  tmSave(list);renderTransferPanel();
+}
+function tmUpdate(id,progress,speed=0,uploaded=0,total=0){
+  const list=tmLoad();const t=list.find(x=>x.id===id);
+  if(t){t.progress=progress;t.speed=speed;t.uploaded=uploaded;t.total=total||t.size;}
+  tmSave(list);renderTransferPanel();
+}
+function tmDone(id,ok=true){
+  const list=tmLoad();const t=list.find(x=>x.id===id);
+  if(t){t.status=ok?'done':'failed';t.progress=ok?100:t.progress;t.speed=0;}
+  tmSave(list);renderTransferPanel();
+}
