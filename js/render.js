@@ -86,33 +86,60 @@ function syncNavBtns(){$('navBack').disabled=S.navIdx<=0;$('navFwd').disabled=S.
 function syncStatus(){const b=$('statusBar');if(!b)return;if(!S.driveId){b.innerHTML='';return;}const fc=S.db.folders.filter(f=>f.driveId===S.driveId&&f.parentId===S.folderId).length;const fi=S.db.files.filter(f=>f.driveId===S.driveId&&f.folderId===S.folderId).length;const sz=S.db.files.filter(f=>f.driveId===S.driveId&&f.folderId===S.folderId).reduce((a,f)=>a+f.size,0);b.innerHTML=`<span>${fc+fi} item${fc+fi!==1?'s':''}</span>${sz?`<span>·</span><span>${fmt(sz)}</span>`:''}`;}
 function setupDrop(el){el.addEventListener('dragover',e=>{e.preventDefault();if(!el.querySelector('.drop-ov')){const ov=document.createElement('div');ov.className='drop-ov';ov.innerHTML='<i class="fas fa-cloud-upload-alt"></i><span>Drop files to upload</span>';el.style.position='relative';el.appendChild(ov);}});el.addEventListener('dragleave',e=>{if(!el.contains(e.relatedTarget))el.querySelector('.drop-ov')?.remove();});el.addEventListener('drop',e=>{e.preventDefault();el.querySelector('.drop-ov')?.remove();if(e.dataTransfer.files.length)uploadFiles(e.dataTransfer.files);});}
 
-// Show/hide logout only — no admin crown anywhere
+// Show/hide logout + lock drive btn
 function syncAdminUI(){
   const l=$('logoutBtn');
   if(l)l.classList.toggle('hidden',!S.ses.isAdmin);
+  // Show Lock Drive btn when browsing a password-protected drive (non-admin only)
+  const lockGrp=$('lockGrp');const lockSep=$('lockSep');
+  if(lockGrp&&lockSep){
+    const drive=S.driveId?S.db.drives.find(x=>x.id===S.driveId):null;
+    const showLock=drive&&drive.passwordHash&&!S.ses.isAdmin&&S.ses.unlocked.includes(drive.id);
+    lockGrp.style.display=showLock?'flex':'none';
+    lockSep.style.display=showLock?'block':'none';
+  }
 }
 // ---- Transfer Manager Panel ----
 function renderTransferPanel(){
   const badge=$('tmBadge');const list=$('tmList');
   const transfers=tmLoad();
   const active=transfers.filter(t=>t.status==='uploading');
-  if(badge)badge.textContent=active.length>0?active.length:'';
-  badge?.classList.toggle('visible',active.length>0);
+  if(badge){badge.textContent=active.length>0?active.length:'';badge.classList.toggle('visible',active.length>0);}
   if(!list)return;
   if(!transfers.length){list.innerHTML='<div style="text-align:center;padding:1.5rem;color:var(--text3);font-size:.8rem"><i class="fas fa-inbox" style="font-size:1.5rem;display:block;margin-bottom:.5rem;opacity:.3"></i>No transfers yet</div>';return;}
   list.innerHTML=transfers.map(t=>{
     const pct=t.progress||0;
-    const ico=t.status==='done'?'fa-check-circle':'style="color:var(--danger)"'+t.status==='failed'?'fa-times-circle':'fa-spinner spin';
     const col=t.status==='done'?'var(--success)':t.status==='failed'?'var(--danger)':'var(--primary)';
     const statusIco=t.status==='done'?'fa-check-circle':t.status==='failed'?'fa-times-circle':'fa-spinner spin';
+    // Build progress info string
+    let info='';
+    if(t.status==='uploading'){
+      const upMB=t.uploaded?(t.uploaded/(1024*1024)).toFixed(1):pct+'%';
+      const totMB=t.total?(t.total/(1024*1024)).toFixed(1):(t.size?(t.size/(1024*1024)).toFixed(1):'?');
+      const speedStr=t.speed&&t.speed>0?` · ${(t.speed/(1024*1024)).toFixed(1)} MB/s`:'';
+      info=`${upMB}/${totMB} MB${speedStr}`;
+    } else {
+      info=t.status==='done'?`Done · ${fmt(t.size||0)}`:`Failed · ${fmt(t.size||0)}`;
+    }
     return `<div class="tm-item">
       <div class="tm-ico" style="color:${col}"><i class="fas ${statusIco}"></i></div>
       <div class="tm-info">
         <div class="tm-name" title="${esc(t.name)}">${esc(t.name)}</div>
-        <div class="tm-sub">${t.status==='uploading'?`${pct}%`:t.status==='done'?'Completed':'Failed'} · ${fmt(t.size||0)}</div>
+        <div class="tm-sub">${info}</div>
         ${t.status==='uploading'?`<div class="tm-prog-bg"><div class="tm-prog-fill" style="width:${pct}%"></div></div>`:''}
       </div>
-      ${t.status==='uploading'?`<button class="tm-cancel" onclick="S.cancelUpload=true;S._xhr?.abort();toast('Cancelling...','warning')" title="Cancel"><i class="fas fa-times"></i></button>`:''}
+      ${t.status==='uploading'?`<button class="tm-cancel" onclick="S.cancelUpload=true;S._xhr&&S._xhr.abort();toast('Cancelling...','warning')" title="Cancel upload"><i class="fas fa-times"></i></button>`:''}
     </div>`;
   }).join('');
+}
+
+// Lock current drive (logout from password-protected drive)
+function lockDrive(){
+  if(!S.driveId)return;
+  const d=S.db.drives.find(x=>x.id===S.driveId);
+  if(!d||!d.passwordHash)return;
+  S.ses.unlocked=S.ses.unlocked.filter(id=>id!==S.driveId);
+  saveSes();
+  goHome();
+  toast(`${d.letter}: drive locked`,'info');
 }
