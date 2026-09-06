@@ -1,6 +1,6 @@
 // TELEDRIVE — Global State
 const S = {
-  db:  { v:2, adminHash:'', drives:[], folders:[], files:[] },
+  db:  { v:2, adminHash:'', drives:[], folders:[], files:[], activityLog:[] },
   cfg: { botToken:'', chatId:'' },
   ses: { isAdmin:false, unlocked:[] },
   driveId:null, folderId:null, selectedId:null,
