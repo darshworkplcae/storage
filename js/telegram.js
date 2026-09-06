@@ -1,65 +1,82 @@
 // TELEDRIVE — Telegram Bot API
 function tgUrl(ep){return `${LOCAL_API}/bot${S.cfg.botToken}/${ep}`;}
 
+// ---- Upload Queue ----
+const _Q=[];let _Qrunning=false;
+
 function uploadChunkXhr(blob,name,onProgress){
   return new Promise((res,rej)=>{
     const fd=new FormData();fd.append('chat_id',S.cfg.chatId);fd.append('document',blob,name);
     const xhr=new XMLHttpRequest();xhr.open('POST',tgUrl('sendDocument'));xhr.timeout=0;
-    let _lastLoaded=0,_lastTime=Date.now(),_speed=0;
+    let _ll=0,_lt=Date.now(),_sp=0;
     xhr.upload.onprogress=e=>{
       if(!e.lengthComputable)return;
-      const now=Date.now();const dt=(now-_lastTime)/1000;
-      if(dt>=0.4){_speed=(e.loaded-_lastLoaded)/dt;_lastLoaded=e.loaded;_lastTime=now;}
-      if(onProgress)onProgress(e.loaded,e.total,_speed);
+      const now=Date.now();const dt=(now-_lt)/1000;
+      if(dt>=0.5){_sp=(e.loaded-_ll)/dt;_ll=e.loaded;_lt=now;}
+      if(onProgress)onProgress(e.loaded,e.total,_sp);
     };
-    xhr.onload=()=>{try{const d=JSON.parse(xhr.responseText);if(d.ok)res(d.result);else rej(new Error(d.description||'Telegram API error'));}catch(e){rej(e);}};
-    xhr.onerror=()=>rej(new Error('Network error — is laptop on? Check Tailscale Funnel'));
+    xhr.onload=()=>{try{const d=JSON.parse(xhr.responseText);if(d.ok)res(d.result);else rej(new Error(d.description||'API error'));}catch(e){rej(e);}};
+    xhr.onerror=()=>rej(new Error('Network error — check Tailscale Funnel'));
     xhr.onabort=()=>rej(new Error('Cancelled'));
     xhr.send(fd);S._xhr=xhr;
   });
 }
 
+// Add files to queue — works even while uploading
 async function uploadFiles(files){
-  if(S.uploading){toast('Upload in progress','warning');return;}
   if(!S.cfg.botToken||!S.cfg.chatId){toast('Bot not configured','error');return;}
   if(!S.driveId){toast('Open a drive first','error');return;}
-  S.uploading=true;S.cancelUpload=false;
-  const bar=$('upBar');bar.classList.remove('hidden');
-  $('upCancelBtn').onclick=()=>{S.cancelUpload=true;S._xhr?.abort();toast('Cancelling...','warning');};
-  for(const file of Array.from(files)){
-    if(S.cancelUpload)break;
-    try{await uploadOne(file);}
-    catch(e){if(e.message!=='Cancelled')toast(`Failed: ${file.name} — ${e.message}`,'error');}
+  const arr=Array.from(files);
+  arr.forEach(f=>_Q.push(f));
+  $('fileInput').value='';
+  toast(`${arr.length} file${arr.length>1?'s':''} queued (${_Q.length} total)`,'info');
+  _processQueue();
+}
+
+async function _processQueue(){
+  if(_Qrunning||_Q.length===0)return;
+  _Qrunning=true;S.uploading=true;S.cancelUpload=false;
+  $('upBar').classList.remove('hidden');
+  $('upCancelBtn').onclick=()=>{S.cancelUpload=true;if(S._xhr)S._xhr.abort();toast('Cancelling current file...','warning');};
+  while(_Q.length>0){
+    const file=_Q[0]; // peek, don't shift yet
+    try{
+      await uploadOne(file);
+      await saveDB();
+      renderExplorer();
+    }catch(e){
+      if(e.message!=='Cancelled')toast(`Failed: ${file.name} — ${e.message}`,'error');
+    }
+    _Q.shift(); // remove after done (whether ok or error)
+    S.cancelUpload=false; // reset for next file
+    // Update queue badge
+    if(_Q.length>0)toast(`${_Q.length} file${_Q.length>1?'s':''} remaining in queue`,'info');
   }
-  S.uploading=false;bar.classList.add('hidden');$('fileInput').value='';
-  await saveDB();renderExplorer();
+  _Qrunning=false;S.uploading=false;$('upBar').classList.add('hidden');
 }
 
 async function uploadOne(file){
-  const tid=uid();
-  const fid=uid();const isChunked=file.size>CHUNK_B;const totalChunks=isChunked?Math.ceil(file.size/CHUNK_B):1;const chunks=[];
+  const tid=uid();const fid=uid();
+  const isChunked=file.size>CHUNK_B;const totalChunks=isChunked?Math.ceil(file.size/CHUNK_B):1;
+  const chunks=[];let totalUploaded=0;
   $('upName').textContent=file.name;$('upStatus').textContent='Starting...';$('upPct').textContent='0%';$('upFill').style.width='0%';
   tmAdd(tid,file.name,file.size);
-  let totalUploaded=0;
   for(let i=0;i<totalChunks;i++){
     if(S.cancelUpload){tmDone(tid,false);throw new Error('Cancelled');}
     const start=i*CHUNK_B;const blob=file.slice(start,Math.min(start+CHUNK_B,file.size));
     const cname=isChunked?`${file.name}.part${String(i+1).padStart(3,'0')}of${totalChunks}`:file.name;
+    const chunkLabel=isChunked?` (Part ${i+1}/${totalChunks})`:'';
+    const queueLabel=_Q.length>1?` [${_Q.length} in queue]`:'';
     const result=await uploadChunkXhr(blob,cname,(loaded,total,speed)=>{
-      // Overall progress across all chunks
-      const overallLoaded=totalUploaded+loaded;
-      const overallPct=Math.round((overallLoaded/file.size)*100);
-      const uploadedMB=(overallLoaded/(1024*1024)).toFixed(1);
-      const totalMB=(file.size/(1024*1024)).toFixed(1);
-      const speedMBs=(speed/(1024*1024)).toFixed(1);
-      // Bottom bar
-      const chunkLabel=isChunked?` (Part ${i+1}/${totalChunks})`:'';
+      const overall=totalUploaded+loaded;
+      const pct=Math.round((overall/file.size)*100);
+      const uMB=(overall/(1024*1024)).toFixed(1);
+      const tMB=(file.size/(1024*1024)).toFixed(1);
+      const spd=speed>0?` · ${(speed/(1024*1024)).toFixed(2)} MB/s`:'';
       $('upName').textContent=file.name;
-      $('upStatus').textContent=`${uploadedMB}/${totalMB} MB${chunkLabel} · ${speedMBs} MB/s`;
-      $('upPct').textContent=overallPct+'%';
-      $('upFill').style.width=overallPct+'%';
-      // Transfer panel
-      tmUpdate(tid,overallPct,speed,overallLoaded,file.size);
+      $('upStatus').textContent=`${uMB}/${tMB} MB${chunkLabel}${spd}${queueLabel}`;
+      $('upPct').textContent=pct+'%';$('upFill').style.width=pct+'%';
+      tmUpdate(tid,pct,speed,overall,file.size);
     });
     totalUploaded+=blob.size;
     const doc=result.document||result.video||result.audio||(result.photo?result.photo[result.photo.length-1]:null);
@@ -68,7 +85,7 @@ async function uploadOne(file){
   S.db.files.push({id:fid,driveId:S.driveId,folderId:S.folderId,name:file.name,size:file.size,type:file.type||'application/octet-stream',date:new Date().toISOString(),isChunked,chunks});
   logActivity('upload',file.name,{size:file.size});
   tmDone(tid,true);
-  toast(`✓ ${file.name} uploaded`,'success');
+  toast(`✓ ${file.name}`,'success');
 }
 
 async function tgFileUrl(fileId){
@@ -80,8 +97,8 @@ async function downloadFile(f){
   if(!f.isChunked){const url=await tgFileUrl(f.chunks[0].fileId);if(url){dlLink(url,f.name);toast(`↓ ${f.name}`,'success');return;}toast('Could not get URL','error');return;}
   toast(`Merging ${f.chunks.length} chunks...`,'info');
   try{const blobs=[];for(const c of f.chunks){const u=await tgFileUrl(c.fileId);if(!u)throw new Error('No URL');const r=await fetch(u);blobs.push(await r.blob());}
-    const url=URL.createObjectURL(new Blob(blobs,{type:f.type}));dlLink(url,f.name);setTimeout(()=>URL.revokeObjectURL(url),8000);toast(`↓ ${f.name}`,'success');
-  }catch(e){toast(`Download failed: ${e.message}`,'error');}
+  const url=URL.createObjectURL(new Blob(blobs,{type:f.type}));dlLink(url,f.name);setTimeout(()=>URL.revokeObjectURL(url),8000);toast(`↓ ${f.name}`,'success');}
+  catch(e){toast(`Download failed: ${e.message}`,'error');}
 }
 async function deleteFile(f){
   logActivity('delete_file',f.name,{driveId:f.driveId,size:f.size});
@@ -106,8 +123,8 @@ async function openMedia(f){
   document.body.appendChild(ov);
   const body=ov.querySelector('#mediaBody');
   if(url){if(isImg){const img=document.createElement('img');img.className='media-img';img.src=url;let z=false;img.onclick=()=>{z=!z;img.style.transform=z?'scale(2.2)':'';};body.innerHTML='';body.appendChild(img);}
-    else if(isVid){const v=document.createElement('video');v.className='media-vid';v.controls=v.autoplay=true;v.src=url;body.innerHTML='';body.appendChild(v);}
-    else if(isAud){body.innerHTML=`<div style="text-align:center;padding:2rem"><i class="fas fa-music" style="font-size:4rem;color:var(--primary);display:block;margin-bottom:1.5rem"></i><audio controls style="width:80%;max-width:400px" src="${url}"></audio></div>`;}}
+  else if(isVid){const v=document.createElement('video');v.className='media-vid';v.controls=v.autoplay=true;v.src=url;body.innerHTML='';body.appendChild(v);}
+  else if(isAud){body.innerHTML=`<div style="text-align:center;padding:2rem"><i class="fas fa-music" style="font-size:4rem;color:var(--primary);display:block;margin-bottom:1.5rem"></i><audio controls style="width:80%;max-width:400px" src="${url}"></audio></div>`;}}
   ov.querySelector('#mdlCls').onclick=()=>ov.remove();ov.querySelector('#mdlDl').onclick=()=>downloadFile(f);
   ov.addEventListener('keydown',e=>{if(e.key==='Escape')ov.remove();});ov.tabIndex=0;ov.focus();
 }
