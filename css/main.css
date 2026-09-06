@@ -298,3 +298,5 @@ html,body{font-family:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-se
 /* Lock Drive button */
 .lock-btn{color:var(--warning) !important;border-color:rgba(255,214,10,.3) !important;background:rgba(255,214,10,.08) !important;}
 .lock-btn:hover{background:rgba(255,214,10,.18) !important;}
+/* Drag and Drop */
+.drag-over{background:rgba(10,132,255,.08) !important;border:2px dashed var(--primary) !important;border-radius:var(--rmd);}
