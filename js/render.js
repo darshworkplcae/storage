@@ -8,10 +8,13 @@ function renderHome(){
     const locked=d.passwordHash&&!S.ses.unlocked.includes(d.id)&&!S.ses.isAdmin;
     const sz=S.db.files.filter(f=>f.driveId===d.id).reduce((a,f)=>a+f.size,0);
     const fc=S.db.files.filter(f=>f.driveId===d.id).length;
-    const pct=Math.min(100,(sz/(200*1024*1024*1024))*100).toFixed(1);
+    // capacity: if drive has a set capacity (in GB) use that, else show Unlimited
+    const capBytes = d.capacity ? d.capacity*1024*1024*1024 : 200*1024*1024*1024;
+    const pct=Math.min(100,(sz/capBytes)*100).toFixed(1);
+    const capLabel = d.capacity ? `${d.capacity} GB` : 'Unlimited';
     const card=document.createElement('div');card.className=`drive-card${locked?' locked':''}`;
     card.style.setProperty('--dc',d.color||'var(--primary)');
-    card.innerHTML=`${locked?'<i class="fas fa-lock drive-lock"></i>':''}<div class="drive-icon"><i class="fas fa-hard-drive"></i><div class="drive-letter">${esc(d.letter)}</div></div><div class="drive-info"><div class="drive-name">${esc(d.name)} (${esc(d.letter)}:)</div><div class="drive-bar-bg"><div class="drive-bar-fill" style="width:${pct}%"></div></div><div class="drive-space">${fmt(sz)} used · ${fc} file${fc!==1?'s':''} · Unlimited</div></div>`;
+    card.innerHTML=`${locked?'<i class="fas fa-lock drive-lock"></i>':''}<div class="drive-icon"><i class="fas fa-hard-drive"></i><div class="drive-letter">${esc(d.letter)}</div></div><div class="drive-info"><div class="drive-name">${esc(d.name)} (${esc(d.letter)}:)</div><div class="drive-bar-bg"><div class="drive-bar-fill" style="width:${pct}%"></div></div><div class="drive-space">${fmt(sz)} used · ${fc} file${fc!==1?'s':''} · ${capLabel}</div></div>`;
     card.onclick=async()=>{if(locked)await promptPass(d);else nav(d.id);};
     card.oncontextmenu=e=>{e.preventDefault();if(!S.ses.isAdmin)return;showCtx(e,[{i:'fa-folder-open',l:'Open',a:()=>nav(d.id)},{sep:true},{i:'fa-edit',l:'Edit Drive',a:()=>editDriveDialog(d)},{sep:true},{i:'fa-trash',l:'Delete Drive',danger:true,a:()=>confirmDeleteDrive(d)}]);};
     grid.appendChild(card);
@@ -27,12 +30,7 @@ function renderSidebar(){
   tree.appendChild(mkTreeNode('fa-hard-drive',`${d.letter}: ${d.name}`,!S.folderId,()=>nav(S.driveId,null)));
   renderTreeLevel(tree,null,1);
 }
-function renderTreeLevel(container,parentId,depth){
-  S.db.folders.filter(f=>f.driveId===S.driveId&&f.parentId===parentId).forEach(f=>{
-    const n=mkTreeNode('fa-folder',f.name,S.folderId===f.id,()=>nav(S.driveId,f.id));
-    n.style.paddingLeft=(0.5+depth*0.75)+'rem';container.appendChild(n);renderTreeLevel(container,f.id,depth+1);
-  });
-}
+function renderTreeLevel(container,parentId,depth){S.db.folders.filter(f=>f.driveId===S.driveId&&f.parentId===parentId).forEach(f=>{const n=mkTreeNode('fa-folder',f.name,S.folderId===f.id,()=>nav(S.driveId,f.id));n.style.paddingLeft=(0.5+depth*0.75)+'rem';container.appendChild(n);renderTreeLevel(container,f.id,depth+1);});}
 function mkTreeNode(icon,label,active,onClick){const n=document.createElement('div');n.className=`tree-node${active?' active':''}`;n.innerHTML=`<i class="fas ${icon}"></i><span class="tree-label">${esc(label)}</span>`;n.onclick=onClick;return n;}
 
 function renderAddrBar(){
@@ -86,10 +84,10 @@ function showFolderCtx(e,f){showCtx(e,[{i:'fa-folder-open',l:'Open',a:()=>nav(S.
 
 function syncNavBtns(){$('navBack').disabled=S.navIdx<=0;$('navFwd').disabled=S.navIdx>=S.navHist.length-1;$('navUp').disabled=!S.driveId;}
 function syncStatus(){const b=$('statusBar');if(!b)return;if(!S.driveId){b.innerHTML='';return;}const fc=S.db.folders.filter(f=>f.driveId===S.driveId&&f.parentId===S.folderId).length;const fi=S.db.files.filter(f=>f.driveId===S.driveId&&f.folderId===S.folderId).length;const sz=S.db.files.filter(f=>f.driveId===S.driveId&&f.folderId===S.folderId).reduce((a,f)=>a+f.size,0);b.innerHTML=`<span>${fc+fi} item${fc+fi!==1?'s':''}</span>${sz?`<span>·</span><span>${fmt(sz)}</span>`:''}`;}
+function setupDrop(el){el.addEventListener('dragover',e=>{e.preventDefault();if(!el.querySelector('.drop-ov')){const ov=document.createElement('div');ov.className='drop-ov';ov.innerHTML='<i class="fas fa-cloud-upload-alt"></i><span>Drop files to upload</span>';el.style.position='relative';el.appendChild(ov);}});el.addEventListener('dragleave',e=>{if(!el.contains(e.relatedTarget))el.querySelector('.drop-ov')?.remove();});el.addEventListener('drop',e=>{e.preventDefault();el.querySelector('.drop-ov')?.remove();if(e.dataTransfer.files.length)uploadFiles(e.dataTransfer.files);});}
 
-function setupDrop(el){
-  el.addEventListener('dragover',e=>{e.preventDefault();if(!el.querySelector('.drop-ov')){const ov=document.createElement('div');ov.className='drop-ov';ov.innerHTML='<i class="fas fa-cloud-upload-alt"></i><span>Drop files to upload</span>';el.style.position='relative';el.appendChild(ov);}});
-  el.addEventListener('dragleave',e=>{if(!el.contains(e.relatedTarget))el.querySelector('.drop-ov')?.remove();});
-  el.addEventListener('drop',e=>{e.preventDefault();el.querySelector('.drop-ov')?.remove();if(e.dataTransfer.files.length)uploadFiles(e.dataTransfer.files);});
+// Show/hide logout only — no admin crown anywhere
+function syncAdminUI(){
+  const l=$('logoutBtn');
+  if(l)l.classList.toggle('hidden',!S.ses.isAdmin);
 }
-function syncAdminUI(){const l=$('logoutBtn');if(l)l.classList.toggle('hidden',!S.ses.isAdmin);}
