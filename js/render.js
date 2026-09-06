@@ -91,3 +91,28 @@ function syncAdminUI(){
   const l=$('logoutBtn');
   if(l)l.classList.toggle('hidden',!S.ses.isAdmin);
 }
+// ---- Transfer Manager Panel ----
+function renderTransferPanel(){
+  const badge=$('tmBadge');const list=$('tmList');
+  const transfers=tmLoad();
+  const active=transfers.filter(t=>t.status==='uploading');
+  if(badge)badge.textContent=active.length>0?active.length:'';
+  badge?.classList.toggle('visible',active.length>0);
+  if(!list)return;
+  if(!transfers.length){list.innerHTML='<div style="text-align:center;padding:1.5rem;color:var(--text3);font-size:.8rem"><i class="fas fa-inbox" style="font-size:1.5rem;display:block;margin-bottom:.5rem;opacity:.3"></i>No transfers yet</div>';return;}
+  list.innerHTML=transfers.map(t=>{
+    const pct=t.progress||0;
+    const ico=t.status==='done'?'fa-check-circle':'style="color:var(--danger)"'+t.status==='failed'?'fa-times-circle':'fa-spinner spin';
+    const col=t.status==='done'?'var(--success)':t.status==='failed'?'var(--danger)':'var(--primary)';
+    const statusIco=t.status==='done'?'fa-check-circle':t.status==='failed'?'fa-times-circle':'fa-spinner spin';
+    return `<div class="tm-item">
+      <div class="tm-ico" style="color:${col}"><i class="fas ${statusIco}"></i></div>
+      <div class="tm-info">
+        <div class="tm-name" title="${esc(t.name)}">${esc(t.name)}</div>
+        <div class="tm-sub">${t.status==='uploading'?`${pct}%`:t.status==='done'?'Completed':'Failed'} · ${fmt(t.size||0)}</div>
+        ${t.status==='uploading'?`<div class="tm-prog-bg"><div class="tm-prog-fill" style="width:${pct}%"></div></div>`:''}
+      </div>
+      ${t.status==='uploading'?`<button class="tm-cancel" onclick="S.cancelUpload=true;S._xhr?.abort();toast('Cancelling...','warning')" title="Cancel"><i class="fas fa-times"></i></button>`:''}
+    </div>`;
+  }).join('');
+}
