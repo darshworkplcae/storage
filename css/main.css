@@ -295,3 +295,6 @@ html,body{font-family:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-se
 .tm-prog-fill{height:100%;background:var(--primary);border-radius:2px;transition:width .3s;}
 .tm-cancel{width:22px;height:22px;border-radius:50%;border:1px solid var(--border2);background:transparent;cursor:pointer;color:var(--text3);display:flex;align-items:center;justify-content:center;font-size:.6rem;flex-shrink:0;transition:.15s;}
 .tm-cancel:hover{background:var(--danger);color:#fff;border-color:var(--danger);}
+/* Lock Drive button */
+.lock-btn{color:var(--warning) !important;border-color:rgba(255,214,10,.3) !important;background:rgba(255,214,10,.08) !important;}
+.lock-btn:hover{background:rgba(255,214,10,.18) !important;}
