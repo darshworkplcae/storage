@@ -1,4 +1,4 @@
-// TELEDRIVE — Telegram Bot API (via your laptop, 2GB support)
+// TELEDRIVE — Telegram Bot API
 function tgUrl(ep){return `${LOCAL_API}/bot${S.cfg.botToken}/${ep}`;}
 
 function uploadChunk(blob,name,onProgress){
@@ -7,13 +7,13 @@ function uploadChunk(blob,name,onProgress){
     const xhr=new XMLHttpRequest();xhr.open('POST',tgUrl('sendDocument'));xhr.timeout=0;
     xhr.upload.onprogress=e=>{if(e.lengthComputable&&onProgress)onProgress(e.loaded,e.total);};
     xhr.onload=()=>{try{const d=JSON.parse(xhr.responseText);if(d.ok)res(d.result);else rej(new Error(d.description||'Telegram error'));}catch(e){rej(e);}};
-    xhr.onerror=()=>rej(new Error('Network error — is your laptop online?'));
+    xhr.onerror=()=>rej(new Error('Network error — is your laptop on and funnel running?'));
     xhr.send(fd);S._xhr=xhr;
   });
 }
 
 async function uploadFiles(files){
-  if(S.uploading){toast('Upload already in progress','warning');return;}
+  if(S.uploading){toast('Upload in progress','warning');return;}
   if(!S.cfg.botToken||!S.cfg.chatId){toast('Bot not configured','error');return;}
   if(!S.driveId){toast('Open a drive first','error');return;}
   S.uploading=true;S.cancelUpload=false;
@@ -33,14 +33,14 @@ async function uploadOne(file){
     const cname=isChunked?`${file.name}.part${String(i+1).padStart(3,'0')}of${totalChunks}`:file.name;
     const result=await uploadChunk(blob,cname,(loaded,total)=>{
       const cp=loaded/total,overall=((i+cp)/totalChunks)*100;
-      const mb=(loaded/(1024*1024)).toFixed(1),tmb=(total/(1024*1024)).toFixed(1);
-      setUI(file.name,`${isChunked?`Chunk ${i+1}/${totalChunks} · `:''}${mb}/${tmb} MB`,Math.round(overall));
+      setUI(file.name,`${isChunked?`Chunk ${i+1}/${totalChunks} · `:''}${(loaded/(1024*1024)).toFixed(1)}/${(total/(1024*1024)).toFixed(1)} MB`,Math.round(overall));
     });
     const doc=result.document||result.video||result.audio||(result.photo?result.photo[result.photo.length-1]:null);
     chunks.push({idx:i,msgId:result.message_id,fileId:doc?.file_id||'',size:blob.size});
   }
   S.db.files.push({id:fid,driveId:S.driveId,folderId:S.folderId,name:file.name,size:file.size,type:file.type||'application/octet-stream',date:new Date().toISOString(),isChunked,chunks});
-  toast(`${file.name} uploaded${isChunked?` (${totalChunks} chunks)`:''}`,'success');
+  logActivity('upload', file.name, {size:file.size});
+  toast(`${file.name} uploaded`,'success');
 }
 
 async function tgFileUrl(fileId){
@@ -50,16 +50,22 @@ async function tgDelete(msgId){
   try{const r=await fetch(tgUrl(`deleteMessage?chat_id=${S.cfg.chatId}&message_id=${msgId}`));const d=await r.json();return d.ok;}catch{return false;}
 }
 async function downloadFile(f){
+  logActivity('download', f.name, {driveId:f.driveId, size:f.size});
   if(!f.isChunked){const url=await tgFileUrl(f.chunks[0].fileId);if(url){dlLink(url,f.name);return;}toast('Could not get download URL','error');return;}
   toast(`Merging ${f.chunks.length} chunks...`,'info');
   try{
     const blobs=[];
-    for(let i=0;i<f.chunks.length;i++){toast(`Fetching chunk ${i+1}/${f.chunks.length}...`,'info');const url=await tgFileUrl(f.chunks[i].fileId);if(!url)throw new Error(`No URL for chunk ${i+1}`);const r=await fetch(url);if(!r.ok)throw new Error(`Chunk ${i+1} failed`);blobs.push(await r.blob());}
+    for(let i=0;i<f.chunks.length;i++){const url=await tgFileUrl(f.chunks[i].fileId);if(!url)throw new Error(`No URL chunk ${i+1}`);const r=await fetch(url);blobs.push(await r.blob());}
     const merged=new Blob(blobs,{type:f.type});const url=URL.createObjectURL(merged);dlLink(url,f.name);setTimeout(()=>URL.revokeObjectURL(url),8000);toast(`${f.name} downloaded`,'success');
   }catch(e){toast(`Download failed: ${e.message}`,'error');}
 }
-async function deleteFile(f){for(const c of f.chunks)await tgDelete(c.msgId);S.db.files=S.db.files.filter(x=>x.id!==f.id);await saveDB();renderExplorer();toast(`${f.name} deleted`,'success');}
+async function deleteFile(f){
+  logActivity('delete_file', f.name, {driveId:f.driveId, size:f.size});
+  for(const c of f.chunks)await tgDelete(c.msgId);
+  S.db.files=S.db.files.filter(x=>x.id!==f.id);await saveDB();renderExplorer();toast(`${f.name} deleted`,'success');
+}
 async function deleteFolder(folder){
+  logActivity('delete_folder', folder.name, {driveId:folder.driveId});
   const ids=getAllFolderIds(folder.id);const toDelete=S.db.files.filter(f=>ids.includes(f.folderId));
   for(const f of toDelete)for(const c of f.chunks)await tgDelete(c.msgId);
   S.db.files=S.db.files.filter(f=>!ids.includes(f.folderId));S.db.folders=S.db.folders.filter(f=>!ids.includes(f.id));
@@ -70,15 +76,16 @@ function getAllFolderIds(fid){const ids=[fid];S.db.folders.filter(f=>f.parentId=
 async function openMedia(f){
   const t=f.type||'';const isImg=t.startsWith('image/');const isVid=t.startsWith('video/');const isAud=t.startsWith('audio/');
   if(!isImg&&!isVid&&!isAud){toast('No preview for this file type','info');return;}
+  logActivity('view', f.name, {driveId:f.driveId, size:f.size});
   let url=null;if(!f.isChunked)url=await tgFileUrl(f.chunks[0].fileId);
   const ov=document.createElement('div');ov.className='media-ov';
-  ov.innerHTML=`<div class="media-hd"><div class="media-hd-title">${esc(f.name)}</div><div class="media-hd-acts"><button class="icon-btn" id="mdlDl" title="Download"><i class="fas fa-download"></i></button><button class="icon-btn" id="mdlCls" title="Close"><i class="fas fa-times"></i></button></div></div><div class="media-body" id="mediaBody">${url?'':`<div style="color:var(--text2)"><i class="fas fa-spinner spin" style="font-size:2rem;color:var(--primary)"></i></div>`}</div><div class="media-ft"><span>${esc(f.name)}</span><span>·</span><span>${fmt(f.size)}</span>${f.isChunked?'<span style="color:var(--warning)">⚡ Chunked</span>':''}</div>`;
+  ov.innerHTML=`<div class="media-hd"><div class="media-hd-title">${esc(f.name)}</div><div class="media-hd-acts"><button class="icon-btn" id="mdlDl"><i class="fas fa-download"></i></button><button class="icon-btn" id="mdlCls"><i class="fas fa-times"></i></button></div></div><div class="media-body" id="mediaBody">${url?'':`<i class="fas fa-spinner spin" style="font-size:2rem;color:var(--primary)"></i>`}</div><div class="media-ft"><span>${esc(f.name)}</span><span>·</span><span>${fmt(f.size)}</span>${f.isChunked?'<span style="color:var(--warning)">⚡ Chunked</span>':''}</div>`;
   document.body.appendChild(ov);
   const body=ov.querySelector('#mediaBody');
   if(url){
-    if(isImg){const img=document.createElement('img');img.className='media-img';img.src=url;img.alt=f.name;let z=false;img.onclick=()=>{z=!z;img.classList.toggle('zoomed',z);img.style.transform=z?'scale(2.2)':'';};body.innerHTML='';body.appendChild(img);}
+    if(isImg){const img=document.createElement('img');img.className='media-img';img.src=url;let z=false;img.onclick=()=>{z=!z;img.classList.toggle('zoomed',z);img.style.transform=z?'scale(2.2)':'';};body.innerHTML='';body.appendChild(img);}
     else if(isVid){const v=document.createElement('video');v.className='media-vid';v.controls=v.autoplay=true;v.src=url;body.innerHTML='';body.appendChild(v);}
-    else if(isAud){body.innerHTML=`<div style="text-align:center;padding:2rem"><i class="fas fa-music" style="font-size:4rem;color:var(--primary);margin-bottom:1.5rem;display:block"></i><audio controls style="width:80%;max-width:400px" src="${url}"></audio></div>`;}
+    else if(isAud){body.innerHTML=`<div style="text-align:center;padding:2rem"><i class="fas fa-music" style="font-size:4rem;color:var(--primary);display:block;margin-bottom:1.5rem"></i><audio controls style="width:80%;max-width:400px" src="${url}"></audio></div>`;}
   }
   ov.querySelector('#mdlCls').onclick=()=>ov.remove();ov.querySelector('#mdlDl').onclick=()=>downloadFile(f);
   ov.addEventListener('keydown',e=>{if(e.key==='Escape')ov.remove();});ov.tabIndex=0;ov.focus();
