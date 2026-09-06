@@ -23,8 +23,22 @@
       </div>
       <div class="top-spacer"></div>
       <div class="top-acts">
+        <!-- Transfer manager button -->
+        <div class="tm-wrap" id="tmWrap">
+          <button class="icon-btn tm-btn" id="tmToggle" title="Transfer Manager">
+            <i class="fas fa-exchange-alt"></i>
+            <span class="tm-badge" id="tmBadge"></span>
+          </button>
+          <div class="tm-panel" id="tmPanel">
+            <div class="tm-panel-hd">
+              <span><i class="fas fa-exchange-alt"></i> Transfers</span>
+              <button class="btn-sm" id="tmClearBtn">Clear</button>
+            </div>
+            <div class="tm-list" id="tmList"></div>
+          </div>
+        </div>
         <!-- Logout only shown when admin is logged in -->
-        <button class="icon-btn hidden" id="logoutBtn" title="Logout Admin" style="color:var(--danger);border-color:rgba(255,69,58,.3);background:rgba(255,69,58,.1)"><i class="fas fa-sign-out-alt"></i></button>
+        <button class="icon-btn hidden" id="logoutBtn" title="Logout Admin" style="color:var(--danger)"><i class="fas fa-sign-out-alt"></i></button>
       </div>
     </header>
     <div class="app-body">
@@ -62,9 +76,7 @@
             <div class="tb-grp" style="margin-left:auto;">
               <button class="tb-btn" id="viewToggleBtn"><i class="fas fa-th"></i></button>
               <select class="tb-sel" id="sortSel">
-                <option value="name">Name</option>
-                <option value="date">Date</option>
-                <option value="size">Size</option>
+                <option value="name">Name</option><option value="date">Date</option><option value="size">Size</option>
               </select>
             </div>
           </div>
@@ -82,7 +94,7 @@
           <div class="status-bar" id="statusBar"><span>0 items</span></div>
         </div>
       </div>
-      <!-- Admin Screen (access via #/admin) -->
+      <!-- Admin Screen -->
       <div id="adminScreen" class="hidden"></div>
     </div>
   </div>
@@ -90,10 +102,7 @@
   <div class="toast-wrap" id="toastWrap"></div>
   <div id="upBar" class="upload-bar hidden">
     <div class="up-icon"><i class="fas fa-arrow-up"></i></div>
-    <div class="up-info">
-      <div class="up-name" id="upName">Uploading...</div>
-      <div class="up-status" id="upStatus">Preparing...</div>
-    </div>
+    <div class="up-info"><div class="up-name" id="upName">Uploading...</div><div class="up-status" id="upStatus">Preparing...</div></div>
     <div class="up-bar-bg"><div class="up-bar-fill" id="upFill" style="width:0%"></div></div>
     <div class="up-pct" id="upPct">0%</div>
     <button class="icon-btn" id="upCancelBtn" style="flex-shrink:0"><i class="fas fa-times"></i></button>
