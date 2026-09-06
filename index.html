@@ -13,20 +13,26 @@
   <div class="noise"></div>
   <div id="app">
     <header class="top-bar">
-      <div class="top-logo" onclick="goHome()"><div class="top-logo-icon"><i class="fas fa-hard-drive"></i></div><span class="top-logo-text">TeleDrive</span></div>
-      <div class="top-search"><i class="fas fa-search"></i><input type="text" id="globalSearch" placeholder="Search files and folders..."></div>
+      <div class="top-logo" onclick="goHome()">
+        <div class="top-logo-icon"><i class="fas fa-hard-drive"></i></div>
+        <span class="top-logo-text">TeleDrive</span>
+      </div>
+      <div class="top-search">
+        <i class="fas fa-search"></i>
+        <input type="text" id="globalSearch" placeholder="Search files and folders...">
+      </div>
       <div class="top-spacer"></div>
       <div class="top-acts">
-        <button class="icon-btn hidden" id="logoutBtn" title="Logout Admin"><i class="fas fa-sign-out-alt"></i></button>
-        <button class="icon-btn" id="backupBtn" title="Backup &amp; Restore"><i class="fas fa-database"></i></button>
-        <button class="icon-btn admin-btn admin-badge" id="adminBtn" title="Admin Panel"><i class="fas fa-crown"></i></button>
+        <!-- Logout only shown when admin is logged in -->
+        <button class="icon-btn hidden" id="logoutBtn" title="Logout Admin" style="color:var(--danger);border-color:rgba(255,69,58,.3);background:rgba(255,69,58,.1)"><i class="fas fa-sign-out-alt"></i></button>
       </div>
     </header>
     <div class="app-body">
+      <!-- Home Screen -->
       <div id="homeScreen" class="hidden">
         <div id="loadingOverlay" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);z-index:10">
           <i class="fas fa-spinner spin" style="font-size:2.5rem;color:var(--primary);margin-bottom:1rem"></i>
-          <div style="font-size:1rem;font-weight:500;color:var(--text)">Loading TeleDrive...</div>
+          <div style="font-size:1rem;font-weight:500">Loading TeleDrive...</div>
           <div style="font-size:.8rem;margin-top:.5rem;color:var(--text2)">Connecting to Upstash &amp; Telegram</div>
         </div>
         <div class="home-hero"><i class="fas fa-desktop" style="font-size:1.5rem;color:var(--primary)"></i><div class="home-title">This PC</div></div>
@@ -34,6 +40,7 @@
         <div class="section-label">Drives</div>
         <div class="drives-grid" id="drivesGrid"></div>
       </div>
+      <!-- Explorer View -->
       <div id="explorerView" class="hidden">
         <div class="ex-sidebar">
           <div class="ex-sidebar-hd">Quick Access</div>
@@ -42,9 +49,9 @@
         <div class="ex-main">
           <div class="ex-toolbar">
             <div class="tb-grp">
-              <button class="tb-btn" id="navBack" title="Back"><i class="fas fa-chevron-left"></i></button>
-              <button class="tb-btn" id="navFwd" title="Forward"><i class="fas fa-chevron-right"></i></button>
-              <button class="tb-btn" id="navUp" title="Up"><i class="fas fa-arrow-up"></i></button>
+              <button class="tb-btn" id="navBack"><i class="fas fa-chevron-left"></i></button>
+              <button class="tb-btn" id="navFwd"><i class="fas fa-chevron-right"></i></button>
+              <button class="tb-btn" id="navUp"><i class="fas fa-arrow-up"></i></button>
             </div>
             <div class="tb-sep"></div>
             <div class="tb-grp">
@@ -53,11 +60,15 @@
             </div>
             <div class="tb-sep"></div>
             <div class="tb-grp" style="margin-left:auto;">
-              <button class="tb-btn" id="viewToggleBtn" title="Toggle view"><i class="fas fa-th"></i></button>
-              <select class="tb-sel" id="sortSel"><option value="name">Name</option><option value="date">Date</option><option value="size">Size</option></select>
+              <button class="tb-btn" id="viewToggleBtn"><i class="fas fa-th"></i></button>
+              <select class="tb-sel" id="sortSel">
+                <option value="name">Name</option>
+                <option value="date">Date</option>
+                <option value="size">Size</option>
+              </select>
             </div>
           </div>
-          <div class="filter-bar" id="filterBar">
+          <div class="filter-bar">
             <button class="filter-btn active" data-f="all">All</button>
             <button class="filter-btn" data-f="image">&#128247; Images</button>
             <button class="filter-btn" data-f="video">&#127916; Videos</button>
@@ -71,16 +82,21 @@
           <div class="status-bar" id="statusBar"><span>0 items</span></div>
         </div>
       </div>
+      <!-- Admin Screen (access via #/admin) -->
+      <div id="adminScreen" class="hidden"></div>
     </div>
   </div>
   <input type="file" id="fileInput" multiple hidden>
   <div class="toast-wrap" id="toastWrap"></div>
   <div id="upBar" class="upload-bar hidden">
     <div class="up-icon"><i class="fas fa-arrow-up"></i></div>
-    <div class="up-info"><div class="up-name" id="upName">Uploading...</div><div class="up-status" id="upStatus">Preparing...</div></div>
+    <div class="up-info">
+      <div class="up-name" id="upName">Uploading...</div>
+      <div class="up-status" id="upStatus">Preparing...</div>
+    </div>
     <div class="up-bar-bg"><div class="up-bar-fill" id="upFill" style="width:0%"></div></div>
     <div class="up-pct" id="upPct">0%</div>
-    <button class="icon-btn" id="upCancelBtn" title="Cancel" style="flex-shrink:0"><i class="fas fa-times"></i></button>
+    <button class="icon-btn" id="upCancelBtn" style="flex-shrink:0"><i class="fas fa-times"></i></button>
   </div>
   <script src="js/config.js"></script>
   <script src="js/state.js"></script>
