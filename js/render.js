@@ -83,8 +83,8 @@ function renderFilesPage(driveId, folderId){
 
   const drive=drives.find(d=>d.id===driveId);
   const search=($('globalSearch')?.value||'').toLowerCase();
-  let folders=(db.folders||[]).filter(f=>f.driveId===driveId&&f.parentId===(folderId||null));
-  let files=(db.files||[]).filter(f=>f.driveId===driveId&&f.folderId===(folderId||null));
+  let folders=(db.folders||[]).filter(f=>f.driveId===driveId&&f.parentId===(folderId||null)&&!f.trashed);
+  let files=(db.files||[]).filter(f=>f.driveId===driveId&&f.folderId===(folderId||null)&&!f.trashed);
 if(S.filter && S.filter!=='all'){
   folders = [];
   files = files.filter(function(f){
@@ -195,15 +195,16 @@ function driveCard(d){
 
 // ─── Folder / File cards ───────────────────────────────
 function folderCard(f){
-  const isAdmin=S.ses.role==='admin';
   return `<div class="fg-card" ondblclick="navTo('files','${esc(f.driveId)}','${esc(f.id)}')" onclick="selectCard(this)">
     <div class="fg-icon xl"><i class="fas fa-folder" style="color:#ff9f0a"></i></div>
     <div class="fg-name">${esc(f.name)}</div>
-    <div class="fg-acts">${isAdmin?`<button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')"><i class="fas fa-trash-alt"></i></button>`:''}</div>
+    <div class="fg-acts">
+      <button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete folder"><i class="fas fa-trash-alt"></i></button>
+    </div>
   </div>`;
 }
 function fileCard(f){
-  const cfg=ftCfg(f.name,f.mimeType),isAdmin=S.ses.role==='admin';
+  const cfg=ftCfg(f.name,f.mimeType);
   const isMedia=['image','video','audio'].includes(cfg.cat);
   const isImage=cfg.cat==='image';
   const isVideo=cfg.cat==='video';
@@ -227,32 +228,31 @@ function fileCard(f){
     <div class="fg-name" title="${esc(f.name)}">${esc(f.name)}</div>
     <div class="fg-meta">${fmt(f.size||0)}</div>
     <div class="fg-acts">
-      <button class="icon-btn xs ${f.starred?'starred':''}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ff9f0a':''}"></i></button>
+      <button class="icon-btn xs star-btn ${f.starred?'starred':''}" data-star-id="${esc(f.id)}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ffcc00':''}"></i></button>
       ${isMedia?`<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>`:''}
       <button class="icon-btn xs" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')"><i class="fas fa-download"></i></button>
-      ${isAdmin?`<button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')"><i class="fas fa-trash-alt"></i></button>`:''}
+      <button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
     </div>
   </div>`;
 }
 function folderRow(f){
-  const isAdmin=S.ses.role==='admin';
   return `<div class="fl-row" ondblclick="navTo('files','${esc(f.driveId)}','${esc(f.id)}')">
     <span><i class="fas fa-folder" style="color:#ff9f0a;margin-right:.4rem"></i>${esc(f.name)}</span>
     <span>—</span><span>${fmtDate(f.date)}</span>
-    <span>${isAdmin?`<button class="icon-btn xs danger" onclick="confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')"><i class="fas fa-trash-alt"></i></button>`:''}</span>
+    <span><button class="icon-btn xs danger" onclick="confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button></span>
   </div>`;
 }
 function fileRow(f){
-  const cfg=ftCfg(f.name,f.mimeType),isAdmin=S.ses.role==='admin';
+  const cfg=ftCfg(f.name,f.mimeType);
   const isMedia=['image','video','audio'].includes(cfg.cat);
   return `<div class="fl-row" ondblclick="${isMedia?`openMedia('${esc(f.id)}')`:`downloadFile('${esc(f.id)}')`}">
     <span><i class="fas ${cfg.icon}" style="color:${cfg.col};margin-right:.4rem"></i>${esc(f.name)}</span>
     <span>${fmt(f.size||0)}</span><span>${fmtDate(f.date)}</span>
     <span style="display:flex;gap:.2rem">
-      <button class="icon-btn xs ${f.starred?'starred':''}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ff9f0a':''}"></i></button>
+      <button class="icon-btn xs star-btn ${f.starred?'starred':''}" data-star-id="${esc(f.id)}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ffcc00':''}"></i></button>
       ${isMedia?`<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>`:''}
       <button class="icon-btn xs" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')"><i class="fas fa-download"></i></button>
-      ${isAdmin?`<button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')"><i class="fas fa-trash-alt"></i></button>`:''}
+      <button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
     </span>
   </div>`;
 }
@@ -356,22 +356,90 @@ function renderTM(){
 
 function renderStarredPage() {
   const pc = $('pageContent'); if(!pc) return;
-  const starred = (S.db&&S.db.files||[]).filter(f => !!f.starred);
+  const starred = (S.db&&S.db.files||[]).filter(f => !!f.starred && !f.trashed);
   pc.innerHTML = `<div class="inner-page">
-    <div class="page-hd"><h2><i class="fas fa-star" style="color:#ff9f0a"></i> Starred Files</h2><p>Quick access to your favorite files</p></div>
-    ${starred.length ? `<div class="file-grid md">${starred.map(f => fileCard(f)).join('')}</div>` : `<div class="empty-state"><div class="empty-icon"><i class="fas fa-star" style="color:#ff9f0a"></i></div><h3>No starred files</h3><p>Click the star icon on any file to bookmark it here.</p></div>`}
+    <div class="page-hd"><h2><i class="fas fa-star" style="color:#ffcc00"></i> Starred Files</h2><p>Quick access to your favorite files</p></div>
+    ${starred.length ? `<div class="file-grid md">${starred.map(f => fileCard(f)).join('')}</div>` : `<div class="empty-state"><div class="empty-icon"><i class="fas fa-star" style="color:#ffcc00"></i></div><h3>No starred files</h3><p>Click the star icon on any file to bookmark it here.</p></div>`}
+  </div>`;
+}
+
+function renderTrashPage() {
+  const pc = $('pageContent'); if(!pc) return;
+  const trashed = (S.db&&S.db.files||[]).filter(f => !!f.trashed);
+  const isAdmin = (S.ses && S.ses.role === 'admin');
+
+  pc.innerHTML = `<div class="inner-page">
+    <div class="page-hd" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem">
+      <div>
+        <h2><i class="fas fa-trash-can" style="color:var(--danger)"></i> Recycle Bin</h2>
+        <p>${isAdmin ? 'Manage deleted files. Approve restore requests or purge permanently.' : 'Files moved here can be restored upon admin approval.'}</p>
+      </div>
+    </div>
+    ${trashed.length ? `
+      <div class="trash-list" style="display:flex;flex-direction:column;gap:.7rem;margin-top:1rem">
+        ${trashed.map(f => {
+          const cfg = ftCfg(f.name, f.mimeType);
+          const isReq = !!f.restoreRequested;
+          return `
+            <div class="trash-item" style="display:flex;align-items:center;gap:.9rem;padding:.9rem 1.2rem;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px">
+              <div style="font-size:1.5rem;color:${cfg.col};width:34px;text-align:center"><i class="fas ${cfg.icon}"></i></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-weight:600;font-size:.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(f.name)}</div>
+                <div style="font-size:.76rem;color:var(--text3);margin-top:2px">
+                  ${fmt(f.size||0)} · Deleted ${fmtDate(f.trashedAt)} by ${esc(f.trashedBy||'user')}
+                  ${isReq ? `<span class="badge-pending" style="margin-left:8px;background:rgba(255,204,0,0.18);color:#ffcc00;padding:2px 8px;border-radius:6px;font-weight:600;font-size:.72rem"><i class="fas fa-clock"></i> Restore Requested</span>` : ''}
+                </div>
+              </div>
+              <div style="display:flex;gap:.5rem">
+                ${isAdmin ? `
+                  <button class="btn-primary sm" onclick="adminApproveRestore('${esc(f.id)}')"><i class="fas fa-rotate-left"></i> Restore</button>
+                  <button class="btn-ghost sm danger" onclick="adminPermanentDelete('${esc(f.id)}','${esc(f.name)}')"><i class="fas fa-trash"></i> Delete Permanently</button>
+                ` : isReq ? `
+                  <button class="btn-ghost sm" disabled style="opacity:.6"><i class="fas fa-hourglass-half"></i> Pending Admin</button>
+                ` : `
+                  <button class="btn-primary sm" onclick="requestRestoreFile('${esc(f.id)}')"><i class="fas fa-rotate-left"></i> Request Restore</button>
+                `}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    ` : `
+      <div class="empty-state">
+        <div class="empty-icon"><i class="fas fa-trash-can" style="color:var(--text3)"></i></div>
+        <h3>Recycle Bin is empty</h3>
+        <p>No deleted files.</p>
+      </div>
+    `}
   </div>`;
 }
 
 async function toggleStar(fileId) {
+  var f = (S.db&&S.db.files||[]).find(x => x.id === fileId);
+  if (!f) return;
+
+  // Instant optimistic update: instantly turns star golden yellow in UI
+  f.starred = !f.starred;
+  var btns = document.querySelectorAll('[data-star-id="' + fileId + '"]');
+  btns.forEach(function(btn){
+    btn.classList.toggle('starred', f.starred);
+    var ico = btn.querySelector('i');
+    if (ico) ico.style.color = f.starred ? '#ffcc00' : '';
+  });
+  toast(f.starred ? 'Starred!' : 'Removed from Starred', 'info');
+
+  if (_curPage === 'starred') renderStarredPage();
+
+  // Sync in background
   var r = await apiToggleStar(fileId);
-  if (r.ok) {
-    var f = (S.db&&S.db.files||[]).find(x => x.id === fileId);
-    if (f) f.starred = r.starred;
-    toast(r.starred ? 'Added to Starred' : 'Removed from Starred', 'info');
-    if (_curPage === 'starred') renderStarredPage();
-    else if (_driveId) renderFilesPage(_driveId, _folderId);
-  } else {
-    toast(r.error || 'Failed to update star', 'error');
+  if (!r.ok && r.error) {
+    // Revert if error
+    f.starred = !f.starred;
+    btns.forEach(function(btn){
+      btn.classList.toggle('starred', f.starred);
+      var ico = btn.querySelector('i');
+      if (ico) ico.style.color = f.starred ? '#ffcc00' : '';
+    });
+    toast(r.error, 'error');
   }
 }

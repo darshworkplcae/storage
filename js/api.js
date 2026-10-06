@@ -107,83 +107,114 @@ function uploadToGoogle(uploadUrl, file, onProgress, cancelSignal) {
   });
 }
 // ─── Resumable Chunk Upload with Pause / Resume Support ───────────────────────
-// Chunk size: 16MB (must be a multiple of 256KB for Google Drive)
-var CHUNK_SIZE = 16 * 1024 * 1024;
-var DIRECT_LIMIT = 25 * 1024 * 1024;
-
+// ─── Resumable Single-Stream Fast Upload with Pause / Resume Support ────────
 async function uploadToGoogleResumable(uploadUrl, file, onProgress, cancelSignal) {
-  // If file is moderate (< 25MB), upload in 1 fast stream directly for maximum line speed:
-  if (file.size <= DIRECT_LIMIT) {
-    return uploadToGoogle(uploadUrl, file, onProgress, cancelSignal);
-  }
-
-  var startOffset = 0;
   var total = file.size;
+  var startOffset = 0;
 
   while (startOffset < total) {
     if (cancelSignal && cancelSignal.cancelled) throw new Error('Cancelled');
 
-    // Handle Pause
     if (cancelSignal && cancelSignal.paused) {
-      await new Promise(function(resolve) {
-        cancelSignal.resumeResolve = resolve;
-      });
+      await new Promise(function(resolve) { cancelSignal.resumeResolve = resolve; });
       if (cancelSignal && cancelSignal.cancelled) throw new Error('Cancelled');
+      // Query Google for uploaded bytes
+      startOffset = await queryGoogleUploadedBytes(uploadUrl, total);
+      if (startOffset >= total) {
+        onProgress(total, total, 0);
+        return { googleFileId: null };
+      }
     }
 
-    var endOffset = Math.min(startOffset + CHUNK_SIZE, total);
-    var chunk = file.slice(startOffset, endOffset);
+    var chunk = (startOffset === 0) ? file : file.slice(startOffset);
+    var endOffset = total - 1;
 
-    var res = await uploadChunk(uploadUrl, chunk, startOffset, endOffset - 1, total, file.type, cancelSignal);
+    var res = await new Promise(function(resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      if (cancelSignal) cancelSignal.xhr = xhr;
+      xhr.open('PUT', uploadUrl);
+      if (startOffset > 0) {
+        xhr.setRequestHeader('Content-Range', 'bytes ' + startOffset + '-' + endOffset + '/' + total);
+      }
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
 
-    if (res.status === 200 || res.status === 201) {
+      var startTime = Date.now();
+      xhr.upload.onprogress = function(e) {
+        if (cancelSignal && cancelSignal.cancelled) { xhr.abort(); return; }
+        if (e.lengthComputable) {
+          var curLoaded = startOffset + e.loaded;
+          var elapsed = (Date.now() - startTime) / 1000 || 0.001;
+          var speed = e.loaded / elapsed;
+          onProgress(curLoaded, total, speed);
+        }
+      };
+
+      xhr.onload = function() {
+        if (xhr.status === 200 || xhr.status === 201) {
+          var id = null;
+          try { id = JSON.parse(xhr.responseText).id; } catch(e){}
+          resolve({ ok: true, googleFileId: id });
+        } else if (xhr.status === 308) {
+          var range = xhr.getResponseHeader('Range');
+          var next = startOffset;
+          if (range) {
+            var m = range.match(/bytes=0-(\d+)/);
+            if (m) next = parseInt(m[1], 10) + 1;
+          }
+          resolve({ ok: false, status: 308, nextOffset: next });
+        } else {
+          var msg = 'Upload failed HTTP ' + xhr.status;
+          try { var j = JSON.parse(xhr.responseText); if (j.error && j.error.message) msg += ': ' + j.error.message; } catch(e){}
+          reject(new Error(msg));
+        }
+      };
+
+      xhr.onerror = function() { reject(new Error('Network error — upload interrupted')); };
+      xhr.onabort = function() {
+        if (cancelSignal && cancelSignal.paused) resolve({ paused: true });
+        else reject(new Error('Cancelled'));
+      };
+
+      xhr.send(chunk);
+    });
+
+    if (res.ok) {
       onProgress(total, total, 0);
       return { googleFileId: res.googleFileId };
+    } else if (res.paused) {
+      continue;
     } else if (res.status === 308) {
-      // Chunk uploaded successfully, advance offset
-      startOffset = res.nextOffset || endOffset;
-      onProgress(startOffset, total, 0);
+      startOffset = res.nextOffset;
     } else {
-      throw new Error(res.error || ('Upload chunk failed HTTP ' + res.status));
+      break;
     }
   }
 
   return { googleFileId: null };
 }
 
-function uploadChunk(uploadUrl, chunk, start, end, total, mimeType, cancelSignal) {
-  return new Promise(function(resolve, reject) {
+function queryGoogleUploadedBytes(uploadUrl, total) {
+  return new Promise(function(resolve) {
     var xhr = new XMLHttpRequest();
     xhr.open('PUT', uploadUrl);
-    xhr.setRequestHeader('Content-Range', 'bytes ' + start + '-' + end + '/' + total);
-    xhr.setRequestHeader('Content-Type', mimeType || 'application/octet-stream');
-
+    xhr.setRequestHeader('Content-Range', 'bytes */' + total);
     xhr.onload = function() {
-      if (xhr.status === 200 || xhr.status === 201) {
-        var id = null;
-        try { id = JSON.parse(xhr.responseText).id; } catch(e){}
-        resolve({ status: xhr.status, googleFileId: id });
-      } else if (xhr.status === 308) {
+      if (xhr.status === 308) {
         var range = xhr.getResponseHeader('Range');
-        var next = end + 1;
         if (range) {
           var m = range.match(/bytes=0-(\d+)/);
-          if (m) next = parseInt(m[1], 10) + 1;
+          if (m) return resolve(parseInt(m[1], 10) + 1);
         }
-        resolve({ status: 308, nextOffset: next });
-      } else {
-        resolve({ status: xhr.status, error: xhr.responseText });
       }
+      resolve(0);
     };
-
-    xhr.onerror = function() {
-      reject(new Error('Network error during chunk upload'));
-    };
-    xhr.onabort = function() { reject(new Error('Cancelled')); };
-
-    xhr.send(chunk);
+    xhr.onerror = function() { resolve(0); };
+    xhr.send();
   });
 }
 
 function apiToggleStar(fileId) { return apiFetch('files/star/' + encodeURIComponent(fileId), { method: 'POST' }); }
 function apiRenameDrive(driveId, newName) { return apiFetch('drives/rename/' + encodeURIComponent(driveId), { method: 'POST', body: JSON.stringify({ name: newName }) }); }
+function apiRequestRestore(fileId) { return apiFetch('files/trash/request-restore/' + encodeURIComponent(fileId), { method: 'POST' }); }
+function apiApproveRestore(fileId) { return apiFetch('files/trash/approve-restore/' + encodeURIComponent(fileId), { method: 'POST' }); }
+function apiPermanentDelete(fileId) { return apiFetch('files/trash/permanent-delete/' + encodeURIComponent(fileId), { method: 'DELETE' }); }

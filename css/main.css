@@ -689,20 +689,73 @@ body {
 }
 
 /* Buttons with 3D Depth */
+/* 3D Tactile Buttons */
 .btn-primary {
-  background: linear-gradient(135deg, #4e86f5, #357af0) !important;
+  background: linear-gradient(135deg, #4e86f5, #2f6deb) !important;
   border-radius: 10px !important;
-  box-shadow: 0 4px 14px rgba(78, 134, 245, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 4px 0 #1b49ab, 0 6px 16px rgba(78, 134, 245, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
   font-weight: 600 !important;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: all 0.15s ease !important;
+  border: none !important;
 }
 .btn-primary:hover {
   transform: translateY(-2px) !important;
-  box-shadow: 0 6px 22px rgba(78, 134, 245, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
-  filter: brightness(1.1);
+  box-shadow: 0 6px 0 #1b49ab, 0 10px 24px rgba(78, 134, 245, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+  filter: brightness(1.08);
 }
 .btn-primary:active {
-  transform: translateY(0) !important;
+  transform: translateY(3px) !important;
+  box-shadow: 0 1px 0 #1b49ab, 0 3px 8px rgba(0, 0, 0, 0.3) !important;
+}
+
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  font-weight: 600 !important;
+  transition: all 0.15s ease !important;
+}
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.4), 0 6px 16px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+  color: #fff !important;
+}
+.btn-ghost:active {
+  transform: translateY(2px) !important;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.4) !important;
+}
+
+.icon-btn {
+  border-radius: 9px !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35) !important;
+  transition: all 0.15s ease !important;
+}
+.icon-btn:hover {
+  transform: translateY(-2px) !important;
+  background: rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+}
+.icon-btn:active {
+  transform: translateY(2px) !important;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35) !important;
+}
+.icon-btn.danger:hover {
+  background: rgba(255, 69, 58, 0.2) !important;
+  border-color: rgba(255, 69, 58, 0.4) !important;
+  box-shadow: 0 5px 0 rgba(180, 20, 20, 0.5), 0 4px 14px rgba(255, 69, 58, 0.3) !important;
+}
+
+.star-btn i {
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), color 0.15s ease;
+}
+.star-btn.starred i {
+  color: #ffcc00 !important;
+  filter: drop-shadow(0 0 6px rgba(255, 204, 0, 0.6));
+  transform: scale(1.18);
 }
 
 /* Quota Card Modern 3D Glow */

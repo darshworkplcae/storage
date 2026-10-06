@@ -250,29 +250,95 @@ async function openMedia(fileLocalId) {
 }
 
 function confirmDeleteFile(fileLocalId, name) {
-  if(!confirm('Delete "'+name+'"? This removes it from Google Drive permanently.'))return;
-  var f=(S.db&&S.db.files||[]).find(function(x){return x.id===fileLocalId;});if(!f)return;
-  apiDeleteFile(f.googleFileId,f.driveId).then(async function(r){
-    if(r.ok){toast('Deleted','success');S.db=await apiFetchDB();renderSidebarStorage();renderFilesPage(_driveId,_folderId);}
-    else toast(r.error||'Delete failed','error');
+  if(!confirm('Move "' + name + '" to Recycle Bin?')) return;
+  var f = (S.db && S.db.files || []).find(function(x){ return x.id === fileLocalId; });
+  if(!f) return;
+  apiDeleteFile(f.googleFileId || f.id).then(async function(r){
+    if(r.ok){
+      toast('Moved to Recycle Bin', 'info');
+      f.trashed = true;
+      S.db = await apiFetchDB();
+      renderSidebarStorage();
+      renderFilesPage(_driveId, _folderId);
+    } else {
+      toast(r.error || 'Delete failed', 'error');
+    }
   });
 }
 
 function confirmDeleteFolder(folderId, name) {
-  if(!confirm('Delete folder "'+name+'" and ALL its contents?'))return;
+  if(!confirm('Move folder "' + name + '" to Recycle Bin?')) return;
   apiDeleteFolder(folderId).then(async function(r){
-    if(r.ok){toast('Folder deleted','success');S.db=await apiFetchDB();renderFilesPage(_driveId,_folderId);}
-    else toast(r.error||'Delete failed','error');
+    if(r.ok){
+      toast('Folder moved to Recycle Bin', 'info');
+      S.db = await apiFetchDB();
+      renderFilesPage(_driveId, _folderId);
+    } else {
+      toast(r.error || 'Delete failed', 'error');
+    }
   });
 }
 
 function showNewFolderDialog() {
-  if(!S.ses||!S.ses.token){toast('Sign in required','warning');return;}
-  if(!_driveId){toast('Open a drive first','warning');return;}
-  var name=prompt('Folder name:');
-  if(!name||!name.trim())return;
-  apiCreateFolder({driveId:_driveId,parentFolderId:_folderId||null,name:name.trim()}).then(async function(r){
-    if(r.ok){toast('Folder created','success');S.db=await apiFetchDB();renderFilesPage(_driveId,_folderId);}
-    else toast(r.error||'Failed to create folder','error');
+  var isOpenTarget = (_driveId && S.db && S.db.openDriveId && _driveId === S.db.openDriveId);
+  var isAuth = (S.ses && S.ses.token);
+  if (!isAuth && !isOpenTarget) {
+    toast('Sign in required or open the public trip drive', 'warning');
+    return;
+  }
+  if (!_driveId) {
+    if (S.db && S.db.openDriveId) _driveId = S.db.openDriveId;
+    else { toast('Open a drive first', 'warning'); return; }
+  }
+  var name = prompt('Enter folder name:');
+  if (!name || !name.trim()) return;
+  toast('Creating folder…', 'info');
+  apiCreateFolder({ driveId: _driveId, parentFolderId: _folderId || null, name: name.trim() }).then(async function(r){
+    if(r.ok){
+      toast('Folder created!', 'success');
+      S.db = await apiFetchDB();
+      renderFilesPage(_driveId, _folderId);
+    } else {
+      toast(r.error || 'Failed to create folder', 'error');
+    }
   });
+}
+
+async function requestRestoreFile(fileId) {
+  toast('Requesting restore…', 'info');
+  var r = await apiRequestRestore(fileId);
+  if (r.ok) {
+    toast('Restore requested! Admin can now approve it.', 'success');
+    S.db = await apiFetchDB();
+    if (typeof renderTrashPage === 'function') renderTrashPage();
+  } else {
+    toast(r.error || 'Failed to request restore', 'error');
+  }
+}
+
+async function adminApproveRestore(fileId) {
+  toast('Restoring file…', 'info');
+  var r = await apiApproveRestore(fileId);
+  if (r.ok) {
+    toast('File restored!', 'success');
+    S.db = await apiFetchDB();
+    if (typeof renderTrashPage === 'function') renderTrashPage();
+    renderSidebarStorage();
+  } else {
+    toast(r.error || 'Failed to restore file', 'error');
+  }
+}
+
+async function adminPermanentDelete(fileId, name) {
+  if (!confirm('PERMANENTLY DELETE "' + name + '"? This will delete it from Google Drive forever.')) return;
+  toast('Permanently deleting…', 'info');
+  var r = await apiPermanentDelete(fileId);
+  if (r.ok) {
+    toast('Permanently deleted from Google Drive', 'success');
+    S.db = await apiFetchDB();
+    if (typeof renderTrashPage === 'function') renderTrashPage();
+    renderSidebarStorage();
+  } else {
+    toast(r.error || 'Failed to delete permanently', 'error');
+  }
 }

@@ -32,7 +32,7 @@ function navTo(page, driveId, folderId) {
   else if (page==='settings') { if(S.ses.role==='admin') renderSettingsPage(); else navTo('files'); }
   else if (page==='apikeys')  { if(S.ses.role==='admin') renderApiKeysPage(); else navTo('files'); }
   else if (page==='starred')  renderStarredPage();
-  else if (page==='trash')    renderSimplePage('Recycle Bin','fa-trash-can','var(--danger)','Recycle bin is empty.');
+  else if (page==='trash')    renderTrashPage();
   else renderFilesPage(null, null);
 }
 
