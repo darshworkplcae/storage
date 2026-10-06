@@ -24,6 +24,10 @@ function apiUserLogin(u, p)       { return apiFetch('auth/user-login',  { method
 function apiDriveQuota()          { return apiFetch('drives/quota'); }
 function apiDisconnect(id)        { return apiFetch('drives/'+id,       { method:'DELETE' }); }
 function apiDownload(gId, dId)    { return apiFetch('download/'+gId+'?driveId='+dId); }
+function getFileDownloadUrl(gId, dId, inline) {
+  var tok = (S.ses && S.ses.token) ? S.ses.token : '';
+  return API + '/download/' + encodeURIComponent(gId) + '?driveId=' + encodeURIComponent(dId||'') + (inline ? '&inline=1' : '') + (tok ? '&token=' + encodeURIComponent(tok) : '');
+}
 function apiDeleteFile(gId, dId)  { return apiFetch('files/'+gId+'?driveId='+dId, { method:'DELETE' }); }
 function apiCreateFolder(body)    { return apiFetch('folders',          { method:'POST', body:JSON.stringify(body) }); }
 function apiDeleteFolder(id)      { return apiFetch('folders/'+id,      { method:'DELETE' }); }

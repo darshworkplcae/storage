@@ -48,10 +48,11 @@ async function uploadOne(file) {
 
     // Step 3: Save metadata to our DB
     if(upStatus) upStatus.textContent = 'Saving…';
+    var activeDriveId = _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : null);
     await apiUploadComplete({
       fileLocalId: init.fileLocalId,
       googleFileId: result.googleFileId,
-      driveId: _driveId,
+      driveId: activeDriveId,
       folderId: _folderId || null,
       name: file.name,
       size: file.size,
@@ -81,21 +82,27 @@ async function downloadFile(fileLocalId) {
   if(!S.ses||!S.ses.token){toast('Sign in required','warning');return;}
   var f=(S.db&&S.db.files||[]).find(function(x){return x.id===fileLocalId;});
   if(!f)return;
-  toast('Getting download link…','info');
-  var r=await apiDownload(f.googleFileId,f.driveId);
-  if(r.url){var a=document.createElement('a');a.href=r.url;a.download=f.name;a.target='_blank';document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);},1000);}
-  else toast(r.error||'Download failed','error');
+  var driveId = f.driveId || _driveId || (S.db&&S.db.drives&&S.db.drives[0]?S.db.drives[0].id:'');
+  var dlUrl = getFileDownloadUrl(f.googleFileId, driveId, false);
+  var a = document.createElement('a');
+  a.href = dlUrl;
+  a.download = f.name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ document.body.removeChild(a); }, 1000);
+  toast('Starting download for ' + f.name, 'info');
 }
 
 async function openMedia(fileLocalId) {
   var f=(S.db&&S.db.files||[]).find(function(x){return x.id===fileLocalId;});
   if(!f||!S.ses||!S.ses.token){downloadFile(fileLocalId);return;}
-  var r=await apiDownload(f.googleFileId,f.driveId);
-  if(!r.url){toast(r.error||'Cannot preview','error');return;}
-  var cfg=ftCfg(f.name,f.mimeType);
-  var ov=document.createElement('div');ov.className='media-ov';
-  ov.innerHTML='<div class="media-hd"><div class="media-title"><i class="fas '+cfg.icon+'" style="color:'+cfg.col+'"></i> '+esc(f.name)+'</div><div style="display:flex;gap:.4rem"><a href="'+r.url+'" download="'+esc(f.name)+'" class="btn-ghost sm"><i class="fas fa-download"></i></a><button class="icon-btn" onclick="this.closest(\'.media-ov\').remove()"><i class="fas fa-times"></i></button></div></div><div class="media-body">'+(cfg.cat==='image'?'<img class="media-img" src="'+r.url+'" alt="'+esc(f.name)+'">':cfg.cat==='video'?'<video class="media-vid" src="'+r.url+'" controls autoplay></video>':cfg.cat==='audio'?'<audio src="'+r.url+'" controls autoplay style="width:80%;max-width:500px"></audio>':'<div style="text-align:center;padding:2rem"><i class="fas fa-file" style="font-size:3rem;color:var(--text2)"></i><p>Preview not available</p><a href="'+r.url+'" class="btn-primary" target="_blank">Open</a></div>')+'</div>';
-  ov.addEventListener('click',function(e){if(e.target===ov)ov.remove();});
+  var driveId = f.driveId || _driveId || (S.db&&S.db.drives&&S.db.drives[0]?S.db.drives[0].id:'');
+  var mediaUrl = getFileDownloadUrl(f.googleFileId, driveId, true);
+  var dlUrl = getFileDownloadUrl(f.googleFileId, driveId, false);
+  var cfg = ftCfg(f.name, f.mimeType);
+  var ov = document.createElement('div'); ov.className = 'media-ov';
+  ov.innerHTML = '<div class="media-hd"><div class="media-title"><i class="fas '+cfg.icon+'" style="color:'+cfg.col+'"></i> '+esc(f.name)+'</div><div style="display:flex;gap:.5rem"><a href="'+dlUrl+'" download="'+esc(f.name)+'" class="btn-primary sm"><i class="fas fa-download"></i> Download</a><button class="icon-btn" onclick="this.closest(\'.media-ov\').remove()"><i class="fas fa-times"></i></button></div></div><div class="media-body">'+(cfg.cat==='image'?'<img class="media-img" src="'+mediaUrl+'" alt="'+esc(f.name)+'">':cfg.cat==='video'?'<video class="media-vid" src="'+mediaUrl+'" controls autoplay playsinline></video>':cfg.cat==='audio'?'<audio src="'+mediaUrl+'" controls autoplay style="width:80%;max-width:500px"></audio>':'<div style="text-align:center;padding:2rem"><i class="fas fa-file" style="font-size:3rem;color:var(--text2)"></i><p style="margin:1rem 0">Preview not available for this file type</p><a href="'+dlUrl+'" class="btn-primary"><i class="fas fa-download"></i> Download File</a></div>')+'</div>';
+  ov.addEventListener('click', function(e){ if(e.target===ov) ov.remove(); });
   document.body.appendChild(ov);
 }
 
