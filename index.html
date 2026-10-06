@@ -65,8 +65,8 @@
       <div class="sb-nav-item" data-page="trash" onclick="navTo('trash')"><i class="fas fa-trash-can"></i><span>Recycle Bin</span></div>
       <div class="sb-divider"></div>
       <div class="sb-nav-item" data-page="activity" onclick="navTo('activity')"><i class="fas fa-list-ul"></i><span>Activity Log</span></div>
-      <div class="sb-nav-item" data-page="settings" onclick="navTo('settings')"><i class="fas fa-gear"></i><span>Setting</span></div>
-      <div class="sb-nav-item" data-page="apikeys" onclick="navTo('apikeys')"><i class="fas fa-key"></i><span>API Keys</span></div>
+      <div class="sb-nav-item admin-only" data-page="settings" onclick="navTo('settings')"><i class="fas fa-gear"></i><span>Setting</span></div>
+      <div class="sb-nav-item admin-only" data-page="apikeys" onclick="navTo('apikeys')"><i class="fas fa-key"></i><span>API Keys</span></div>
     </nav>
 
     <div class="sb-storage" id="sbStorage">
@@ -75,7 +75,7 @@
       <div class="sb-quota-txt" id="sbQuotaTxt"><span>—</span><span>—</span></div>
     </div>
 
-    <button class="sb-logout" id="sbLogout" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Log Out</button>
+    <button class="sb-logout hidden" id="sbLogout" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Log Out</button>
   </aside>
 
   <!-- ─── Main Area ─── -->
@@ -95,7 +95,7 @@
           <button class="vsz active" data-sz="md" onclick="setGridSize('md')">MD</button>
           <button class="vsz" data-sz="lg" onclick="setGridSize('lg')">LG</button>
         </div>
-        <button class="btn-primary sm hidden" id="uploadBtn"><i class="fas fa-upload"></i> Upload</button>
+        <div class="upload-group"><button class="btn-primary sm hidden" id="uploadBtn"><i class="fas fa-upload"></i> Upload</button><button class="btn-ghost sm hidden icon-btn" id="folderUpBtn" title="Upload Folder"><i class="fas fa-folder-arrow-up"></i></button></div>
         <button class="btn-ghost sm hidden" id="newFolderBtn"><i class="fas fa-folder-plus"></i> New Folder</button>
         <button class="btn-ghost sm hidden" id="syncBtn"><i class="fas fa-rotate"></i> Sync</button>
         <div class="tb-divider"></div>
@@ -140,7 +140,7 @@
 </div>
 
 <div class="toast-wrap" id="toastWrap"></div>
-<input type="file" id="fileInput" multiple hidden>
+<input type="file" id="fileInput" multiple hidden><input type="file" id="folderInput" multiple hidden webkitdirectory>
 
 <script src="js/config.js"></script>
 <script src="js/state.js"></script>

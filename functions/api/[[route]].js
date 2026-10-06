@@ -52,6 +52,7 @@ export async function onRequest({request,env}){
     if(p==='drives/quota'&&m==='GET')return hQ(request,env);
     if(p.startsWith('drives/')&&m==='DELETE')return hDD(request,env,p.replace('drives/',''));
     if(p==='upload/init'&&m==='POST')return hUI(request,env);
+    if(p==='upload/chunk'&&m==='PUT')return hUChunk(request,env);
     if(p==='upload/complete'&&m==='POST')return hUC(request,env);
     if(p.startsWith('download/')&&m==='GET')return hDL(request,env,p.replace('download/',''));
     if(p.startsWith('files/')&&m==='DELETE')return hDF(request,env,p.replace('files/',''));
