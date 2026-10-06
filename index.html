@@ -9,7 +9,7 @@
 </head>
 <body>
 
-<!-- Auth Gate -->
+<!-- ═══ LOGIN PAGE (shown only when navigating to #/login) ═══ -->
 <div id="authGate" class="auth-gate hidden">
   <div class="auth-bg-blobs"><div class="abl a1"></div><div class="abl a2"></div></div>
   <div class="auth-card">
@@ -33,32 +33,29 @@
   </div>
 </div>
 
-<!-- Main App (hidden until logged in OR public browse) -->
-<div id="appShell" class="app-shell hidden">
+<!-- ═══ MAIN APP SHELL (always visible) ═══ -->
+<div id="appShell" class="app-shell">
 
   <!-- ─── Sidebar ─── -->
   <aside class="sidebar">
-    <!-- Logo -->
     <div class="sb-logo" onclick="navTo('files')">
       <div class="sb-logo-icon"><i class="fas fa-hard-drive"></i></div>
       <span class="sb-logo-txt">TeleDrive</span>
     </div>
 
-    <!-- User Profile -->
     <div class="sb-profile" id="sbProfile">
       <div class="sb-avatar" id="sbAvatar">?</div>
       <div class="sb-pinfo">
         <div class="sb-pname" id="sbName">Guest</div>
-        <div class="sb-pemail" id="sbRole">Not signed in</div>
+        <div class="sb-pemail" id="sbRole">Browse only</div>
       </div>
-      <button class="icon-btn xs" id="sbMenuBtn" onclick="toggleSbMenu()"><i class="fas fa-ellipsis-v"></i></button>
+      <button class="icon-btn xs" onclick="toggleSbMenu()"><i class="fas fa-ellipsis-v"></i></button>
       <div class="sb-pmenu hidden" id="sbMenu">
         <div class="pmenu-item" onclick="navTo('settings')"><i class="fas fa-gear"></i> Settings</div>
         <div class="pmenu-item danger" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
       </div>
     </div>
 
-    <!-- Nav -->
     <nav class="sb-nav">
       <div class="sb-nav-item" data-page="files" onclick="navTo('files')"><i class="fas fa-folder-open"></i><span>All Files</span></div>
       <div class="sb-nav-item" data-page="quota" onclick="navTo('quota')"><i class="fas fa-chart-pie"></i><span>Quota Tracker</span></div>
@@ -71,25 +68,20 @@
       <div class="sb-nav-item" data-page="apikeys" onclick="navTo('apikeys')"><i class="fas fa-key"></i><span>API Keys</span></div>
     </nav>
 
-    <!-- Storage Stats -->
     <div class="sb-storage" id="sbStorage">
       <div class="sb-storage-rows" id="sbStorageRows"></div>
       <div class="sb-quota-bar"><div class="sb-quota-fill" id="sbQuotaFill"></div></div>
-      <div class="sb-quota-txt" id="sbQuotaTxt">Loading…</div>
+      <div class="sb-quota-txt" id="sbQuotaTxt"><span>—</span><span>—</span></div>
     </div>
 
-    <!-- Logout -->
-    <button class="sb-logout" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Log Out</button>
+    <button class="sb-logout" id="sbLogout" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Log Out</button>
   </aside>
 
   <!-- ─── Main Area ─── -->
   <div class="main-area">
-
-    <!-- Top Bar -->
     <header class="topbar">
       <div class="topbar-left">
-        <!-- Breadcrumb / page title injected here -->
-        <div id="breadcrumb" class="breadcrumb"></div>
+        <div id="breadcrumb" class="breadcrumb"><span class="bc-item active">All Files</span></div>
       </div>
       <div class="topbar-search">
         <i class="fas fa-magnifying-glass"></i>
@@ -102,11 +94,10 @@
           <button class="vsz active" data-sz="md" onclick="setGridSize('md')">MD</button>
           <button class="vsz" data-sz="lg" onclick="setGridSize('lg')">LG</button>
         </div>
-        <button class="btn-primary sm" id="uploadBtn"><i class="fas fa-upload"></i> Upload</button>
-        <button class="btn-ghost sm" id="newFolderBtn"><i class="fas fa-folder-plus"></i> New Folder</button>
-        <button class="btn-ghost sm" id="syncBtn" title="Sync from Drive"><i class="fas fa-rotate"></i> Sync</button>
+        <button class="btn-primary sm hidden" id="uploadBtn"><i class="fas fa-upload"></i> Upload</button>
+        <button class="btn-ghost sm hidden" id="newFolderBtn"><i class="fas fa-folder-plus"></i> New Folder</button>
+        <button class="btn-ghost sm hidden" id="syncBtn"><i class="fas fa-rotate"></i> Sync</button>
         <div class="tb-divider"></div>
-        <!-- Transfer indicator -->
         <div class="tm-btn-wrap">
           <button class="icon-btn" id="tmBtn" title="Transfers">
             <i class="fas fa-arrow-right-arrow-left"></i>
@@ -117,18 +108,19 @@
             <div id="tmList" class="tm-list"></div>
           </div>
         </div>
-        <button class="icon-btn" title="Notifications"><i class="fas fa-bell"></i></button>
-        <!-- Admin shield if admin -->
-        <button class="icon-btn hidden" id="adminQuickBtn" onclick="navTo('settings')" title="Admin"><i class="fas fa-shield-halved" style="color:var(--primary)"></i></button>
+        <button class="icon-btn hidden" id="adminQuickBtn" onclick="navTo('settings')" title="Admin Panel">
+          <i class="fas fa-shield-halved" style="color:var(--primary)"></i>
+        </button>
+        <button class="btn-ghost xs" id="signinBtn">Sign In</button>
       </div>
     </header>
 
-    <!-- Page Content -->
+    <!-- Loading splash (replaced on init) -->
     <div class="page-content" id="pageContent">
-      <div class="loading-full"><i class="fas fa-spinner fa-spin"></i></div>
+      <div class="loading-full"><i class="fas fa-spinner fa-spin"></i><span>Loading TeleDrive…</span></div>
     </div>
 
-    <!-- Upload bar -->
+    <!-- Upload progress bar -->
     <div class="up-bar hidden" id="upBar">
       <div class="up-inner">
         <i class="fas fa-cloud-arrow-up up-ico"></i>
@@ -140,15 +132,13 @@
           <div class="up-track"><div class="up-fill" id="upFill"></div></div>
           <span class="up-pct" id="upPct">0%</span>
         </div>
-        <button class="icon-btn danger" id="upCancelBtn" title="Cancel"><i class="fas fa-times"></i></button>
+        <button class="icon-btn" id="upCancelBtn"><i class="fas fa-times"></i></button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Toast -->
 <div class="toast-wrap" id="toastWrap"></div>
-<!-- Hidden file input -->
 <input type="file" id="fileInput" multiple hidden>
 
 <script src="js/config.js"></script>

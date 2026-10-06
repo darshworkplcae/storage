@@ -62,6 +62,14 @@ a{color:var(--primary);text-decoration:none;}
 /* ═══════════════ APP SHELL ═══════════════ */
 .app-shell{display:flex;height:100vh;overflow:hidden;}
 
+/* Login overlay (modal over the app) */
+.login-overlay{
+  position:fixed;inset:0;z-index:800;
+  background:rgba(12,13,20,.85);backdrop-filter:blur(12px);
+  display:flex;align-items:center;justify-content:center;
+}
+.login-overlay .auth-card{box-shadow:0 20px 60px rgba(0,0,0,.8);}
+
 /* ═══════════════ SIDEBAR ═══════════════ */
 .sidebar{
   width:230px;flex-shrink:0;
