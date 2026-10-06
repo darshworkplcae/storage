@@ -83,7 +83,8 @@
 ═══════════════════════════════════════════════════════════ -->
 <div id="appShell" class="app-shell" style="display:none">
 
-  <aside class="sidebar">
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeMobileSidebar()"></div>
+  <aside class="sidebar" id="appSidebar">
     <div class="sb-logo" onclick="navTo('files')">
       <div class="sb-logo-icon"><i class="fas fa-hard-drive"></i></div>
       <span class="sb-logo-txt">TeleDrive</span>
@@ -128,6 +129,7 @@
   <div class="main-area">
     <header class="topbar">
       <div class="topbar-left">
+        <button class="icon-btn mobile-menu-btn" id="mobileMenuBtn" onclick="toggleMobileSidebar()" title="Toggle Menu"><i class="fas fa-bars"></i></button>
         <div id="breadcrumb" class="breadcrumb"><span class="bc-item active">All Files</span></div>
       </div>
       <div class="topbar-search">
@@ -165,6 +167,30 @@
 
     <div class="page-content" id="pageContent">
       <div class="loading-full"><i class="fas fa-spinner fa-spin"></i><span>Loading…</span></div>
+    </div>
+
+    <!-- Multi-Select Floating Bar -->
+    <div class="multi-select-bar hidden" id="multiSelectBar">
+      <div class="ms-left">
+        <span class="ms-count-badge"><i class="fas fa-check-circle"></i> <span id="msCount">0</span> selected</span>
+      </div>
+      <div class="ms-actions">
+        <button class="btn-ghost sm" onclick="selectAllCurrentFiles()"><i class="fas fa-check-double"></i> Select All</button>
+        <button class="btn-ghost sm" onclick="clearFileSelection()"><i class="fas fa-times"></i> Clear</button>
+        <button class="btn-danger sm" onclick="deleteSelectedFiles()"><i class="fas fa-trash-alt"></i> Delete Selected</button>
+      </div>
+    </div>
+
+    <!-- Mobile Floating Action Button (FAB) for fast mobile uploading -->
+    <div class="mobile-fab-wrap" id="mobileFabWrap">
+      <div class="mobile-fab-menu hidden" id="mobileFabMenu">
+        <button class="fab-menu-item" onclick="triggerMobileUploadFiles()"><i class="fas fa-cloud-arrow-up"></i> Upload Photos / Videos</button>
+        <button class="fab-menu-item" onclick="triggerMobileUploadFolder()"><i class="fas fa-folder-arrow-up"></i> Upload Folder</button>
+        <button class="fab-menu-item" onclick="showNewFolderDialog(); toggleMobileFab(false)"><i class="fas fa-folder-plus"></i> New Folder</button>
+      </div>
+      <button class="mobile-fab-btn" id="mobileFabBtn" onclick="toggleMobileFab()" title="Upload & New">
+        <i class="fas fa-plus"></i>
+      </button>
     </div>
 
     <div class="up-bar hidden" id="upBar">

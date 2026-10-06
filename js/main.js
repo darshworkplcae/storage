@@ -122,8 +122,47 @@ function updateUploadBtnVisibility() {
   ['uploadBtn','folderUpBtn','newFolderBtn','syncBtn'].forEach(function(id){
     var el=$(id); if(el) el.classList.toggle('hidden',!show);
   });
+  var fab = $('mobileFabWrap');
+  if(fab) fab.classList.toggle('hidden', !(show && _curPage === 'files'));
   var guestInBtn = $('guestSignInBtn');
   if(guestInBtn) guestInBtn.classList.toggle('hidden', !!S.ses.token);
+}
+
+function toggleMobileSidebar() {
+  var sb = $('appSidebar'), bd = $('sidebarBackdrop');
+  if (!sb) return;
+  var isOpen = sb.classList.contains('open');
+  if (isOpen) {
+    closeMobileSidebar();
+  } else {
+    sb.classList.add('open');
+    if (bd) bd.classList.add('show');
+  }
+}
+
+function closeMobileSidebar() {
+  var sb = $('appSidebar'), bd = $('sidebarBackdrop');
+  if (sb) sb.classList.remove('open');
+  if (bd) bd.classList.remove('show');
+}
+
+function toggleMobileFab(forceState) {
+  var menu = $('mobileFabMenu'), btn = $('mobileFabBtn');
+  if (!menu) return;
+  var shouldOpen = typeof forceState === 'boolean' ? forceState : menu.classList.contains('hidden');
+  menu.classList.toggle('hidden', !shouldOpen);
+  if (btn) btn.classList.toggle('active', shouldOpen);
+}
+
+function triggerMobileUploadFiles() {
+  toggleMobileFab(false);
+  var fi = $('fileInput');
+  if (fi) fi.click();
+}
+
+function triggerMobileUploadFolder() {
+  toggleMobileFab(false);
+  uploadFolder();
 }
 
 // ─── Wire events ─────────────────────────────────────────────────────────────
@@ -172,6 +211,11 @@ function wireEvents() {
   }
   var tmClear=$('tmClear');
   if(tmClear) tmClear.onclick=function(){tmSave([]);renderTM();};
+  // Close mobile FAB when tapping elsewhere
+  document.addEventListener('click',function(e){
+    var fabWrap=$('mobileFabWrap');
+    if(fabWrap && !fabWrap.contains(e.target)){ toggleMobileFab(false); }
+  });
   // Search
   var gs=$('globalSearch');
   if(gs) gs.addEventListener('input',debounce(function(){

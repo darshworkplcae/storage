@@ -3,6 +3,9 @@ var _driveId = null;
 var _folderId = null;
 
 function navTo(page, driveId, folderId) {
+  if(typeof closeMobileSidebar === "function") closeMobileSidebar();
+  if(S.selectedFiles) S.selectedFiles.clear();
+  if(typeof updateSelectionUI === "function") updateSelectionUI();
   if(typeof updateUploadBtnVisibility === "function") updateUploadBtnVisibility();
   driveId = driveId || null; folderId = folderId || null;
   _curPage = page; _driveId = driveId; _folderId = folderId;
@@ -20,6 +23,13 @@ function navTo(page, driveId, folderId) {
   ['uploadBtn','newFolderBtn','syncBtn'].forEach(function(id) {
     var el = $(id); if(el) el.classList.toggle('hidden', !explorer);
   });
+  var fab = $('mobileFabWrap');
+  if (fab) {
+    var isOpenTarget = (driveId && S.db && S.db.openDriveId && driveId === S.db.openDriveId);
+    var canUpload = !!S.ses.token || isOpenTarget;
+    var showFab = canUpload && !!driveId && page === 'files';
+    fab.classList.toggle('hidden', !showFab);
+  }
   updateBreadcrumb(page, driveId, folderId);
 
   var pc = $('pageContent');

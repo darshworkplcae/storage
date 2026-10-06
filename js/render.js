@@ -14,9 +14,16 @@ function renderSidebarProfile(){
   if(syncBtn)syncBtn.classList.toggle('hidden',true); // hidden unless in explorer
 }
 
+function getDriveUsedBytes(driveId){
+  const db = S.db;
+  if (!db || !db.files) return 0;
+  const activeFiles = db.files.filter(f => f.driveId === driveId && !f.trashed);
+  return activeFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+}
+
 function renderSidebarStorage(){
   const db=S.db; if(!db)return;
-  const drives=db.drives||[], files=db.files||[];
+  const drives=db.drives||[], files=(db.files||[]).filter(f => !f.trashed);
   const byType={image:0,video:0,audio:0,doc:0,other:0};
   files.forEach(f=>{const c=ftCfg(f.name,f.mimeType).cat;byType[c]=(byType[c]||0)+(f.size||0);});
   const types=[
@@ -26,7 +33,7 @@ function renderSidebarStorage(){
     {lbl:'Other',  col:'#8f91a8', val:byType.other},
   ];
   const totalCap=drives.reduce((s,d)=>s+(d.capacity||0),0);
-  const totalUsed=drives.reduce((s,d)=>s+(d.usedBytes||0),0);
+  const totalUsed=files.reduce((s,f)=>s+(f.size||0),0);
   const pct=totalCap?Math.min(100,Math.round(totalUsed/totalCap*100)):0;
   const freeBytes=Math.max(0,totalCap-totalUsed);
 
@@ -177,10 +184,12 @@ function goUp(){
 
 // ─── Drive card ────────────────────────────────────────
 function driveCard(d){
-  const used=d.usedBytes||0,cap=d.capacity||0;
-  const pct=cap?Math.min(100,Math.round(used/cap*100)):0;
-  const files=(S.db?.files||[]).filter(f=>f.driveId===d.id).length;
-  const isAdmin=S.ses.role==='admin';
+  const dynamicUsed = getDriveUsedBytes(d.id);
+  const used = dynamicUsed > 0 ? dynamicUsed : (d.usedBytes || 0);
+  const cap = d.capacity || 0;
+  const pct = cap ? Math.min(100, Math.round(used / cap * 100)) : 0;
+  const files = (S.db?.files || []).filter(f => f.driveId === d.id && !f.trashed).length;
+  const isAdmin = S.ses.role === 'admin';
   return `<div class="fg-card drive-card-item" onclick="navTo('files','${esc(d.id)}')" title="${esc(d.email)}">
     <div class="fg-icon xl" style="color:${esc(d.color)}"><i class="fab fa-google-drive"></i></div>
     <div class="fg-name" style="font-weight:600;font-size:.95rem">${esc(d.name)}</div>
@@ -195,7 +204,11 @@ function driveCard(d){
 
 // ─── Folder / File cards ───────────────────────────────
 function folderCard(f){
-  return `<div class="fg-card" ondblclick="navTo('files','${esc(f.driveId)}','${esc(f.id)}')" onclick="selectCard(this)">
+  const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
+  return `<div class="fg-card ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="navTo('files','${esc(f.driveId)}','${esc(f.id)}')" onclick="handleCardClick('${esc(f.id)}', event)">
+    <div class="card-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select folder">
+      <i class="fas fa-check"></i>
+    </div>
     <div class="fg-icon xl"><i class="fas fa-folder" style="color:#ff9f0a"></i></div>
     <div class="fg-name">${esc(f.name)}</div>
     <div class="fg-acts">
@@ -210,8 +223,12 @@ function fileCard(f){
   const isVideo=cfg.cat==='video';
   const driveId=f.driveId||_driveId||(S.db&&S.db.drives&&S.db.drives[0]?S.db.drives[0].id:'');
   const previewUrl=getFileDownloadUrl(f.googleFileId, driveId, true);
+  const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
 
-  return `<div class="fg-card ${isImage?'is-image':isVideo?'is-video':''}" ondblclick="${isMedia?`openMedia('${esc(f.id)}')`:`downloadFile('${esc(f.id)}')`}" onclick="selectCard(this)">
+  return `<div class="fg-card ${isImage?'is-image':isVideo?'is-video':''} ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="${isMedia?`openMedia('${esc(f.id)}')`:`downloadFile('${esc(f.id)}')`}" onclick="handleCardClick('${esc(f.id)}', event)">
+    <div class="card-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select file">
+      <i class="fas fa-check"></i>
+    </div>
     ${isImage ? `
       <div class="fg-thumb-wrap">
         <img class="fg-thumb" src="${previewUrl}" alt="${esc(f.name)}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\'fg-icon\' style=\'color:${cfg.col}\'><i class=\'fas ${cfg.icon}\'></i></div>'">
@@ -236,17 +253,25 @@ function fileCard(f){
   </div>`;
 }
 function folderRow(f){
-  return `<div class="fl-row" ondblclick="navTo('files','${esc(f.driveId)}','${esc(f.id)}')">
-    <span><i class="fas fa-folder" style="color:#ff9f0a;margin-right:.4rem"></i>${esc(f.name)}</span>
+  const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
+  return `<div class="fl-row ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="navTo('files','${esc(f.driveId)}','${esc(f.id)}')">
+    <span style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" class="row-select-check" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')">
+      <i class="fas fa-folder" style="color:#ff9f0a;margin-right:.4rem"></i>${esc(f.name)}
+    </span>
     <span>—</span><span>${fmtDate(f.date)}</span>
     <span><button class="icon-btn xs danger" onclick="confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button></span>
   </div>`;
 }
 function fileRow(f){
-  const cfg=ftCfg(f.name,f.mimeType);
-  const isMedia=['image','video','audio'].includes(cfg.cat);
-  return `<div class="fl-row" ondblclick="${isMedia?`openMedia('${esc(f.id)}')`:`downloadFile('${esc(f.id)}')`}">
-    <span><i class="fas ${cfg.icon}" style="color:${cfg.col};margin-right:.4rem"></i>${esc(f.name)}</span>
+  const cfg = ftCfg(f.name, f.mimeType);
+  const isMedia = ['image','video','audio'].includes(cfg.cat);
+  const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
+  return `<div class="fl-row ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="${isMedia?`openMedia('${esc(f.id)}')`:`downloadFile('${esc(f.id)}')`}">
+    <span style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" class="row-select-check" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')">
+      <i class="fas ${cfg.icon}" style="color:${cfg.col};margin-right:.4rem"></i>${esc(f.name)}
+    </span>
     <span>${fmt(f.size||0)}</span><span>${fmtDate(f.date)}</span>
     <span style="display:flex;gap:.2rem">
       <button class="icon-btn xs star-btn ${f.starred?'starred':''}" data-star-id="${esc(f.id)}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ffcc00':''}"></i></button>
@@ -256,7 +281,83 @@ function fileRow(f){
     </span>
   </div>`;
 }
-function selectCard(el){document.querySelectorAll('.fg-card.selected').forEach(e=>e.classList.remove('selected'));el.classList.add('selected');}
+
+function selectCard(el){
+  document.querySelectorAll('.fg-card.selected').forEach(e=>e.classList.remove('selected'));
+  if(el) el.classList.add('selected');
+}
+
+function handleCardClick(id, event) {
+  if (event.ctrlKey || event.metaKey || event.shiftKey) {
+    toggleFileSelect(id);
+    return;
+  }
+  if (S.selectedFiles && S.selectedFiles.size > 0) {
+    toggleFileSelect(id);
+    return;
+  }
+  const el = document.querySelector(`[data-item-id="${id}"]`);
+  if (el) selectCard(el);
+}
+
+function toggleFileSelect(id) {
+  if (!S.selectedFiles) S.selectedFiles = new Set();
+  if (S.selectedFiles.has(id)) S.selectedFiles.delete(id);
+  else S.selectedFiles.add(id);
+  updateSelectionUI();
+}
+
+function selectAllCurrentFiles() {
+  if (!S.selectedFiles) S.selectedFiles = new Set();
+  const db = S.db || {};
+  const currentFolders = (db.folders || []).filter(f => f.driveId === _driveId && f.parentId === (_folderId || null) && !f.trashed);
+  const currentFiles = (db.files || []).filter(f => f.driveId === _driveId && f.folderId === (_folderId || null) && !f.trashed);
+  currentFolders.forEach(f => S.selectedFiles.add(f.id));
+  currentFiles.forEach(f => S.selectedFiles.add(f.id));
+  updateSelectionUI();
+}
+
+function clearFileSelection() {
+  if (S.selectedFiles) S.selectedFiles.clear();
+  updateSelectionUI();
+}
+
+function updateSelectionUI() {
+  const count = S.selectedFiles ? S.selectedFiles.size : 0;
+  const bar = $('multiSelectBar');
+  const countEl = $('msCount');
+  if (countEl) countEl.textContent = count;
+  if (bar) bar.classList.toggle('hidden', count === 0);
+
+  document.querySelectorAll('.fg-card, .fl-row').forEach(el => {
+    const id = el.getAttribute('data-item-id');
+    const isSelected = id && S.selectedFiles && S.selectedFiles.has(id);
+    el.classList.toggle('is-selected', !!isSelected);
+    const btn = el.querySelector('.card-select-btn');
+    if (btn) btn.classList.toggle('selected', !!isSelected);
+    const chk = el.querySelector('.row-select-check');
+    if (chk) chk.checked = !!isSelected;
+  });
+}
+
+async function deleteSelectedFiles() {
+  if (!S.selectedFiles || S.selectedFiles.size === 0) return;
+  const count = S.selectedFiles.size;
+  if (!confirm(`Move ${count} selected item(s) to Recycle Bin?`)) return;
+
+  const ids = Array.from(S.selectedFiles);
+  toast(`Moving ${count} item(s) to Recycle Bin…`, 'info');
+  const res = await apiBatchTrash(ids);
+  if (res && res.ok) {
+    toast(`${res.count || count} item(s) moved to Recycle Bin`, 'success');
+    clearFileSelection();
+    S.db = await apiFetchDB();
+    renderSidebarStorage();
+    renderFilesPage(_driveId, _folderId);
+  } else {
+    toast(res ? (res.error || 'Failed to move items to trash') : 'Network error', 'error');
+  }
+}
 
 // ─── Quota Tracker ─────────────────────────────────────
 async function renderQuotaPage(){
@@ -265,7 +366,7 @@ async function renderQuotaPage(){
   pc.innerHTML=`<div class="inner-page">
     <div class="page-hd"><h2>Quota Tracker</h2><p>Live storage usage across all connected drives</p></div>
     <div class="quota-grid" id="quotaGrid">
-      ${drives.length?drives.map(d=>{const used=d.usedBytes||0,cap=d.capacity||0,pct=cap?Math.min(100,Math.round(used/cap*100)):0;const free=Math.max(0,cap-used);return`<div class="quota-card">
+      ${drives.length?drives.map(d=>{const dynamicUsed=getDriveUsedBytes(d.id);const used=dynamicUsed>0?dynamicUsed:(d.usedBytes||0);const cap=d.capacity||0,pct=cap?Math.min(100,Math.round(used/cap*100)):0;const free=Math.max(0,cap-used);return`<div class="quota-card">
         <div class="quota-card-top">
           <div class="qc-avatar" style="background:${d.color}22;color:${d.color}">${(d.name||'?')[0].toUpperCase()}</div>
           <div><div class="qc-name">${esc(d.name)}</div><div class="qc-email">${esc(d.email)}</div></div>
@@ -365,23 +466,55 @@ function renderStarredPage() {
 
 function renderTrashPage() {
   const pc = $('pageContent'); if(!pc) return;
-  const trashed = (S.db&&S.db.files||[]).filter(f => !!f.trashed);
+  const allTrashed = (S.db&&S.db.files||[]).filter(f => !!f.trashed);
   const isAdmin = (S.ses && S.ses.role === 'admin');
+  const flt = S.trashFilter || 'all';
+  const trashed = flt === 'pending' ? allTrashed.filter(f => !!f.restoreRequested) : allTrashed;
+  const pendingCount = allTrashed.filter(f => !!f.restoreRequested).length;
+  const selCount = S.selectedTrash ? S.selectedTrash.size : 0;
 
   pc.innerHTML = `<div class="inner-page">
     <div class="page-hd" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem">
       <div>
         <h2><i class="fas fa-trash-can" style="color:var(--danger)"></i> Recycle Bin</h2>
-        <p>${isAdmin ? 'Manage deleted files. Approve restore requests or purge permanently.' : 'Files moved here can be restored upon admin approval.'}</p>
+        <p>${isAdmin ? 'Manage deleted files. Approve restore requests, batch delete, or empty bin.' : 'Deleted files can be restored upon admin approval.'}</p>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        ${isAdmin && allTrashed.length ? `
+          <button class="btn-ghost sm danger" onclick="adminEmptyTrash()" title="Permanently delete all trash"><i class="fas fa-trash-can"></i> Empty Bin</button>
+        ` : ''}
       </div>
     </div>
+
+    <!-- Filter and Batch Action Bar -->
+    <div class="trash-toolbar" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.7rem;margin-top:.7rem;padding:.7rem 1rem;background:var(--bg2);border:1px solid var(--border);border-radius:12px">
+      <div class="filter-tabs" style="margin:0">
+        <button class="ftab ${flt==='all'?'active':''}" onclick="setTrashFilter('all')">All (${allTrashed.length})</button>
+        <button class="ftab ${flt==='pending'?'active':''}" onclick="setTrashFilter('pending')"><i class="fas fa-clock" style="color:#ffcc00"></i> Pending Request (${pendingCount})</button>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        ${allTrashed.length ? `
+          <button class="btn-ghost sm" onclick="selectAllTrash()"><i class="fas fa-check-double"></i> Select All</button>
+          ${selCount > 0 ? `<button class="btn-ghost sm" onclick="clearTrashSelection()"><i class="fas fa-times"></i> Clear (${selCount})</button>` : ''}
+        ` : ''}
+        ${selCount > 0 ? (isAdmin ? `
+          <button class="btn-primary sm" onclick="batchAdminApproveRestore()"><i class="fas fa-rotate-left"></i> Restore Selected (${selCount})</button>
+          <button class="btn-danger sm" onclick="batchAdminPermanentDelete()"><i class="fas fa-trash"></i> Delete Selected (${selCount})</button>
+        ` : `
+          <button class="btn-primary sm" onclick="batchUserRequestRestore()"><i class="fas fa-rotate-left"></i> Request Restore (${selCount})</button>
+        `) : ''}
+      </div>
+    </div>
+
     ${trashed.length ? `
       <div class="trash-list" style="display:flex;flex-direction:column;gap:.7rem;margin-top:1rem">
         ${trashed.map(f => {
           const cfg = ftCfg(f.name, f.mimeType);
           const isReq = !!f.restoreRequested;
+          const isSelected = S.selectedTrash && S.selectedTrash.has(f.id);
           return `
-            <div class="trash-item" style="display:flex;align-items:center;gap:.9rem;padding:.9rem 1.2rem;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px">
+            <div class="trash-item ${isSelected ? 'is-selected' : ''}" style="display:flex;align-items:center;gap:.9rem;padding:.85rem 1.1rem;background:${isSelected ? 'rgba(78,134,245,0.08)' : 'var(--bg2)'};border:1px solid ${isSelected ? 'var(--primary)' : 'var(--border)'};border-radius:12px;transition:.15s">
+              <input type="checkbox" class="row-select-check" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleTrashSelect('${esc(f.id)}')">
               <div style="font-size:1.5rem;color:${cfg.col};width:34px;text-align:center"><i class="fas ${cfg.icon}"></i></div>
               <div style="flex:1;min-width:0">
                 <div style="font-weight:600;font-size:.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(f.name)}</div>
@@ -405,13 +538,110 @@ function renderTrashPage() {
         }).join('')}
       </div>
     ` : `
-      <div class="empty-state">
+      <div class="empty-state" style="margin-top:2rem">
         <div class="empty-icon"><i class="fas fa-trash-can" style="color:var(--text3)"></i></div>
         <h3>Recycle Bin is empty</h3>
-        <p>No deleted files.</p>
+        <p>${flt==='pending' ? 'No pending restore requests.' : 'No deleted files.'}</p>
       </div>
     `}
   </div>`;
+}
+
+function setTrashFilter(flt){
+  S.trashFilter = flt;
+  renderTrashPage();
+}
+
+function toggleTrashSelect(id){
+  if(!S.selectedTrash) S.selectedTrash = new Set();
+  if(S.selectedTrash.has(id)) S.selectedTrash.delete(id);
+  else S.selectedTrash.add(id);
+  renderTrashPage();
+}
+
+function selectAllTrash(){
+  if(!S.selectedTrash) S.selectedTrash = new Set();
+  const allTrashed = (S.db&&S.db.files||[]).filter(f => !!f.trashed);
+  const flt = S.trashFilter || 'all';
+  const trashed = flt === 'pending' ? allTrashed.filter(f => !!f.restoreRequested) : allTrashed;
+  trashed.forEach(f => S.selectedTrash.add(f.id));
+  renderTrashPage();
+}
+
+function clearTrashSelection(){
+  if(S.selectedTrash) S.selectedTrash.clear();
+  renderTrashPage();
+}
+
+async function batchAdminApproveRestore(){
+  if(!S.selectedTrash || S.selectedTrash.size === 0) return;
+  const count = S.selectedTrash.size;
+  const ids = Array.from(S.selectedTrash);
+  toast(`Restoring ${count} file(s)…`, 'info');
+  const res = await apiBatchApproveRestore(ids);
+  if(res && res.ok){
+    toast(`Restored ${res.count || count} file(s)!`, 'success');
+    S.selectedTrash.clear();
+    S.db = await apiFetchDB();
+    renderSidebarStorage();
+    renderTrashPage();
+  } else {
+    toast(res ? (res.error || 'Failed to restore') : 'Network error', 'error');
+  }
+}
+
+async function batchAdminPermanentDelete(){
+  if(!S.selectedTrash || S.selectedTrash.size === 0) return;
+  const count = S.selectedTrash.size;
+  if(!confirm(`PERMANENTLY DELETE ${count} selected item(s) from Google Drive? This CANNOT be undone.`)) return;
+  const ids = Array.from(S.selectedTrash);
+  toast(`Permanently deleting ${count} file(s)…`, 'info');
+  const res = await apiBatchPermanentDelete(ids);
+  if(res && res.ok){
+    toast(`Permanently deleted ${res.count || count} file(s)`, 'success');
+    S.selectedTrash.clear();
+    S.db = await apiFetchDB();
+    renderSidebarStorage();
+    renderTrashPage();
+  } else {
+    toast(res ? (res.error || 'Failed to permanently delete') : 'Network error', 'error');
+  }
+}
+
+async function adminEmptyTrash(){
+  const trashed = (S.db&&S.db.files||[]).filter(f => !!f.trashed);
+  if(!trashed.length){
+    toast('Recycle Bin is already empty', 'info');
+    return;
+  }
+  if(!confirm(`EMPTY RECYCLE BIN?\n\nThis will PERMANENTLY DELETE all ${trashed.length} item(s) from Google Drive forever. This action CANNOT be undone.`)) return;
+  toast('Emptying Recycle Bin…', 'info');
+  const res = await apiEmptyTrash();
+  if(res && res.ok){
+    toast(`Recycle Bin emptied (${res.count || trashed.length} items permanently deleted)`, 'success');
+    if(S.selectedTrash) S.selectedTrash.clear();
+    S.db = await apiFetchDB();
+    renderSidebarStorage();
+    renderTrashPage();
+  } else {
+    toast(res ? (res.error || 'Failed to empty recycle bin') : 'Network error', 'error');
+  }
+}
+
+async function batchUserRequestRestore(){
+  if(!S.selectedTrash || S.selectedTrash.size === 0) return;
+  const count = S.selectedTrash.size;
+  const ids = Array.from(S.selectedTrash);
+  toast(`Requesting restore for ${count} file(s)…`, 'info');
+  const res = await apiBatchRequestRestore(ids);
+  if(res && res.ok){
+    toast(`Requested restore for ${res.count || count} file(s)! Admin can now approve.`, 'success');
+    S.selectedTrash.clear();
+    S.db = await apiFetchDB();
+    renderTrashPage();
+  } else {
+    toast(res ? (res.error || 'Failed to request restore') : 'Network error', 'error');
+  }
 }
 
 async function toggleStar(fileId) {

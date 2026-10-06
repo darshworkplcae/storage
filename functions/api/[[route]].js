@@ -36,7 +36,15 @@ async function hAL(req,env){const{password=''}=await req.json().catch(()=>({}));
 async function hUL(req,env){const{username='',password=''}=await req.json().catch(()=>({}));const db=await uGet(env,'td:db');const u=(db&&db.users||[]).find(x=>x.username===username);if(!u||await sha256(password)!==u.passwordHash)return J({error:'Wrong username or password'},401);const t=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b=>b.toString(16).padStart(2,'0')).join('');await uSet(env,`td:ses:${t}`,u.id);await uExp(env,`td:ses:${t}`,604800);return J({token:t,role:'user',userId:u.id,username:u.username,allowedDrives:u.allowedDrives||'all'});}
 async function hAG(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const cid=gGC(env);if(!cid)return J({error:'GOOGLE_CLIENT_ID not set in Cloudflare Pages env vars'},400);const o=new URL(req.url).origin;const u=new URL('https://accounts.google.com/o/oauth2/v2/auth');u.searchParams.set('client_id',cid);u.searchParams.set('redirect_uri',`${o}/api/auth/callback`);u.searchParams.set('response_type','code');u.searchParams.set('scope','https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile');u.searchParams.set('access_type','offline');u.searchParams.set('prompt','consent');return J({url:u.toString()});}
 async function hCB(req,env){const url=new URL(req.url),code=url.searchParams.get('code');if(!code)return new Response('Missing code',{status:400});const toks=await(await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({code,client_id:gGC(env),client_secret:gGS(env),redirect_uri:`${url.origin}/api/auth/callback`,grant_type:'authorization_code'})})).json();if(!toks.refresh_token)return new Response(`<html><body style="background:#0d0d12;color:#eee;font:16px sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center"><div><h2 style="color:#ff453a">No refresh token</h2><p>Revoke TeleDrive from <a href="https://myaccount.google.com/permissions" style="color:#4e86f5" target="_blank">Google Account permissions</a> then retry.</p><a href="/#/settings" style="color:#4e86f5">Back</a></div></body></html>`,{status:400,headers:{'Content-Type':'text/html'}});const user=await(await fetch('https://www.googleapis.com/oauth2/v2/userinfo',{headers:{Authorization:`Bearer ${toks.access_token}`}})).json();const quota=await gDQ(toks.access_token);const rfId=await mkDir(toks.access_token,'TeleDrive',null);const eT=await enc(toks.refresh_token,gEK(env));let db=await uGet(env,'td:db');if(!db)db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};if(!db.drives)db.drives=[];const cols=['#4e86f5','#30d158','#bf5af2','#ff9f0a','#ff453a','#64d2ff'];db.drives.push({id:uid(),email:user.email,name:user.name||user.email,picture:user.picture||'',color:cols[db.drives.length%cols.length],capacity:parseInt(quota.storageQuota&&quota.storageQuota.limit)||0,usedBytes:parseInt(quota.storageQuota&&quota.storageQuota.usage)||0,rootFolderId:rfId,encToken:eT,createdAt:new Date().toISOString()});await uSet(env,'td:db',db);return new Response(`<html><head><script>window.opener&&window.opener.postMessage('drive-connected','*');setTimeout(function(){window.close();},1500);<\/script></head><body style="background:#0d0d12;color:#eee;font:16px sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center"><div><h2 style="color:#30d158">Drive Connected!</h2><p>${user.email}</p><p style="opacity:.6">Closing…</p></div></body></html>`,{headers:{'Content-Type':'text/html'}});}
-async function hDB(req,env){const db=await uGet(env,'td:db');if(!db)return J(null);const r=await vSes(req,env,null);return J({...db,drives:(db.drives||[]).map(d=>({...d,encToken:undefined})),activityLog:r==='admin'?(db.activityLog||[]):[],users:r==='admin'?(db.users||[]):(db.users||[]).map(u=>({id:u.id,username:u.username}))});}
+function syncDriveUsage(db){
+  if(!db||!db.drives)return;
+  const active=(db.files||[]).filter(f=>!f.trashed);
+  db.drives.forEach(d=>{
+    const dFiles=active.filter(f=>f.driveId===d.id);
+    d.usedBytes=dFiles.reduce((s,f)=>s+(f.size||0),0);
+  });
+}
+async function hDB(req,env){const db=await uGet(env,'td:db');if(!db)return J(null);syncDriveUsage(db);const r=await vSes(req,env,null);return J({...db,drives:(db.drives||[]).map(d=>({...d,encToken:undefined})),activityLog:r==='admin'?(db.activityLog||[]):[],users:r==='admin'?(db.users||[]):(db.users||[]).map(u=>({id:u.id,username:u.username}))});}
 async function hQ(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const db=await uGet(env,'td:db');if(!db||!db.drives)return J({drives:[]});const res=await Promise.all(db.drives.map(async d=>{try{const at=await gAT(env,d.encToken);const q=await gDQ(at);return{id:d.id,capacity:parseInt(q.storageQuota&&q.storageQuota.limit)||d.capacity,usedBytes:parseInt(q.storageQuota&&q.storageQuota.usage)||d.usedBytes};}catch(e){return{id:d.id,error:e.message};}}));return J({drives:res});}
 async function hDD(req,env,id){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const db=await uGet(env,'td:db');db.drives=(db.drives||[]).filter(d=>d.id!==id);await uSet(env,'td:db',db);return J({ok:true});}
 async function hUI(req,env){
@@ -83,6 +91,7 @@ async function hUC(req,env){
   if(!db) return J({error:'DB error'},500);
   if(!db.files) db.files=[];
   db.files.push({id:fileLocalId,googleFileId,driveId,folderId:folderId||null,name,size,mimeType:mimeType||'application/octet-stream',uploadedBy:ses||'guest',date:new Date().toISOString()});
+  syncDriveUsage(db);
   if(!db.activityLog) db.activityLog=[];
   const drv=(db.drives||[]).find(d=>d.id===driveId);
   db.activityLog.unshift({id:uid(),type:'upload',name,size,driveId,driveLetter:drv?drv.email:'?',ts:new Date().toISOString()});
@@ -150,6 +159,7 @@ async function hDF(req,env,fileId){
   if(!db.activityLog) db.activityLog=[];
   db.activityLog.unshift({id:uid(),type:'trash',name:file.name,driveId:file.driveId,by:ses||'guest',ts:new Date().toISOString()});
   if(db.activityLog.length>500) db.activityLog=db.activityLog.slice(0,500);
+  syncDriveUsage(db);
   await uSet(env,'td:db',db);
   return J({ok:true,trashed:true});
 }
@@ -170,6 +180,7 @@ async function hPermanentDelete(req,env,fileId){
   db.files=(db.files||[]).filter(f=>f.id!==file.id && f.googleFileId!==file.googleFileId);
   if(!db.activityLog) db.activityLog=[];
   db.activityLog.unshift({id:uid(),type:'delete_permanent',name:file.name,driveId:file.driveId,ts:new Date().toISOString()});
+  syncDriveUsage(db);
   await uSet(env,'td:db',db);
   return J({ok:true,purged:true});
 }
@@ -197,8 +208,143 @@ async function hApproveRestore(req,env,fileId){
   file.trashedBy = null;
   if(!db.activityLog) db.activityLog=[];
   db.activityLog.unshift({id:uid(),type:'restore_approved',name:file.name,driveId:file.driveId,ts:new Date().toISOString()});
+  syncDriveUsage(db);
   await uSet(env,'td:db',db);
   return J({ok:true,restored:true});
+}
+
+async function hBatchTrash(req,env){
+  const{fileIds=[]}=await req.json().catch(()=>({}));
+  if(!Array.isArray(fileIds)||!fileIds.length) return J({error:'fileIds required'},400);
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const ses=await vSes(req,env,null);
+  const now=new Date().toISOString();
+  let count=0;
+  (db.files||[]).forEach(f=>{
+    if(fileIds.includes(f.id)||fileIds.includes(f.googleFileId)){
+      const isOpenTarget=(db.openDriveId&&f.driveId===db.openDriveId);
+      if(ses||isOpenTarget){
+        f.trashed=true;
+        f.trashedAt=now;
+        f.trashedBy=ses||'guest';
+        f.restoreRequested=false;
+        count++;
+      }
+    }
+  });
+  (db.folders||[]).forEach(f=>{
+    if(fileIds.includes(f.id)){
+      const isOpenTarget=(db.openDriveId&&f.driveId===db.openDriveId);
+      if(ses||isOpenTarget){
+        f.trashed=true;
+        f.trashedAt=now;
+        count++;
+      }
+    }
+  });
+  syncDriveUsage(db);
+  if(!db.activityLog) db.activityLog=[];
+  db.activityLog.unshift({id:uid(),type:'trash_batch',count,by:ses||'guest',ts:now});
+  if(db.activityLog.length>500) db.activityLog=db.activityLog.slice(0,500);
+  await uSet(env,'td:db',db);
+  return J({ok:true,count});
+}
+
+async function hBatchRequestRestore(req,env){
+  const{fileIds=[]}=await req.json().catch(()=>({}));
+  if(!Array.isArray(fileIds)||!fileIds.length) return J({error:'fileIds required'},400);
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const now=new Date().toISOString();
+  let count=0;
+  (db.files||[]).forEach(f=>{
+    if(fileIds.includes(f.id)||fileIds.includes(f.googleFileId)){
+      f.restoreRequested=true;
+      f.restoreRequestedAt=now;
+      count++;
+    }
+  });
+  await uSet(env,'td:db',db);
+  return J({ok:true,count});
+}
+
+async function hBatchApproveRestore(req,env){
+  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized - Admin only'},401);
+  const{fileIds=[]}=await req.json().catch(()=>({}));
+  if(!Array.isArray(fileIds)||!fileIds.length) return J({error:'fileIds required'},400);
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  let count=0;
+  (db.files||[]).forEach(f=>{
+    if(fileIds.includes(f.id)||fileIds.includes(f.googleFileId)){
+      f.trashed=false;
+      f.restoreRequested=false;
+      f.trashedAt=null;
+      f.trashedBy=null;
+      count++;
+    }
+  });
+  (db.folders||[]).forEach(f=>{
+    if(fileIds.includes(f.id)){
+      f.trashed=false;
+      f.trashedAt=null;
+      count++;
+    }
+  });
+  syncDriveUsage(db);
+  if(!db.activityLog) db.activityLog=[];
+  db.activityLog.unshift({id:uid(),type:'restore_batch',count,ts:new Date().toISOString()});
+  await uSet(env,'td:db',db);
+  return J({ok:true,count});
+}
+
+async function hBatchPermanentDelete(req,env){
+  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized - Admin only'},401);
+  const{fileIds=[]}=await req.json().catch(()=>({}));
+  if(!Array.isArray(fileIds)||!fileIds.length) return J({error:'fileIds required'},400);
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const toDelete=(db.files||[]).filter(f=>fileIds.includes(f.id)||fileIds.includes(f.googleFileId));
+  for(const f of toDelete){
+    const drv=(db.drives||[]).find(d=>d.id===f.driveId);
+    if(drv){
+      try{
+        const at=await gAT(env,drv.encToken);
+        await fetch(`https://www.googleapis.com/drive/v3/files/${f.googleFileId}`,{method:'DELETE',headers:{Authorization:`Bearer ${at}`}});
+      }catch(e){}
+    }
+  }
+  db.files=(db.files||[]).filter(f=>!fileIds.includes(f.id)&&!fileIds.includes(f.googleFileId));
+  db.folders=(db.folders||[]).filter(f=>!fileIds.includes(f.id));
+  syncDriveUsage(db);
+  if(!db.activityLog) db.activityLog=[];
+  db.activityLog.unshift({id:uid(),type:'delete_permanent_batch',count:toDelete.length,ts:new Date().toISOString()});
+  await uSet(env,'td:db',db);
+  return J({ok:true,count:toDelete.length});
+}
+
+async function hEmptyTrash(req,env){
+  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized - Admin only'},401);
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const trashedFiles=(db.files||[]).filter(f=>!!f.trashed);
+  for(const f of trashedFiles){
+    const drv=(db.drives||[]).find(d=>d.id===f.driveId);
+    if(drv){
+      try{
+        const at=await gAT(env,drv.encToken);
+        await fetch(`https://www.googleapis.com/drive/v3/files/${f.googleFileId}`,{method:'DELETE',headers:{Authorization:`Bearer ${at}`}});
+      }catch(e){}
+    }
+  }
+  db.files=(db.files||[]).filter(f=>!f.trashed);
+  db.folders=(db.folders||[]).filter(f=>!f.trashed);
+  syncDriveUsage(db);
+  if(!db.activityLog) db.activityLog=[];
+  db.activityLog.unshift({id:uid(),type:'empty_trash',count:trashedFiles.length,ts:new Date().toISOString()});
+  await uSet(env,'td:db',db);
+  return J({ok:true,count:trashedFiles.length});
 }
 
 async function hMF(req,env){
@@ -299,6 +445,11 @@ export async function onRequest({request,env}){
     if(p==='upload/chunk'&&m==='PUT')return hUChunk(request,env);
     if(p==='upload/complete'&&m==='POST')return hUC(request,env);
     if(p.startsWith('download/')&&m==='GET')return hDL(request,env,p.replace('download/',''));
+    if(p==='files/batch-trash'&&m==='POST')return hBatchTrash(request,env);
+    if(p==='files/trash/empty'&&(m==='POST'||m==='DELETE'))return hEmptyTrash(request,env);
+    if(p==='files/trash/batch-request-restore'&&m==='POST')return hBatchRequestRestore(request,env);
+    if(p==='files/trash/batch-approve-restore'&&m==='POST')return hBatchApproveRestore(request,env);
+    if(p==='files/trash/batch-permanent-delete'&&(m==='POST'||m==='DELETE'))return hBatchPermanentDelete(request,env);
     if(p.startsWith('files/trash/request-restore/')&&m==='POST')return hRequestRestore(request,env,p.replace('files/trash/request-restore/',''));
     if(p.startsWith('files/trash/approve-restore/')&&m==='POST')return hApproveRestore(request,env,p.replace('files/trash/approve-restore/',''));
     if(p.startsWith('files/trash/permanent-delete/')&&m==='DELETE')return hPermanentDelete(request,env,p.replace('files/trash/permanent-delete/',''));

@@ -7,5 +7,9 @@ var S = {
   filter: 'all',
   listMode: false,
   cancelUpload: false,
-  _xhr: null
+  _xhr: null,
+  selectedFiles: new Set(),
+  selectedTrash: new Set(),
+  mobileSidebarOpen: false,
+  trashFilter: 'all'
 };

@@ -218,3 +218,8 @@ function apiRenameDrive(driveId, newName) { return apiFetch('drives/rename/' + e
 function apiRequestRestore(fileId) { return apiFetch('files/trash/request-restore/' + encodeURIComponent(fileId), { method: 'POST' }); }
 function apiApproveRestore(fileId) { return apiFetch('files/trash/approve-restore/' + encodeURIComponent(fileId), { method: 'POST' }); }
 function apiPermanentDelete(fileId) { return apiFetch('files/trash/permanent-delete/' + encodeURIComponent(fileId), { method: 'DELETE' }); }
+function apiBatchTrash(fileIds) { return apiFetch('files/batch-trash', { method: 'POST', body: JSON.stringify({ fileIds: fileIds }) }); }
+function apiBatchRequestRestore(fileIds) { return apiFetch('files/trash/batch-request-restore', { method: 'POST', body: JSON.stringify({ fileIds: fileIds }) }); }
+function apiBatchApproveRestore(fileIds) { return apiFetch('files/trash/batch-approve-restore', { method: 'POST', body: JSON.stringify({ fileIds: fileIds }) }); }
+function apiBatchPermanentDelete(fileIds) { return apiFetch('files/trash/batch-permanent-delete', { method: 'POST', body: JSON.stringify({ fileIds: fileIds }) }); }
+function apiEmptyTrash() { return apiFetch('files/trash/empty', { method: 'POST' }); }
