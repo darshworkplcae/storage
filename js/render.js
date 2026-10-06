@@ -1,145 +1,263 @@
-// TELEDRIVE — Render
+// TeleDrive — Rendering
+
 function renderHome(){
-  const grid=$('drivesGrid');if(!grid)return;
-  const q=($('globalSearch')?.value||'').toLowerCase();
-  const drives=q?S.db.drives.filter(d=>d.name.toLowerCase().includes(q)||d.letter.toLowerCase().includes(q)):S.db.drives;
-  grid.innerHTML='';
-  drives.forEach(d=>{
-    const locked=d.passwordHash&&!S.ses.unlocked.includes(d.id)&&!S.ses.isAdmin;
-    const sz=S.db.files.filter(f=>f.driveId===d.id).reduce((a,f)=>a+f.size,0);
-    const fc=S.db.files.filter(f=>f.driveId===d.id).length;
-    // capacity: if drive has a set capacity (in GB) use that, else show Unlimited
-    const capBytes = d.capacity ? d.capacity*1024*1024*1024 : 200*1024*1024*1024;
-    const pct=Math.min(100,(sz/capBytes)*100).toFixed(1);
-    const capLabel = d.capacity ? `${d.capacity} GB` : 'Unlimited';
-    const card=document.createElement('div');card.className=`drive-card${locked?' locked':''}`;
-    card.style.setProperty('--dc',d.color||'var(--primary)');
-    card.innerHTML=`${locked?'<i class="fas fa-lock drive-lock"></i>':''}<div class="drive-icon"><i class="fas fa-hard-drive"></i><div class="drive-letter">${esc(d.letter)}</div></div><div class="drive-info"><div class="drive-name">${esc(d.name)} (${esc(d.letter)}:)</div><div class="drive-bar-bg"><div class="drive-bar-fill" style="width:${pct}%"></div></div><div class="drive-space">${fmt(sz)} used · ${fc} file${fc!==1?'s':''} · ${capLabel}</div></div>`;
-    card.onclick=async()=>{if(locked)await promptPass(d);else nav(d.id);};
-    card.oncontextmenu=e=>{e.preventDefault();if(!S.ses.isAdmin)return;showCtx(e,[{i:'fa-folder-open',l:'Open',a:()=>nav(d.id)},{sep:true},{i:'fa-edit',l:'Edit Drive',a:()=>editDriveDialog(d)},{sep:true},{i:'fa-trash',l:'Delete Drive',danger:true,a:()=>confirmDeleteDrive(d)}]);};
-    grid.appendChild(card);
-  });
-  if(S.ses.isAdmin){const add=document.createElement('div');add.className='drive-add';add.innerHTML='<i class="fas fa-plus-circle" style="font-size:1.4rem"></i><span style="font-size:.88rem;font-weight:500">New Drive</span>';add.onclick=()=>createDriveDialog();grid.appendChild(add);}
+  const el=$('drivesGrid');if(!el)return;
+  const drives=S.db?.drives||[];
+  const search=($('globalSearch')?.value||'').toLowerCase();
+  if(!drives.length){
+    el.innerHTML=`<div class="empty-drives"><div class="empty-icon"><i class="fas fa-hard-drive"></i></div><h3>No Drives Connected</h3><p>Connect a Google Drive account from the admin panel</p>${S.ses.role==='admin'?`<button class="btn-p" onclick="showAdminScreen()"><i class="fas fa-plus"></i> Add Drive</button>`:''}</div>`;
+    return;
+  }
+  const visible=drives.filter(d=>!search||d.name?.toLowerCase().includes(search)||d.email?.toLowerCase().includes(search));
+  const isAdmin=S.ses.role==='admin';
+  // Filter by allowed drives for users
+  const allowed=S.ses.allowedDrives==='all'?null:S.ses.allowedDrives;
+  const filtered=allowed?visible.filter(d=>allowed.includes(d.id)):visible;
+  el.innerHTML=filtered.map(d=>{
+    const used=d.usedBytes||0;const cap=d.capacity||0;
+    const pct=cap?Math.min(100,Math.round(used/cap*100)):0;
+    const usedStr=fmt(used);const capStr=cap?fmt(cap):'∞';
+    const files=(S.db?.files||[]).filter(f=>f.driveId===d.id).length;
+    return `<div class="drive-card" style="--dc:${esc(d.color)}" onclick="openDrive('${esc(d.id)}')">
+      <div class="dc-accent"></div>
+      <div class="dc-top">
+        <div class="dc-icon" style="background:${esc(d.color)}22;color:${esc(d.color)}"><i class="fab fa-google-drive"></i></div>
+        <div class="dc-info">
+          <div class="dc-name">${esc(d.name)}</div>
+          <div class="dc-email">${esc(d.email||'')}</div>
+        </div>
+        ${isAdmin?`<div class="dc-menu" onclick="event.stopPropagation();showDriveMenu('${esc(d.id)}',this)"><i class="fas fa-ellipsis-v"></i></div>`:''}
+      </div>
+      <div class="dc-quota">
+        <div class="dc-quota-bar"><div class="dc-quota-fill" style="width:${pct}%;background:${esc(d.color)}"></div></div>
+        <div class="dc-quota-txt"><span>${usedStr} used</span><span>${capStr}</span></div>
+      </div>
+      <div class="dc-footer">
+        <span><i class="fas fa-file" style="color:${esc(d.color)}"></i> ${files} files</span>
+        <span class="dc-badge" style="background:${esc(d.color)}22;color:${esc(d.color)}">${pct}%</span>
+      </div>
+    </div>`;
+  }).join('');
+  if(!filtered.length)el.innerHTML=`<div style="color:var(--text3);padding:2rem;grid-column:1/-1">No drives match your search.</div>`;
 }
 
-function renderExplorer(){renderSidebar();renderAddrBar();renderContent();syncNavBtns();syncStatus();}
+function openDrive(driveId){
+  S.driveId=driveId;S.folderId=null;
+  pushNav(driveId,null);
+  showScreen('explorerView');syncToolbar();renderExplorer();
+}
+
+function renderExplorer(){
+  renderSidebar();renderAddr();renderContent();renderStats();
+}
 
 function renderSidebar(){
-  const tree=$('sidebarTree');tree.innerHTML='';if(!S.driveId)return;
-  const d=S.db.drives.find(x=>x.id===S.driveId);if(!d)return;
-  tree.appendChild(mkTreeNode('fa-hard-drive',`${d.letter}: ${d.name}`,!S.folderId,()=>nav(S.driveId,null)));
-  renderTreeLevel(tree,null,1);
+  const el=$('sidebarTree');if(!el||!S.db)return;
+  const drives=S.db.drives||[];
+  el.innerHTML=drives.map(d=>`
+    <div class="sb-drive ${S.driveId===d.id?'active':''}" onclick="openDrive('${esc(d.id)}')">
+      <span class="sb-dot" style="background:${esc(d.color)}"></span>${esc(d.name)}
+    </div>
+    ${S.driveId===d.id?renderSidebarFolders(null,d.id,1):''}
+  `).join('');
 }
-function renderTreeLevel(container,parentId,depth){S.db.folders.filter(f=>f.driveId===S.driveId&&f.parentId===parentId).forEach(f=>{const n=mkTreeNode('fa-folder',f.name,S.folderId===f.id,()=>nav(S.driveId,f.id));n.style.paddingLeft=(0.5+depth*0.75)+'rem';container.appendChild(n);renderTreeLevel(container,f.id,depth+1);});}
-function mkTreeNode(icon,label,active,onClick){const n=document.createElement('div');n.className=`tree-node${active?' active':''}`;n.innerHTML=`<i class="fas ${icon}"></i><span class="tree-label">${esc(label)}</span>`;n.onclick=onClick;return n;}
 
-function renderAddrBar(){
-  const bar=$('addrBar');bar.innerHTML='';if(!S.driveId)return;
-  const d=S.db.drives.find(x=>x.id===S.driveId);if(!d)return;
-  const crumbs=[{name:`${d.letter}:`,action:()=>nav(S.driveId,null)}];
-  if(S.folderId)getFolderPath(S.folderId).forEach(f=>crumbs.push({name:f.name,action:()=>nav(S.driveId,f.id)}));
-  crumbs.forEach((c,i)=>{
-    if(i>0){const sep=document.createElement('span');sep.className='bc-sep';sep.innerHTML='<i class="fas fa-chevron-right" style="font-size:.6rem"></i>';bar.appendChild(sep);}
-    const bc=document.createElement('div');bc.className=`bc-item${i===crumbs.length-1?' cur':''}`;bc.innerHTML=`<span>${esc(c.name)}</span>`;
-    if(i<crumbs.length-1)bc.querySelector('span').onclick=c.action;bar.appendChild(bc);
-  });
+function renderSidebarFolders(parentId,driveId,depth){
+  if(depth>3)return '';
+  const folders=(S.db?.folders||[]).filter(f=>f.driveId===driveId&&f.parentId===parentId);
+  return folders.map(f=>`
+    <div class="sb-folder ${S.folderId===f.id?'active':''}" style="padding-left:${8+depth*12}px" onclick="openFolder('${esc(f.id)}')">
+      <i class="fas fa-folder" style="color:#ff9f0a;font-size:.75rem;margin-right:.3rem"></i>${esc(f.name)}
+    </div>
+    ${renderSidebarFolders(f.id,driveId,depth+1)}
+  `).join('');
 }
-function getFolderPath(fid){const p=[];let cur=S.db.folders.find(f=>f.id===fid);while(cur){p.unshift(cur);cur=cur.parentId?S.db.folders.find(f=>f.id===cur.parentId):null;}return p;}
+
+function renderAddr(){
+  const el=$('addrBar');if(!el||!S.db)return;
+  const drive=S.db.drives?.find(d=>d.id===S.driveId);
+  let parts=[`<span class="addr-part" onclick="openDrive('${esc(S.driveId)}')" style="color:${esc(drive?.color||'var(--primary)')}"><i class="fab fa-google-drive"></i> ${esc(drive?.name||'Drive')}</span>`];
+  if(S.folderId){
+    const chain=getFolderChain(S.folderId);
+    chain.forEach(f=>{
+      parts.push(`<i class="fas fa-chevron-right addr-sep"></i>`);
+      parts.push(`<span class="addr-part" onclick="openFolder('${esc(f.id)}')">${esc(f.name)}</span>`);
+    });
+  }
+  el.innerHTML=parts.join('');
+}
+
+function getFolderChain(folderId){
+  const chain=[];let current=S.db?.folders?.find(f=>f.id===folderId);
+  while(current){chain.unshift(current);current=S.db?.folders?.find(f=>f.id===current.parentId);}
+  return chain;
+}
+
+function openFolder(folderId){S.folderId=folderId;pushNav(S.driveId,folderId);renderExplorer();}
+
+function getVisibleItems(){
+  if(!S.db||!S.driveId)return{folders:[],files:[]};
+  const search=($('globalSearch')?.value||'').toLowerCase();
+  let folders=(S.db.folders||[]).filter(f=>f.driveId===S.driveId&&f.parentId===(S.folderId||null));
+  let files=(S.db.files||[]).filter(f=>f.driveId===S.driveId&&f.folderId===(S.folderId||null));
+  // Filter by type
+  if(S.filter!=='all'||S.filterExt){
+    if(S.filterExt){const ext=S.filterExt.toLowerCase().replace(/^\./,'');files=files.filter(f=>f.name.split('.').pop().toLowerCase()===ext);}
+    else{files=files.filter(f=>ftCfg(f.name,f.mimeType).cat===S.filter);}
+    folders=[];
+  }
+  // Search
+  if(search){folders=folders.filter(f=>f.name.toLowerCase().includes(search));files=files.filter(f=>f.name.toLowerCase().includes(search));}
+  // Sort
+  const sortKey=S.sort==='date'?'date':S.sort==='size'?'size':'name';
+  const sortFn=(a,b)=>sortKey==='size'?(b.size||0)-(a.size||0):sortKey==='date'?new Date(b.date)-new Date(a.date):(a.name||'').localeCompare(b.name||'');
+  folders.sort((a,b)=>(a.name||'').localeCompare(b.name||''));files.sort(sortFn);
+  return{folders,files};
+}
 
 function renderContent(){
-  const content=$('exContent');content.innerHTML='';if(!S.driveId)return;
-  const q=($('globalSearch')?.value||'').toLowerCase();
-  let folders=S.db.folders.filter(f=>f.driveId===S.driveId&&f.parentId===S.folderId);
-  let files=S.db.files.filter(f=>f.driveId===S.driveId&&f.folderId===S.folderId);
-  if(q){folders=folders.filter(f=>f.name.toLowerCase().includes(q));files=files.filter(f=>f.name.toLowerCase().includes(q));}
-  if(S.filter!=='all'){files=files.filter(f=>{const t=f.type||'';
-    if(S.filter==='image')return t.startsWith('image/');if(S.filter==='video')return t.startsWith('video/');
-    if(S.filter==='audio')return t.startsWith('audio/');
-    if(S.filter==='doc')return t.includes('pdf')||t.includes('word')||t.includes('text')||t.includes('sheet');
-    if(S.filter==='ext'&&S.filterExt)return f.name.toLowerCase().endsWith('.'+S.filterExt.toLowerCase());
-    return true;
-  });}
-  const sortFn=(a,b)=>{if(S.sort==='name')return a.name.localeCompare(b.name);if(S.sort==='date')return new Date(b.date||b.createdAt)-new Date(a.date||a.createdAt);if(S.sort==='size')return(b.size||0)-(a.size||0);return 0;};
-  folders.sort(sortFn);files.sort(sortFn);
-  if(!folders.length&&!files.length){content.innerHTML=`<div class="empty"><i class="fas fa-folder-open"></i><h3>${q?'No results':'Empty'}</h3><p>${q?'Try a different search':'Drop files here or click Upload'}</p></div>`;setupDrop(content);return;}
-  if(S.view==='grid'){const g=document.createElement('div');g.className='file-grid';folders.forEach(f=>g.appendChild(mkFolderGrid(f)));files.forEach(f=>g.appendChild(mkFileGrid(f)));content.appendChild(g);}
-  else{const l=document.createElement('div');l.className='file-list';folders.forEach(f=>l.appendChild(mkFolderList(f)));files.forEach(f=>l.appendChild(mkFileList(f)));content.appendChild(l);}
-  setupDrop(content);
-}
-function mkFolderGrid(f){const el=document.createElement('div');el.className='f-item folder';const cnt=S.db.files.filter(x=>x.folderId===f.id).length;el.innerHTML=`<div class="f-item-ico">📁</div><div class="f-item-name">${esc(f.name)}</div><div class="f-item-sub">${cnt} item${cnt!==1?'s':''}</div>`;el.onclick=()=>nav(S.driveId,f.id);el.oncontextmenu=e=>{e.preventDefault();showFolderCtx(e,f);};return el;}
-function mkFileGrid(f){const el=document.createElement('div');el.className=`f-item${S.selectedId===f.id?' sel':''}`;const cfg=ftCfg(f.type);el.innerHTML=`<div class="f-item-ico">${cfg.em}</div><div class="f-item-name" title="${esc(f.name)}">${esc(f.name)}</div><div class="f-item-sub">${fmt(f.size)}${f.isChunked?' 🔗':''}</div>`;el.onclick=()=>{S.selectedId=f.id;renderContent();};el.ondblclick=()=>openMedia(f);el.oncontextmenu=e=>{e.preventDefault();showFileCtx(e,f);};return el;}
-function mkFolderList(f){const el=document.createElement('div');el.className='f-list-item';const cnt=S.db.files.filter(x=>x.folderId===f.id).length;el.innerHTML=`<div class="f-list-ico" style="color:#ffd60a"><i class="fas fa-folder"></i></div><div class="f-list-name">${esc(f.name)}</div><div class="f-list-size">${cnt} items</div><div class="f-list-date">${fmtDate(f.createdAt)}</div>`;el.onclick=()=>nav(S.driveId,f.id);el.oncontextmenu=e=>{e.preventDefault();showFolderCtx(e,f);};return el;}
-function mkFileList(f){const el=document.createElement('div');el.className=`f-list-item${S.selectedId===f.id?' sel':''}`;const cfg=ftCfg(f.type);el.innerHTML=`<div class="f-list-ico" style="color:${cfg.color}">${cfg.ico}</div><div class="f-list-name" title="${esc(f.name)}">${esc(f.name)}${f.isChunked?'<span style="color:var(--warning);font-size:.65rem;margin-left:.3rem">🔗</span>':''}</div><div class="f-list-size">${fmt(f.size)}</div><div class="f-list-date">${fmtDate(f.date)}</div>`;el.onclick=()=>{S.selectedId=f.id;renderContent();};el.ondblclick=()=>openMedia(f);el.oncontextmenu=e=>{e.preventDefault();showFileCtx(e,f);};return el;}
-
-function showCtx(e,items){
-  document.querySelectorAll('.ctx-menu').forEach(m=>m.remove());
-  const menu=document.createElement('div');menu.className='ctx-menu';
-  items.forEach(item=>{if(item.sep){const s=document.createElement('div');s.className='ctx-sep';menu.appendChild(s);return;}const el=document.createElement('div');el.className=`ctx-item${item.danger?' danger':''}`;el.innerHTML=`<i class="fas ${item.i}"></i><span>${item.l}</span>`;el.onclick=()=>{menu.remove();item.a();};menu.appendChild(el);});
-  document.body.appendChild(menu);
-  const x=Math.min(e.clientX,window.innerWidth-190),y=Math.min(e.clientY,window.innerHeight-menu.scrollHeight-10);menu.style.left=x+'px';menu.style.top=y+'px';
-  setTimeout(()=>document.addEventListener('click',()=>menu.remove(),{once:true}),0);
-}
-function showFileCtx(e,f){showCtx(e,[{i:'fa-eye',l:'Preview / Play',a:()=>openMedia(f)},{i:'fa-download',l:'Download',a:()=>downloadFile(f)},{sep:true},{i:'fa-link',l:'Copy Link',a:async()=>{const u=await tgFileUrl(f.chunks[0].fileId);if(u){navigator.clipboard.writeText(u);toast('Link copied','success');}else toast('Could not get link','error');}},{sep:true},{i:'fa-trash',l:'Delete',danger:true,a:()=>confirmDeleteFile(f)}]);}
-function showFolderCtx(e,f){showCtx(e,[{i:'fa-folder-open',l:'Open',a:()=>nav(S.driveId,f.id)},{i:'fa-edit',l:'Rename',a:()=>renameFolderDlg(f)},{sep:true},{i:'fa-trash',l:'Delete',danger:true,a:()=>confirmDeleteFolder(f)}]);}
-
-function syncNavBtns(){$('navBack').disabled=S.navIdx<=0;$('navFwd').disabled=S.navIdx>=S.navHist.length-1;$('navUp').disabled=!S.driveId;}
-function syncStatus(){const b=$('statusBar');if(!b)return;if(!S.driveId){b.innerHTML='';return;}const fc=S.db.folders.filter(f=>f.driveId===S.driveId&&f.parentId===S.folderId).length;const fi=S.db.files.filter(f=>f.driveId===S.driveId&&f.folderId===S.folderId).length;const sz=S.db.files.filter(f=>f.driveId===S.driveId&&f.folderId===S.folderId).reduce((a,f)=>a+f.size,0);b.innerHTML=`<span>${fc+fi} item${fc+fi!==1?'s':''}</span>${sz?`<span>·</span><span>${fmt(sz)}</span>`:''}`;}
-function setupDrop(el){el.addEventListener('dragover',e=>{e.preventDefault();if(!el.querySelector('.drop-ov')){const ov=document.createElement('div');ov.className='drop-ov';ov.innerHTML='<i class="fas fa-cloud-upload-alt"></i><span>Drop files to upload</span>';el.style.position='relative';el.appendChild(ov);}});el.addEventListener('dragleave',e=>{if(!el.contains(e.relatedTarget))el.querySelector('.drop-ov')?.remove();});el.addEventListener('drop',e=>{e.preventDefault();el.querySelector('.drop-ov')?.remove();if(e.dataTransfer.files.length)uploadFiles(e.dataTransfer.files);});}
-
-// Show/hide logout + lock drive btn
-function syncAdminUI(){
-  const l=$('logoutBtn');
-  if(l)l.classList.toggle('hidden',!S.ses.isAdmin);
-  // Show Lock Drive btn when browsing a password-protected drive (non-admin only)
-  const lockGrp=$('lockGrp');const lockSep=$('lockSep');
-  if(lockGrp&&lockSep){
-    const drive=S.driveId?S.db.drives.find(x=>x.id===S.driveId):null;
-    const showLock=drive&&drive.passwordHash&&!S.ses.isAdmin&&S.ses.unlocked.includes(drive.id);
-    lockGrp.style.display=showLock?'flex':'none';
-    lockSep.style.display=showLock?'block':'none';
+  const el=$('exContent');if(!el)return;
+  const{folders,files}=getVisibleItems();
+  if(!folders.length&&!files.length){
+    el.innerHTML=`<div class="empty-state"><div class="empty-icon"><i class="fas fa-folder-open"></i></div><h3>Empty</h3><p>Drop files here or click Upload</p></div>`;
+    return;
+  }
+  if(S.view==='list'){
+    el.innerHTML=`<div class="file-list">
+      <div class="fl-hd"><span>Name</span><span>Size</span><span>Date</span><span></span></div>
+      ${folders.map(f=>folderListRow(f)).join('')}
+      ${files.map(f=>fileListRow(f)).join('')}
+    </div>`;
+  }else{
+    el.innerHTML=`<div class="file-grid">
+      ${folders.map(f=>folderGridCard(f)).join('')}
+      ${files.map(f=>fileGridCard(f)).join('')}
+    </div>`;
   }
 }
-// ---- Transfer Manager Panel ----
-function renderTransferPanel(){
-  const badge=$('tmBadge');const list=$('tmList');
+
+function folderGridCard(f){
+  const isAdmin=S.ses.role==='admin';
+  return `<div class="fg-card folder-card" ondblclick="openFolder('${esc(f.id)}')" onclick="selectItem(this)">
+    <div class="fg-icon folder-icon"><i class="fas fa-folder"></i></div>
+    <div class="fg-name" title="${esc(f.name)}">${esc(f.name)}</div>
+    ${isAdmin?`<div class="fg-acts">
+      <button class="icon-btn sm" onclick="event.stopPropagation();confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+    </div>`:''}
+  </div>`;
+}
+
+function fileGridCard(f){
+  const cfg=ftCfg(f.name,f.mimeType);
+  const isAdmin=S.ses.role==='admin';
+  const isMedia=['image','video','audio'].includes(cfg.cat);
+  return `<div class="fg-card" ondblclick="${isMedia?`openMedia('${esc(f.id)}')`:`downloadFile('${esc(f.id)}')`}" onclick="selectItem(this)" title="${esc(f.name)}">
+    <div class="fg-icon" style="color:${cfg.col}"><i class="fas ${cfg.icon}"></i></div>
+    <div class="fg-name">${esc(f.name)}</div>
+    <div class="fg-meta">${fmt(f.size||0)}</div>
+    <div class="fg-acts">
+      ${isMedia?`<button class="icon-btn sm" onclick="event.stopPropagation();openMedia('${esc(f.id)}')" title="Preview"><i class="fas fa-eye"></i></button>`:''}
+      <button class="icon-btn sm" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')" title="Download"><i class="fas fa-download"></i></button>
+      ${isAdmin?`<button class="icon-btn sm danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>`:''}
+    </div>
+  </div>`;
+}
+
+function folderListRow(f){
+  const isAdmin=S.ses.role==='admin';
+  return `<div class="fl-row folder-row" ondblclick="openFolder('${esc(f.id)}')">
+    <span><i class="fas fa-folder" style="color:#ff9f0a;margin-right:.5rem"></i>${esc(f.name)}</span>
+    <span>—</span><span>${fmtDate(f.date)}</span>
+    <span>${isAdmin?`<button class="icon-btn sm" onclick="confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')"><i class="fas fa-trash-alt"></i></button>`:''}</span>
+  </div>`;
+}
+
+function fileListRow(f){
+  const cfg=ftCfg(f.name,f.mimeType);const isAdmin=S.ses.role==='admin';
+  const isMedia=['image','video','audio'].includes(cfg.cat);
+  return `<div class="fl-row" ondblclick="${isMedia?`openMedia('${esc(f.id)}')`:`downloadFile('${esc(f.id)}')`}">
+    <span><i class="fas ${cfg.icon}" style="color:${cfg.col};margin-right:.5rem"></i>${esc(f.name)}</span>
+    <span>${fmt(f.size||0)}</span><span>${fmtDate(f.date)}</span>
+    <span style="display:flex;gap:.3rem">
+      ${isMedia?`<button class="icon-btn sm" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>`:''}
+      <button class="icon-btn sm" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')"><i class="fas fa-download"></i></button>
+      ${isAdmin?`<button class="icon-btn sm danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')"><i class="fas fa-trash-alt"></i></button>`:''}
+    </span>
+  </div>`;
+}
+
+function renderStats(){
+  const el=$('statusBar');if(!el||!S.db)return;
+  const{folders,files}=getVisibleItems();
+  const total=files.reduce((s,f)=>s+(f.size||0),0);
+  el.innerHTML=`<span>${folders.length} folder${folders.length!==1?'s':''}, ${files.length} file${files.length!==1?'s':''}</span><span>${total?fmt(total):''}</span>`;
+}
+
+function selectItem(el){document.querySelectorAll('.fg-card.selected').forEach(e=>e.classList.remove('selected'));el.classList.add('selected');}
+
+// Transfer Manager panel
+function renderTM(){
+  const badge=$('tmBadge'),list=$('tmList');
   const transfers=tmLoad();
   const active=transfers.filter(t=>t.status==='uploading');
-  if(badge){badge.textContent=active.length>0?active.length:'';badge.classList.toggle('visible',active.length>0);}
+  if(badge){badge.textContent=active.length||'';badge.classList.toggle('visible',active.length>0);}
   if(!list)return;
-  if(!transfers.length){list.innerHTML='<div style="text-align:center;padding:1.5rem;color:var(--text3);font-size:.8rem"><i class="fas fa-inbox" style="font-size:1.5rem;display:block;margin-bottom:.5rem;opacity:.3"></i>No transfers yet</div>';return;}
+  if(!transfers.length){list.innerHTML=`<div class="tm-empty"><i class="fas fa-inbox"></i><span>No transfers yet</span></div>`;return;}
   list.innerHTML=transfers.map(t=>{
-    const pct=t.progress||0;
     const col=t.status==='done'?'var(--success)':t.status==='failed'?'var(--danger)':'var(--primary)';
-    const statusIco=t.status==='done'?'fa-check-circle':t.status==='failed'?'fa-times-circle':'fa-spinner spin';
-    // Build progress info string
-    let info='';
-    if(t.status==='uploading'){
-      const upMB=t.uploaded?(t.uploaded/(1024*1024)).toFixed(1):pct+'%';
-      const totMB=t.total?(t.total/(1024*1024)).toFixed(1):(t.size?(t.size/(1024*1024)).toFixed(1):'?');
-      const speedStr=t.speed&&t.speed>0?` · ${(t.speed/(1024*1024)).toFixed(1)} MB/s`:'';
-      info=`${upMB}/${totMB} MB${speedStr}`;
-    } else {
-      info=t.status==='done'?`Done · ${fmt(t.size||0)}`:`Failed · ${fmt(t.size||0)}`;
-    }
+    const ico=t.status==='done'?'fa-check-circle':t.status==='failed'?'fa-times-circle':'fa-spinner fa-spin';
+    const uMB=t.uploaded?(t.uploaded/1048576).toFixed(1):'0';
+    const tMB=t.size?(t.size/1048576).toFixed(1):'?';
+    const spd=t.speed?` · ${fmtSpeed(t.speed)}`:'';
+    const sub=t.status==='uploading'?`${uMB}/${tMB} MB${spd}`:t.status==='done'?`Done · ${fmt(t.size||0)}`:`Failed`;
     return `<div class="tm-item">
-      <div class="tm-ico" style="color:${col}"><i class="fas ${statusIco}"></i></div>
+      <div class="tm-ico" style="color:${col}"><i class="fas ${ico}"></i></div>
       <div class="tm-info">
         <div class="tm-name" title="${esc(t.name)}">${esc(t.name)}</div>
-        <div class="tm-sub">${info}</div>
-        ${t.status==='uploading'?`<div class="tm-prog-bg"><div class="tm-prog-fill" style="width:${pct}%"></div></div>`:''}
+        <div class="tm-sub">${sub}</div>
+        ${t.status==='uploading'?`<div class="tm-bar"><div class="tm-fill" style="width:${t.pct||0}%"></div></div>`:''}
       </div>
-      ${t.status==='uploading'?`<button class="tm-cancel" onclick="S.cancelUpload=true;S._xhr&&S._xhr.abort();toast('Cancelling...','warning')" title="Cancel upload"><i class="fas fa-times"></i></button>`:''}
+      ${t.status==='uploading'?`<button class="tm-cancel" onclick="S.cancelUpload=true;S._xhr&&S._xhr.abort()" title="Cancel"><i class="fas fa-times"></i></button>`:''}
     </div>`;
   }).join('');
 }
 
-// Lock current drive (logout from password-protected drive)
-function lockDrive(){
-  if(!S.driveId)return;
-  const d=S.db.drives.find(x=>x.id===S.driveId);
-  if(!d||!d.passwordHash)return;
-  S.ses.unlocked=S.ses.unlocked.filter(id=>id!==S.driveId);
-  saveSes();
-  goHome();
-  toast(`${d.letter}: drive locked`,'info');
+function renderLoginScreen(returnTo=''){
+  const el=$('authScreen');if(!el)return;
+  el.innerHTML=`<div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo"><i class="fas fa-hard-drive"></i></div>
+      <h2 class="auth-title">Sign In</h2>
+      <p class="auth-sub">Enter your credentials to access TeleDrive</p>
+      <div id="authError" class="auth-err hidden"></div>
+      <div class="tabs" id="authTabs">
+        <button class="tab active" onclick="switchAuthTab('user',this)">User</button>
+        <button class="tab" onclick="switchAuthTab('admin',this)">Admin</button>
+      </div>
+      <div id="authUserForm">
+        <input class="inp" type="text" id="authUsername" placeholder="Username" autocomplete="username">
+        <input class="inp" type="password" id="authPassword" placeholder="Password" autocomplete="current-password">
+        <button class="btn-p w100" id="authLoginBtn" onclick="doLogin()"><i class="fas fa-sign-in-alt"></i> Sign In</button>
+      </div>
+      <div id="authAdminForm" class="hidden">
+        <input class="inp" type="password" id="authAdminPass" placeholder="Admin password" autocomplete="current-password">
+        <button class="btn-p w100" onclick="doAdminLogin()"><i class="fas fa-user-shield"></i> Admin Login</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function switchAuthTab(mode,btn){
+  document.querySelectorAll('#authTabs .tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  $('authUserForm').classList.toggle('hidden',mode==='admin');
+  $('authAdminForm').classList.toggle('hidden',mode==='user');
+}
+
+function syncAdminUI(){
+  const logoutBtn=$('logoutBtn');
+  const isAuth=S.ses.role==='admin'||S.ses.role==='user';
+  if(logoutBtn)logoutBtn.classList.toggle('hidden',!isAuth);
+  const adminFab=$('adminFab');
+  if(adminFab)adminFab.classList.toggle('hidden',S.ses.role!=='admin');
 }
