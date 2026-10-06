@@ -93,3 +93,6 @@ function renderSimplePage(title, icon, color, msg) {
   var pc=$('pageContent'); if(!pc) return;
   pc.innerHTML = '<div class="inner-page"><div class="page-hd"><h2>'+title+'</h2></div><div class="empty-state" style="min-height:300px"><div class="empty-icon"><i class="fas '+icon+'" style="color:'+color+'"></i></div><h3>'+msg+'</h3><p>Coming soon</p></div></div>';
 }
+window.addEventListener('hashchange', function() {
+  handleInitialHash();
+});

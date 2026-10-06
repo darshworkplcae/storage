@@ -254,7 +254,7 @@ async function renderQuotaPage(){
   // Refresh live quota
   if(S.ses.role==='admin'&&drives.length){
     const r=await apiDriveQuota().catch(()=>null);
-    if(r?.drives){r.drives.forEach(qd=>{const d=S.db?.drives?.find(x=>x.id===qd.id);if(d&&!qd.error){d.capacity=qd.capacity;d.usedBytes=qd.usedBytes;}});renderSidebarStorage();renderQuotaPage();}
+    if(r?.drives){r.drives.forEach(qd=>{const d=S.db?.drives?.find(x=>x.id===qd.id);if(d&&!qd.error){d.capacity=qd.capacity;d.usedBytes=qd.usedBytes;}});renderSidebarStorage();}
   }
 }
 

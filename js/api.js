@@ -72,20 +72,30 @@ function uploadToGoogle(uploadUrl, file, onProgress, cancelSignal) {
     };
 
     xhr.onload = function() {
+      // 200, 201 means completed file created
       if(xhr.status === 200 || xhr.status === 201) {
         try {
-          var resp = JSON.parse(xhr.responseText);
+          var resp = JSON.parse(xhr.responseText || '{}');
           resolve({ googleFileId: resp.id });
         } catch(e) {
           resolve({ googleFileId: null });
         }
+      } else if (xhr.status === 308) {
+        // Resumable incomplete, but for single-shot upload this shouldn't happen unless chunked
+        resolve({ googleFileId: null, status: 308 });
       } else {
-        reject(new Error('Upload to Google failed: HTTP ' + xhr.status + ' — ' + xhr.responseText.substring(0,200)));
+        var msg = 'Upload error (HTTP ' + xhr.status + ')';
+        try {
+          var errObj = JSON.parse(xhr.responseText);
+          if (errObj && errObj.error && errObj.error.message) msg += ': ' + errObj.error.message;
+        } catch(e) {}
+        reject(new Error(msg));
       }
     };
 
-    xhr.onerror = function() {
-      reject(new Error('Network error — check your internet connection'));
+    xhr.onerror = function(err) {
+      // Detailed error if possible
+      reject(new Error('Network error — upload interrupted or blocked by browser'));
     };
     xhr.onabort = function() { reject(new Error('Cancelled')); };
 
