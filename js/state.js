@@ -1,11 +1,21 @@
-// TELEDRIVE — Global State
+// TeleDrive — App State
 const S = {
-  db:  { v:2, adminHash:'', drives:[], folders:[], files:[], activityLog:[] },
-  cfg: { botToken:'', chatId:'' },
-  ses: { isAdmin:false, unlocked:[] },
-  driveId:null, folderId:null, selectedId:null,
-  navHist:[], navIdx:-1,
-  view:'grid', sort:'name',
-  filter:'all', filterExt:'',
-  uploading:false, cancelUpload:false, _xhr:null,
+  db: null,           // loaded from API
+  driveId: null,
+  folderId: null,
+  view: 'grid',
+  sort: 'name',
+  filter: 'all',
+  filterExt: '',
+  uploading: false,
+  cancelUpload: false,
+  navHist: [],
+  navIdx: -1,
+  ses: {
+    token: null,
+    role: null,       // 'admin' | 'user' | null
+    userId: null,
+    username: null,
+    allowedDrives: 'all',
+  },
 };
