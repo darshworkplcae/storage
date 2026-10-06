@@ -74,11 +74,35 @@ async function doAdminLogin() {
   } else setLpError('adminErr', r.error||'Wrong password');
 }
 
+function syncLiveQuota() {
+  if (!S.ses || !S.ses.token) return;
+  apiDriveQuota().then(function(res){
+    if (res && res.drives && S.db && S.db.drives) {
+      var changed = false;
+      res.drives.forEach(function(qd){
+        var d = S.db.drives.find(function(x){ return x.id === qd.id; });
+        if (d && !qd.error && (d.capacity !== qd.capacity || d.usedBytes !== qd.usedBytes)) {
+          d.capacity = qd.capacity;
+          d.usedBytes = qd.usedBytes;
+          changed = true;
+        }
+      });
+      if (changed) {
+        renderSidebarStorage();
+        if (_curPage === 'files' && !_driveId) renderFilesPage(null, null);
+        if (_curPage === 'quota') renderQuotaPage();
+        if (_curPage === 'settings' && typeof renderSettingsPage === 'function') renderSettingsPage();
+      }
+    }
+  }).catch(function(){});
+}
+
 async function onLoginSuccess() {
   S.db = await apiFetchDB();
   updateSidebarProfile();
   updateNavVisibility();
   renderSidebarStorage();
+  syncLiveQuota();
   showAppShell();
   toast('Welcome'+(S.ses.username?' '+S.ses.username:'')+'!','success');
   // Route to appropriate first page
@@ -196,6 +220,7 @@ function wireEvents() {
   var syncBtn=$('syncBtn');
   if(syncBtn) syncBtn.onclick=async function(){
     S.db=await apiFetchDB();
+    syncLiveQuota();
     renderFilesPage(_driveId,_folderId);
     renderSidebarStorage();
     toast('Synced','success');
@@ -264,6 +289,7 @@ async function init() {
       updateSidebarProfile();
       updateNavVisibility();
       renderSidebarStorage();
+      syncLiveQuota();
       showAppShell();
       wireEvents();
       renderTM();

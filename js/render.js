@@ -51,7 +51,7 @@ function renderSidebarStorage(){
     {lbl:'Other',  col:'#8f91a8', val:byType.other},
   ];
   const totalCap=drives.reduce((s,d)=>s+(d.capacity||0),0);
-  const totalUsed=files.reduce((s,f)=>s+(f.size||0),0);
+  const totalUsed=drives.reduce((s,d)=>s+(d.usedBytes||0),0);
   const pct=totalCap?Math.min(100,Math.round(totalUsed/totalCap*100)):0;
   const freeBytes=Math.max(0,totalCap-totalUsed);
 
@@ -63,7 +63,7 @@ function renderSidebarStorage(){
       </div>`).join('');
   }
   const fill=$('sbQuotaFill'); if(fill)fill.style.width=pct+'%';
-  const txt=$('sbQuotaTxt'); if(txt)txt.innerHTML=`<span>${fmt(totalUsed)} used</span><span>${fmt(totalCap)||'—'}</span>`;
+  const txt=$('sbQuotaTxt'); if(txt)txt.innerHTML=`<span>${fmt(totalUsed)} used</span><span>${fmt(freeBytes)} free</span>`;
 }
 
 // ─── All Files / Explorer ───────────────────────────────
@@ -91,8 +91,8 @@ function renderFilesPage(driveId, folderId){
       return;
     }
     const search=($('globalSearch')?.value||'').toLowerCase();
-    const allowed=S.ses.allowedDrives==='all'?null:S.ses.allowedDrives;
-    const visible=drives.filter(d=>(!allowed||allowed.includes(d.id))&&(!search||d.name?.toLowerCase().includes(search)||d.email?.toLowerCase().includes(search)));
+    const allowed = getAllowedDriveIds();
+    const visible=drives.filter(d=>allowed.includes(d.id)&&(!search||d.name?.toLowerCase().includes(search)||d.email?.toLowerCase().includes(search)));
 
     pc.innerHTML=`<div class="inner-page">
       <div class="page-hd"><h2>All Files</h2><p>Browse your connected Google Drive accounts</p></div>
@@ -200,20 +200,20 @@ function goUp(){
   }else if(_driveId){navTo('files');}
 }
 
-// ─── Drive card ────────────────────────────────────────
 function driveCard(d){
-  const dynamicUsed = getDriveUsedBytes(d.id);
-  const used = dynamicUsed > 0 ? dynamicUsed : (d.usedBytes || 0);
+  const used = d.usedBytes || 0;
   const cap = d.capacity || 0;
+  const free = Math.max(0, cap - used);
   const pct = cap ? Math.min(100, Math.round(used / cap * 100)) : 0;
-  const files = (S.db?.files || []).filter(f => f.driveId === d.id && !f.trashed).length;
   const isAdmin = S.ses.role === 'admin';
   const canRename = isAdmin || (S.ses.role === 'user' && isDriveAllowed(d.id));
   return `<div class="fg-card drive-card-item" onclick="navTo('files','${esc(d.id)}')" title="${esc(d.email)}">
     <div class="fg-icon xl" style="color:${esc(d.color)}"><i class="fab fa-google-drive"></i></div>
     <div class="fg-name" style="font-weight:600;font-size:.95rem">${esc(d.name)}</div>
-    <div class="fg-meta">${fmt(used)} / ${cap?fmt(cap):'∞'} · ${pct}%</div>
-    <div class="fg-acts">
+    <div class="fg-meta">${fmt(used)} / ${cap?fmt(cap):'∞'} (${pct}%)</div>
+    <div class="dc-bar" style="margin:.45rem 0 .3rem;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden"><div class="dc-fill" style="height:100%;border-radius:3px;width:${pct}%;background:${esc(d.color)};box-shadow:0 0 8px ${esc(d.color)}66"></div></div>
+    <div class="fg-remaining" style="font-size:.76rem;color:#30d158;font-weight:600;display:flex;align-items:center;gap:4px"><i class="fas fa-circle-check" style="font-size:.7rem"></i> ${fmt(free)} free remaining</div>
+    <div class="fg-acts" style="margin-top:.4rem">
       ${canRename?`<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameDrive('${esc(d.id)}','${esc(d.name).replace(/'/g,"\\'")}')" title="Rename Drive"><i class="fas fa-pen"></i></button>`:''}
       ${isAdmin?`<button class="icon-btn xs danger" onclick="event.stopPropagation();disconnectDrive('${esc(d.id)}')" title="Disconnect"><i class="fas fa-unlink"></i></button>`:''}
       <button class="icon-btn xs" onclick="event.stopPropagation();navTo('files','${esc(d.id)}')" title="Open"><i class="fas fa-folder-open"></i></button>
@@ -386,21 +386,37 @@ async function renderQuotaPage(){
   pc.innerHTML=`<div class="inner-page">
     <div class="page-hd"><h2>Quota Tracker</h2><p>Live storage usage across ${S.ses.role==='admin'?'all connected drives':'your assigned drive'}</p></div>
     <div class="quota-grid" id="quotaGrid">
-      ${drives.length?drives.map(d=>{const dynamicUsed=getDriveUsedBytes(d.id);const used=dynamicUsed>0?dynamicUsed:(d.usedBytes||0);const cap=d.capacity||0,pct=cap?Math.min(100,Math.round(used/cap*100)):0;const free=Math.max(0,cap-used);return`<div class="quota-card">
+      ${drives.length?drives.map(d=>{const used=d.usedBytes||0;const cap=d.capacity||0;const pct=cap?Math.min(100,Math.round(used/cap*100)):0;const free=Math.max(0,cap-used);return`<div class="quota-card">
         <div class="quota-card-top">
           <div class="qc-avatar" style="background:${d.color}22;color:${d.color}">${(d.name||'?')[0].toUpperCase()}</div>
           <div><div class="qc-name">${esc(d.name)}</div><div class="qc-email">${esc(d.email)}</div></div>
         </div>
-        <div class="qc-usage">${pct}%</div>
+        <div class="qc-usage">${pct}% (${fmt(used)} used)</div>
         <div class="qc-bar"><div class="qc-fill" style="width:${pct}%;background:${d.color}"></div></div>
-        <div class="qc-meta"><span>${fmt(used)} used</span><span>${fmt(free)} free</span><span>${fmt(cap)} total</span></div>
+        <div class="qc-meta"><span>${fmt(used)} used</span><span style="color:#30d158;font-weight:600">${fmt(free)} free remaining</span><span>${fmt(cap)} total</span></div>
       </div>`}).join(''):`<div class="empty-state"><div class="empty-icon"><i class="fas fa-chart-pie"></i></div><h3>No drives connected</h3></div>`}
     </div>
   </div>`;
   // Refresh live quota for admin and private user
   if((S.ses.role==='admin'||S.ses.role==='user')&&drives.length){
     const r=await apiDriveQuota().catch(()=>null);
-    if(r?.drives){r.drives.forEach(qd=>{const d=S.db?.drives?.find(x=>x.id===qd.id);if(d&&!qd.error){d.capacity=qd.capacity;d.usedBytes=qd.usedBytes;}});renderSidebarStorage();}
+    if(r?.drives){
+      r.drives.forEach(qd=>{const d=S.db?.drives?.find(x=>x.id===qd.id);if(d&&!qd.error){d.capacity=qd.capacity;d.usedBytes=qd.usedBytes;}});
+      renderSidebarStorage();
+      // Re-populate cards if on quota page
+      const qg = $('quotaGrid');
+      if(qg && _curPage === 'quota') {
+        qg.innerHTML = drives.map(d=>{const used=d.usedBytes||0;const cap=d.capacity||0;const pct=cap?Math.min(100,Math.round(used/cap*100)):0;const free=Math.max(0,cap-used);return`<div class="quota-card">
+          <div class="quota-card-top">
+            <div class="qc-avatar" style="background:${d.color}22;color:${d.color}">${(d.name||'?')[0].toUpperCase()}</div>
+            <div><div class="qc-name">${esc(d.name)}</div><div class="qc-email">${esc(d.email)}</div></div>
+          </div>
+          <div class="qc-usage">${pct}% (${fmt(used)} used)</div>
+          <div class="qc-bar"><div class="qc-fill" style="width:${pct}%;background:${d.color}"></div></div>
+          <div class="qc-meta"><span>${fmt(used)} used</span><span style="color:#30d158;font-weight:600">${fmt(free)} free remaining</span><span>${fmt(cap)} total</span></div>
+        </div>`}).join('');
+      }
+    }
   }
 }
 

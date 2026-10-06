@@ -20,7 +20,10 @@ function renderSettingsPage() {
     drives.length===0
       ? '<div class="empty-small"><i class="fas fa-hard-drive"></i><p>No drives connected yet</p></div>'
       : '<div class="drives-grid">' + drives.map(function(d){
-          var usedPct = d.capacity>0?Math.round(d.usedBytes/d.capacity*100):0;
+          var used = d.usedBytes || 0;
+          var cap = d.capacity || 0;
+          var free = Math.max(0, cap - used);
+          var usedPct = cap > 0 ? Math.min(100, Math.round(used / cap * 100)) : 0;
           var isOpen = (db.openDriveId === d.id || d.isOpenDrive);
           return '<div class="drive-card '+(isOpen?'open-drive-card':'')+'">' +
             '<div class="dc-top">' +
@@ -36,7 +39,7 @@ function renderSettingsPage() {
               '</div>' +
             '</div>' +
             '<div class="dc-bar"><div class="dc-fill" style="width:'+usedPct+'%;background:'+d.color+'"></div></div>' +
-            '<div class="dc-usage">'+fmt(d.usedBytes)+' / '+fmt(d.capacity)+' ('+usedPct+'%)</div>' +
+            '<div class="dc-usage">'+fmt(used)+' / '+fmt(cap)+' ('+usedPct+'%) · <span style="color:#30d158;font-weight:600">'+fmt(free)+' free</span></div>' +
             '<div style="margin-top:.6rem;display:flex;gap:6px">' +
               '<button class="btn-ghost xs" style="flex:1" onclick="promptRenameDrive(\''+d.id+'\',\''+esc(d.name).replace(/'/g,"\\'")+'\')"><i class="fas fa-pen"></i> Rename</button>' +
               '<button class="btn-ghost xs" style="flex:1" onclick="toggleOpenDrive(\''+d.id+'\')"><i class="fas fa-users"></i> '+(isOpen?'Disable Open':'Make Open')+'</button>' +
