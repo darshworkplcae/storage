@@ -1,315 +1,183 @@
-// TELEDRIVE — Admin (Full-Screen at #/admin)
-const COLORS=['#0a84ff','#30d158','#ff9f0a','#bf5af2','#ff453a','#ff375f','#64d2ff','#ffd60a'];
-
-// ---- Admin Login (shown when visiting #/admin while not logged in) ----
-function showAdminLogin() {
-  const sc = $('adminScreen');
-  sc.classList.remove('hidden');
-  $('homeScreen').classList.add('hidden');
-  $('explorerView').classList.add('hidden');
-  sc.innerHTML = `
-    <div class="admin-login-wrap">
-      <div class="admin-login-box">
-        <div class="admin-login-logo"><i class="fas fa-shield-alt"></i></div>
-        <h2 class="admin-login-title">Admin Access</h2>
-        <p style="color:var(--text2);font-size:.85rem;margin-bottom:1.5rem;text-align:center">
-          This area is restricted. Enter your admin password to continue.
-        </p>
-        <div class="f-grp">
-          <input type="password" id="adminPassInp" class="f-inp" placeholder="Admin password..." autofocus>
-          <div id="adminPassErr" class="f-err" style="min-height:1.1rem;margin-top:.35rem"></div>
-        </div>
-        <button class="btn-p" id="adminPassBtn" style="width:100%;margin-top:.4rem">
-          <i class="fas fa-unlock"></i> Login
-        </button>
-        <button class="btn-s" onclick="goHome()" style="width:100%;margin-top:.6rem">
-          <i class="fas fa-arrow-left"></i> Back to Home
-        </button>
-      </div>
+// TeleDrive — Admin Panel
+function renderAdminScreen(){
+  const el=$('adminScreen');if(!el)return;
+  const db=S.db||{drives:[],files:[],folders:[],activityLog:[],users:[]};
+  const drives=db.drives||[];const files=db.files||[];const users=db.users||[];const log=db.activityLog||[];
+  const totalSize=files.reduce((s,f)=>s+(f.size||0),0);
+  el.innerHTML=`
+  <div class="admin-wrap">
+    <div class="admin-hd">
+      <div class="admin-logo"><i class="fas fa-shield-halved"></i> Admin Panel</div>
+      <button class="btn-ghost sm" onclick="goHome()"><i class="fas fa-arrow-left"></i> Back</button>
     </div>
-  `;
-  const login = async () => {
-    const p = $('adminPassInp').value;
-    if (!p) return;
-    const h = await sha256(p);
-    if (h === S.db.adminHash) {
-      S.ses.isAdmin = true; saveSes();
-      logActivity('admin_login', 'Admin login', {});
-      await saveDB();
-      syncAdminUI(); showAdminScreen();
-    } else {
-      $('adminPassErr').textContent = 'Incorrect password';
-      $('adminPassInp').value = '';
-    }
-  };
-  $('adminPassBtn').onclick = login;
-  $('adminPassInp').onkeydown = e => { if (e.key === 'Enter') login(); };
+    <div class="admin-tabs" id="adminTabs">
+      <button class="atab active" onclick="showAdminTab('overview',this)"><i class="fas fa-chart-pie"></i> Overview</button>
+      <button class="atab" onclick="showAdminTab('drives',this)"><i class="fab fa-google-drive"></i> Drives</button>
+      <button class="atab" onclick="showAdminTab('files',this)"><i class="fas fa-folder"></i> Files</button>
+      <button class="atab" onclick="showAdminTab('users',this)"><i class="fas fa-users"></i> Users</button>
+      <button class="atab" onclick="showAdminTab('log',this)"><i class="fas fa-list-ul"></i> Activity</button>
+      <button class="atab" onclick="showAdminTab('settings',this)"><i class="fas fa-sliders"></i> Settings</button>
+    </div>
+    <div id="adminContent" class="admin-content"></div>
+  </div>`;
+  showAdminTab('overview');
 }
 
-// ---- Full Admin Screen ----
-function renderAdminScreen() {
-  const sc = $('adminScreen');
-  sc.innerHTML = `
-    <div class="admin-pg">
-      <div class="admin-pg-hd">
-        <div class="admin-pg-logo"><i class="fas fa-shield-alt"></i> Admin Panel</div>
-        <div class="admin-pg-acts">
-          <button class="btn-sm" onclick="goHome()"><i class="fas fa-home"></i> Home</button>
-          <button class="btn-sm d" id="adminLogoutBtn"><i class="fas fa-sign-out-alt"></i> Logout</button>
-        </div>
-      </div>
-      <div class="admin-pg-tabs">
-        <div class="admin-pg-tab active" data-t="overview"><i class="fas fa-chart-bar"></i> Overview</div>
-        <div class="admin-pg-tab" data-t="files"><i class="fas fa-file"></i> All Files</div>
-        <div class="admin-pg-tab" data-t="drives"><i class="fas fa-hard-drive"></i> Drives</div>
-        <div class="admin-pg-tab" data-t="activity"><i class="fas fa-history"></i> Activity Log</div>
-        <div class="admin-pg-tab" data-t="settings"><i class="fas fa-cog"></i> Settings</div>
-      </div>
-      <div class="admin-pg-body" id="adminPgBody">${renderAdminTab('overview')}</div>
-    </div>
-  `;
-  sc.querySelectorAll('.admin-pg-tab').forEach(tab => {
-    tab.onclick = () => {
-      sc.querySelectorAll('.admin-pg-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      $('adminPgBody').innerHTML = renderAdminTab(tab.dataset.t);
-      bindAdminPgTab(tab.dataset.t);
-    };
-  });
-  bindAdminPgTab('overview');
-  $('adminLogoutBtn').onclick = () => {
-    S.ses.isAdmin = false; saveSes(); syncAdminUI();
-    window.location.hash = '#/'; goHome(); toast('Logged out', 'info');
-  };
-}
+function showAdminTab(tab,btn){
+  document.querySelectorAll('#adminTabs .atab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  else document.querySelector(`#adminTabs .atab`)?.classList.add('active');
+  const db=S.db||{drives:[],files:[],folders:[],activityLog:[],users:[]};
+  const drives=db.drives||[];const files=db.files||[];const users=db.users||[];const log=db.activityLog||[];
+  const totalSize=files.reduce((s,f)=>s+(f.size||0),0);
+  const el=$('adminContent');if(!el)return;
 
-function renderAdminTab(t) {
-  if (t === 'overview') {
-    const totalFiles = S.db.files.length;
-    const totalSize  = S.db.files.reduce((a,f)=>a+f.size,0);
-    const totalFolders = S.db.folders.length;
-    const drives = S.db.drives.length;
-    const recentUploads = S.db.files.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5);
-    return `
-      <div class="admin-stats">
-        <div class="stat-card"><div class="stat-n">${totalFiles}</div><div class="stat-l">Total Files</div></div>
-        <div class="stat-card"><div class="stat-n">${fmt(totalSize)}</div><div class="stat-l">Storage Used</div></div>
-        <div class="stat-card"><div class="stat-n">${totalFolders}</div><div class="stat-l">Folders</div></div>
-        <div class="stat-card"><div class="stat-n">${drives}</div><div class="stat-l">Drives</div></div>
+  if(tab==='overview'){
+    const totalCap=drives.reduce((s,d)=>s+(d.capacity||0),0);
+    const totalUsed=drives.reduce((s,d)=>s+(d.usedBytes||0),0);
+    const pct=totalCap?Math.round(totalUsed/totalCap*100):0;
+    el.innerHTML=`
+      <div class="overview-cards">
+        <div class="ov-card"><div class="ov-icon" style="background:#0a84ff22;color:#0a84ff"><i class="fab fa-google-drive"></i></div><div class="ov-txt"><span class="ov-val">${drives.length}</span><span class="ov-lbl">Drives</span></div></div>
+        <div class="ov-card"><div class="ov-icon" style="background:#30d15822;color:#30d158"><i class="fas fa-file"></i></div><div class="ov-txt"><span class="ov-val">${files.length}</span><span class="ov-lbl">Files</span></div></div>
+        <div class="ov-card"><div class="ov-icon" style="background:#bf5af222;color:#bf5af2"><i class="fas fa-users"></i></div><div class="ov-txt"><span class="ov-val">${users.length}</span><span class="ov-lbl">Users</span></div></div>
+        <div class="ov-card"><div class="ov-icon" style="background:#ff9f0a22;color:#ff9f0a"><i class="fas fa-database"></i></div><div class="ov-txt"><span class="ov-val">${fmt(totalSize)}</span><span class="ov-lbl">Stored</span></div></div>
       </div>
-      <div class="admin-section-title">Recent Uploads</div>
-      <div class="admin-file-list">
-        ${recentUploads.length ? recentUploads.map(f=>{
-          const d=S.db.drives.find(x=>x.id===f.driveId);
-          return `<div class="admin-file-row">
-            <span class="admin-file-ico">${ftCfg(f.type).em}</span>
-            <span class="admin-file-name">${esc(f.name)}</span>
-            <span class="admin-file-drive" style="color:${d?.color||'var(--primary)'}">${d?.letter||'?'}:</span>
-            <span class="admin-file-size">${fmt(f.size)}</span>
-            <span class="admin-file-date">${fmtDate(f.date)}</span>
-          </div>`;
-        }).join('') : '<div style="color:var(--text2);padding:.8rem;text-align:center">No files yet</div>'}
+      <div class="ov-section"><h3>Storage Usage</h3>
+        <div class="quota-bar big"><div class="quota-fill" style="width:${pct}%;background:var(--primary)"></div></div>
+        <div style="display:flex;justify-content:space-between;margin-top:.5rem;color:var(--text3);font-size:.85rem"><span>${fmt(totalUsed)} used</span><span>${fmt(totalCap)} total</span></div>
       </div>
-    `;
+      <div class="ov-section"><h3>Drives</h3>
+        ${drives.map(d=>{const p=d.capacity?Math.round((d.usedBytes||0)/d.capacity*100):0;return`<div class="drive-row"><span class="sb-dot" style="background:${d.color}"></span><span style="flex:1">${esc(d.email)}</span><span>${fmt(d.usedBytes||0)} / ${fmt(d.capacity||0)}</span><div class="mini-bar"><div style="width:${p}%;background:${d.color};height:100%;border-radius:2px"></div></div></div>`}).join('')}
+      </div>`;
+    // Refresh live quota
+    apiDriveQuota().then(r=>{if(!r.drives)return;r.drives.forEach(qd=>{const d=S.db?.drives?.find(x=>x.id===qd.id);if(d&&!qd.error){d.capacity=qd.capacity;d.usedBytes=qd.usedBytes;}});if($('adminContent'))showAdminTab('overview',null);});
   }
-  if (t === 'files') {
-    const q = '';
-    const allFiles = S.db.files.slice().sort((a,b)=>new Date(b.date)-new Date(a.date));
-    return `
-      <div style="display:flex;gap:.6rem;margin-bottom:1rem;align-items:center">
-        <input type="text" id="adminFileSearch" class="f-inp" placeholder="Search files..." style="max-width:280px;margin-bottom:0">
-        <span style="color:var(--text2);font-size:.82rem">${allFiles.length} total files</span>
+
+  else if(tab==='drives'){
+    el.innerHTML=`
+      <div class="admin-actions">
+        <button class="btn-p" id="connectDriveBtn" onclick="doConnectDrive()"><i class="fab fa-google-drive"></i> Connect Google Drive</button>
       </div>
-      <div class="admin-file-list" id="adminFileList">
-        ${renderAdminFileRows(allFiles)}
-      </div>
-    `;
+      <div class="drives-list">
+        ${drives.length?drives.map(d=>`
+          <div class="drive-item">
+            <div class="di-avatar" style="background:${d.color}22;color:${d.color}">${(d.name||'?')[0].toUpperCase()}</div>
+            <div class="di-info"><div class="di-name">${esc(d.name)}</div><div class="di-email">${esc(d.email)}</div><div class="di-quota">${fmt(d.usedBytes||0)} / ${fmt(d.capacity||0)}</div></div>
+            <div class="di-acts">
+              <button class="btn-ghost sm danger" onclick="disconnectDrive('${esc(d.id)}')"><i class="fas fa-unlink"></i> Disconnect</button>
+            </div>
+          </div>`).join(''):`<div class="empty-msg"><i class="fab fa-google-drive"></i><p>No drives connected yet.<br>Click "Connect Google Drive" to add your first drive.</p></div>`}
+      </div>`;
   }
-  if (t === 'drives') {
-    let h = `<div style="margin-bottom:1rem"><button class="btn-sm p" id="addDriveBtn"><i class="fas fa-plus"></i> Add Drive</button></div>`;
-    S.db.drives.forEach(d => {
-      const fc = S.db.files.filter(f=>f.driveId===d.id).length;
-      const sz = S.db.files.filter(f=>f.driveId===d.id).reduce((a,f)=>a+f.size,0);
-      const cap = d.capacity ? `${d.capacity} GB` : 'Unlimited';
-      h += `<div class="drive-row">
-        <div class="drive-row-badge" style="background:${d.color||'var(--primary)'}">${esc(d.letter)}</div>
-        <div class="drive-row-info">
-          <div class="drive-row-name">${esc(d.name)} (${esc(d.letter)}:)</div>
-          <div class="drive-row-sub">${d.passwordHash?'🔒 Password set':'🔓 No password'} · ${fc} files · ${fmt(sz)} used · Capacity: ${cap}</div>
+
+  else if(tab==='files'){
+    const search=($('adminFileSearch')?.value||'').toLowerCase();
+    const filt=search?files.filter(f=>f.name.toLowerCase().includes(search)):files;
+    el.innerHTML=`
+      <div class="admin-actions"><input class="inp" id="adminFileSearch" placeholder="Search files…" oninput="showAdminTab('files')" style="max-width:300px"></div>
+      <div class="admin-table-wrap"><table class="admin-table">
+        <thead><tr><th>Name</th><th>Drive</th><th>Size</th><th>Date</th><th></th></tr></thead>
+        <tbody>${filt.length?filt.map(f=>{const drive=drives.find(d=>d.id===f.driveId);const cfg=ftCfg(f.name,f.mimeType);return`<tr>
+          <td><i class="fas ${cfg.icon}" style="color:${cfg.col};margin-right:.4rem"></i>${esc(f.name)}</td>
+          <td><span class="sb-dot" style="background:${drive?.color||'#888'}"></span>${esc(drive?.email||'?')}</td>
+          <td>${fmt(f.size||0)}</td><td>${fmtDate(f.date)}</td>
+          <td><button class="icon-btn sm danger" onclick="confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')"><i class="fas fa-trash-alt"></i></button></td>
+        </tr>`;}).join(''):`<tr><td colspan="5" style="text-align:center;color:var(--text3)">No files found</td></tr>`}</tbody>
+      </table></div>`;
+  }
+
+  else if(tab==='users'){
+    el.innerHTML=`
+      <div class="admin-actions">
+        <button class="btn-p" onclick="showCreateUserDialog()"><i class="fas fa-user-plus"></i> Add User</button>
+      </div>
+      <div class="admin-table-wrap"><table class="admin-table">
+        <thead><tr><th>Username</th><th>Allowed Drives</th><th>Created</th><th></th></tr></thead>
+        <tbody>${users.length?users.map(u=>`<tr>
+          <td><i class="fas fa-user" style="color:var(--primary);margin-right:.4rem"></i>${esc(u.username)}</td>
+          <td>${u.allowedDrives==='all'?'<span class="badge">All Drives</span>':Array.isArray(u.allowedDrives)?(u.allowedDrives.map(id=>{const d=drives.find(x=>x.id===id);return d?`<span class="badge">${esc(d.email)}</span>`:''}).join('')):'All'}</td>
+          <td>${fmtDate(u.createdAt||'')}</td>
+          <td><button class="icon-btn sm danger" onclick="deleteUser('${esc(u.id)}','${esc(u.username)}')"><i class="fas fa-trash-alt"></i></button></td>
+        </tr>`).join(''):`<tr><td colspan="4" style="text-align:center;color:var(--text3)">No users yet. Add users so others can access TeleDrive.</td></tr>`}</tbody>
+      </table></div>`;
+  }
+
+  else if(tab==='log'){
+    el.innerHTML=`<div class="admin-table-wrap"><table class="admin-table">
+      <thead><tr><th>Action</th><th>File</th><th>Drive</th><th>Time</th></tr></thead>
+      <tbody>${log.length?log.slice(0,100).map(l=>{
+        const icons={upload:'fa-upload',download:'fa-download',delete:'fa-trash-alt',view:'fa-eye'};
+        const colors={upload:'var(--success)',download:'var(--primary)',delete:'var(--danger)',view:'var(--text2)'};
+        return`<tr>
+          <td><i class="fas ${icons[l.type]||'fa-circle'}" style="color:${colors[l.type]||'var(--text2)'};margin-right:.4rem"></i>${l.type}</td>
+          <td>${esc(l.name||l.googleFileId||'—')}</td>
+          <td>${esc(l.driveLetter||l.driveId||'—')}</td>
+          <td style="color:var(--text3);font-size:.8rem">${fmtDate(l.ts)}</td>
+        </tr>`;}).join(''):`<tr><td colspan="4" style="text-align:center;color:var(--text3)">No activity yet</td></tr>`}</tbody>
+    </table></div>`;
+  }
+
+  else if(tab==='settings'){
+    el.innerHTML=`
+      <div class="settings-section">
+        <h3>Change Admin Password</h3>
+        <div class="settings-row">
+          <input class="inp" type="password" id="newAdminPass" placeholder="New admin password (min 4 chars)">
+          <button class="btn-p" onclick="changeAdminPassword()"><i class="fas fa-key"></i> Update Password</button>
         </div>
-        <div class="drive-row-acts">
-          <button class="btn-sm editDrBtn" data-id="${d.id}">Edit</button>
-          <button class="btn-sm d delDrBtn" data-id="${d.id}">Delete</button>
+      </div>
+      <div class="settings-section">
+        <h3>Google Cloud Setup</h3>
+        <div class="setup-steps">
+          <div class="step"><span class="step-num">1</span><div><strong>Create a Google Cloud project</strong><br><a href="https://console.cloud.google.com/" target="_blank" class="link">console.cloud.google.com</a> → New Project</div></div>
+          <div class="step"><span class="step-num">2</span><div><strong>Enable Google Drive API</strong><br>APIs & Services → Enable APIs → Search "Google Drive API" → Enable</div></div>
+          <div class="step"><span class="step-num">3</span><div><strong>Create OAuth Credentials</strong><br>Credentials → Create Credentials → OAuth 2.0 Client ID → Web Application<br>Redirect URI: <code>https://tobichan.pages.dev/api/auth/callback</code></div></div>
+          <div class="step"><span class="step-num">4</span><div><strong>Set Environment Variables in Cloudflare Pages</strong><br>Pages → tobichan → Settings → Environment Variables:<br><code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code>, <code>ENCRYPTION_KEY</code> (any 32-char string), <code>UPSTASH_URL</code>, <code>UPSTASH_TOKEN</code></div></div>
+          <div class="step"><span class="step-num">5</span><div><strong>Connect Drive</strong><br>Go to Drives tab → Connect Google Drive → authorize with your Google account</div></div>
         </div>
       </div>`;
-    });
-    return h;
-  }
-  if (t === 'activity') {
-    const log = S.db.activityLog || [];
-    const iconMap = {upload:'fa-upload',download:'fa-download',delete_file:'fa-trash',delete_folder:'fa-folder-minus',view:'fa-eye',admin_login:'fa-shield-alt'};
-    const colorMap = {upload:'var(--success)',download:'var(--primary)',delete_file:'var(--danger)',delete_folder:'var(--danger)',view:'var(--text2)',admin_login:'var(--warning)'};
-    return `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-        <span style="color:var(--text2);font-size:.82rem">${log.length} events logged</span>
-        <button class="btn-sm d" id="clearLogBtn"><i class="fas fa-trash"></i> Clear Log</button>
-      </div>
-      <div class="activity-log" id="activityLog">
-        ${log.length ? log.map(e=>{
-          const ico = iconMap[e.type]||'fa-info';
-          const col = colorMap[e.type]||'var(--text2)';
-          return `<div class="activity-row">
-            <div class="activity-ico" style="color:${col}"><i class="fas ${ico}"></i></div>
-            <div class="activity-info">
-              <div class="activity-name">${esc(e.name)}</div>
-              <div class="activity-sub">${e.type.replace(/_/g,' ')}${e.driveLetter?' · Drive '+e.driveLetter+':':''}${e.size?' · '+fmt(e.size):''}</div>
-            </div>
-            <div class="activity-time">${fmtDate(e.ts)}</div>
-          </div>`;
-        }).join('') : '<div style="text-align:center;padding:3rem;color:var(--text2)"><i class="fas fa-history" style="font-size:2rem;display:block;margin-bottom:.8rem;opacity:.3"></i>No activity yet</div>'}
-      </div>
-    `;
-  }
-  if (t === 'settings') {
-    return `
-      <div class="f-grp"><label class="f-lbl">Bot Token</label><input type="password" id="sBt" class="f-inp" value="${esc(S.cfg.botToken)}"></div>
-      <div class="f-grp"><label class="f-lbl">Chat ID</label><input id="sCid" class="f-inp" value="${esc(S.cfg.chatId)}"></div>
-      <div class="f-grp"><label class="f-lbl">New Admin Password <span style="color:var(--text3)">(leave blank to keep current)</span></label><input type="password" id="sAp" class="f-inp" placeholder="New password..."></div>
-      <div class="f-grp"><label class="f-lbl">Local Bot API URL</label><input id="sApi" class="f-inp" value="${esc(LOCAL_API)}" readonly><div class="f-hint">Change in js/config.js → LOCAL_API constant</div></div>
-      <div style="margin-top:.5rem;display:flex;gap:.6rem">
-        <button class="btn-p" id="saveSetBtn">Save Settings</button>
-        <button class="btn-sm p" id="bkExport"><i class="fas fa-download"></i> Export Backup</button>
-        <button class="btn-sm" id="bkImport"><i class="fas fa-upload"></i> Import</button>
-        <input type="file" id="bkFile" accept=".json" hidden>
-      </div>
-    `;
-  }
-  return '';
-}
-
-function renderAdminFileRows(files) {
-  if (!files.length) return '<div style="text-align:center;padding:3rem;color:var(--text2)">No files</div>';
-  return files.map(f => {
-    const d = S.db.drives.find(x=>x.id===f.driveId);
-    const folder = f.folderId ? S.db.folders.find(x=>x.id===f.folderId) : null;
-    return `<div class="admin-file-row" data-id="${f.id}">
-      <span class="admin-file-ico">${ftCfg(f.type).em}</span>
-      <div class="admin-file-name-wrap">
-        <div class="admin-file-name">${esc(f.name)}</div>
-        <div class="admin-file-path" style="font-size:.7rem;color:var(--text3)">${d?.letter||'?'}:${folder?'/'+esc(folder.name):''}</div>
-      </div>
-      <span class="admin-file-size">${fmt(f.size)}</span>
-      <span class="admin-file-date">${fmtDate(f.date)}</span>
-      <div class="admin-file-acts">
-        <button class="btn-sm aDownBtn" data-id="${f.id}" title="Download"><i class="fas fa-download"></i></button>
-        <button class="btn-sm d aDelBtn" data-id="${f.id}" title="Delete"><i class="fas fa-trash"></i></button>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function bindAdminPgTab(t) {
-  const body = $('adminPgBody');
-  if (t === 'files') {
-    $('adminFileSearch')?.addEventListener('input', e => {
-      const q = e.target.value.toLowerCase();
-      const filtered = q ? S.db.files.filter(f=>f.name.toLowerCase().includes(q)) : S.db.files;
-      $('adminFileList').innerHTML = renderAdminFileRows(filtered.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)));
-      bindFileActions($('adminFileList'));
-    });
-    bindFileActions($('adminFileList'));
-  }
-  if (t === 'drives') {
-    body.querySelector('#addDriveBtn')?.addEventListener('click', () => createDriveDialog(renderAdminScreen));
-    body.querySelectorAll('.editDrBtn').forEach(btn => btn.addEventListener('click', () => {
-      const d = S.db.drives.find(x=>x.id===btn.dataset.id);
-      if (d) editDriveDialog(d, renderAdminScreen);
-    }));
-    body.querySelectorAll('.delDrBtn').forEach(btn => btn.addEventListener('click', async () => {
-      const d = S.db.drives.find(x=>x.id===btn.dataset.id);
-      if (d && confirm(`Delete "${d.name}" and ALL its files?`)) { await deleteDrive(d); renderAdminScreen(); }
-    }));
-  }
-  if (t === 'activity') {
-    $('clearLogBtn')?.addEventListener('click', async () => {
-      if (!confirm('Clear all activity logs?')) return;
-      S.db.activityLog = []; await saveDB(); renderAdminScreen();
-      $('adminPgBody').innerHTML = renderAdminTab('activity');
-      bindAdminPgTab('activity');
-    });
-  }
-  if (t === 'settings') {
-    $('saveSetBtn')?.addEventListener('click', async () => {
-      const bt = $('sBt').value.trim();
-      const cid = $('sCid').value.trim();
-      const ap = $('sAp').value;
-      if (bt) S.cfg.botToken = bt;
-      if (cid) S.cfg.chatId = cid;
-      if (ap) S.db.adminHash = await sha256(ap);
-      saveCfg();
-      const ok = await saveDB();
-      toast(ok ? 'Settings saved' : 'Saved (Upstash sync failed)', ok ? 'success' : 'warning');
-    });
-    $('bkExport')?.addEventListener('click', () => {
-      const blob = new Blob([JSON.stringify(S.db,null,2)],{type:'application/json'});
-      dlLink(URL.createObjectURL(blob),`teledrive_backup_${new Date().toISOString().slice(0,10)}.json`);
-      toast('Backup exported','success');
-    });
-    $('bkImport')?.addEventListener('click', () => $('bkFile').click());
-    $('bkFile')?.addEventListener('change', async e => {
-      const file = e.target.files[0]; if (!file) return;
-      try {
-        const d = JSON.parse(await file.text());
-        if (!d.v||!d.drives) throw new Error('Invalid backup');
-        S.db = d; if(!S.db.activityLog)S.db.activityLog=[];
-        await saveDB(); renderAdminScreen(); toast('Backup restored','success');
-      } catch(e) { toast('Import failed: '+e.message,'error'); }
-    });
   }
 }
 
-function bindFileActions(container) {
-  container?.querySelectorAll('.aDownBtn').forEach(btn => btn.addEventListener('click', () => {
-    const f = S.db.files.find(x=>x.id===btn.dataset.id); if(f) downloadFile(f);
-  }));
-  container?.querySelectorAll('.aDelBtn').forEach(btn => btn.addEventListener('click', async () => {
-    const f = S.db.files.find(x=>x.id===btn.dataset.id);
-    if (f && confirm(`Delete "${f.name}"?`)) { await deleteFile(f); renderAdminScreen(); }
-  }));
+async function doConnectDrive(){
+  const btn=$('connectDriveBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fas fa-spinner fa-spin"></i> Connecting…';}
+  toast('Opening Google authorization…','info');
+  const ok=await apiConnectDrive();
+  if(ok){toast('Drive connected!','success');S.db=await apiFetchDB();showAdminTab('drives');}
+  else{toast('Authorization was cancelled or failed','error');}
+  if(btn){btn.disabled=false;btn.innerHTML='<i class="fab fa-google-drive"></i> Connect Google Drive';}
 }
 
-// Drive management
-function createDriveDialog(cb) {
-  let color=COLORS[0];
-  const{box,close}=modal(`<div class="modal-hd"><div class="modal-ttl">Create Drive</div><button class="modal-x modal-cls"><i class="fas fa-times"></i></button></div><div class="modal-bd"><div class="f-grp"><label class="f-lbl">Drive Name</label><input id="cdName" class="f-inp" placeholder="e.g. My Drive" autofocus></div><div class="f-grp"><label class="f-lbl">Drive Letter</label><input id="cdLetter" class="f-inp" placeholder="T" maxlength="1" style="width:80px;text-transform:uppercase"></div><div class="f-grp"><label class="f-lbl">Capacity (GB)</label><input id="cdCap" class="f-inp" type="number" placeholder="Leave blank for Unlimited"></div><div class="f-grp"><label class="f-lbl">Color</label><div class="color-grid">${COLORS.map((c,i)=>`<div class="c-swatch${i===0?' active':''}" data-c="${c}" style="background:${c}"></div>`).join('')}</div></div><div class="f-grp"><label class="f-lbl">Password (optional)</label><input type="password" id="cdPass" class="f-inp" placeholder="Leave blank for no password"></div></div><div class="modal-ft"><button class="btn-s modal-cls">Cancel</button><button id="cdCreate" class="btn-p">Create Drive</button></div>`);
-  box.querySelectorAll('.c-swatch').forEach(s=>{s.onclick=()=>{color=s.dataset.c;box.querySelectorAll('.c-swatch').forEach(x=>x.classList.remove('active'));s.classList.add('active');};});
-  box.querySelector('#cdLetter').oninput=e=>e.target.value=e.target.value.toUpperCase().replace(/[^A-Z]/g,'');
-  box.querySelector('#cdCreate').onclick=async()=>{
-    const name=box.querySelector('#cdName').value.trim();
-    const letter=box.querySelector('#cdLetter').value.trim().toUpperCase();
-    const pass=box.querySelector('#cdPass').value;
-    const cap=parseInt(box.querySelector('#cdCap').value)||null;
-    if(!name||!letter){toast('Fill name and letter','error');return;}
-    if(S.db.drives.find(d=>d.letter===letter)){toast('Letter in use','error');return;}
-    S.db.drives.push({id:uid(),letter,name,color,passwordHash:pass?await sha256(pass):null,capacity:cap,createdAt:new Date().toISOString()});
-    await saveDB();close();renderHome();toast(`Drive ${letter}: created`,'success');if(cb)cb();
-  };
+async function changeAdminPassword(){
+  const p=$('newAdminPass')?.value;
+  if(!p||p.length<4){toast('Password must be at least 4 characters','warning');return;}
+  const r=await apiChangeAdminPassword(p);
+  if(r.ok){toast('Password updated','success');$('newAdminPass').value='';}
+  else toast(r.error||'Failed','error');
 }
-function editDriveDialog(drive, cb) {
-  const{box,close}=modal(`<div class="modal-hd"><div class="modal-ttl">Edit Drive — ${esc(drive.letter)}:</div><button class="modal-x modal-cls"><i class="fas fa-times"></i></button></div><div class="modal-bd"><div class="f-grp"><label class="f-lbl">Drive Name</label><input id="edName" class="f-inp" value="${esc(drive.name)}" autofocus></div><div class="f-grp"><label class="f-lbl">Capacity (GB)</label><input id="edCap" class="f-inp" type="number" value="${drive.capacity||''}" placeholder="Blank = Unlimited"></div><div class="f-grp"><label class="f-lbl">${drive.passwordHash?'Change Password':'Set Password (optional)'}</label><input type="password" id="edPass" class="f-inp" placeholder="New password...">${drive.passwordHash?'<div class="f-hint"><label><input type="checkbox" id="edRemPass" style="margin-right:.3rem"> Remove password</label></div>':''}</div></div><div class="modal-ft"><button class="btn-s modal-cls">Cancel</button><button id="edSave" class="btn-p">Save</button></div>`);
-  box.querySelector('#edSave').onclick=async()=>{
-    const name=box.querySelector('#edName').value.trim();
-    const pass=box.querySelector('#edPass').value;
-    const rem=box.querySelector('#edRemPass')?.checked;
-    const cap=parseInt(box.querySelector('#edCap').value)||null;
-    const d=S.db.drives.find(x=>x.id===drive.id);
-    if(d){if(name)d.name=name;d.capacity=cap;if(rem)d.passwordHash=null;else if(pass)d.passwordHash=await sha256(pass);}
-    await saveDB();close();renderHome();toast('Drive updated','success');if(cb)cb();
-  };
+
+function showCreateUserDialog(){
+  const username=prompt('Username:');if(!username?.trim())return;
+  const password=prompt('Password:');if(!password)return;
+  const drivesInput=prompt('Allowed drives (comma-separated emails, or leave blank for all):');
+  let allowedDrives='all';
+  if(drivesInput?.trim()){
+    const emails=drivesInput.split(',').map(e=>e.trim());
+    const ids=(S.db?.drives||[]).filter(d=>emails.includes(d.email)).map(d=>d.id);
+    if(ids.length)allowedDrives=ids;
+  }
+  apiCreateUser(username.trim(),password,allowedDrives).then(async r=>{
+    if(r.ok){toast(`User "${username}" created`,'success');S.db=await apiFetchDB();showAdminTab('users');}
+    else toast(r.error||'Failed','error');
+  });
 }
-async function deleteDrive(d){
-  const files=S.db.files.filter(f=>f.driveId===d.id);
-  for(const f of files)for(const c of f.chunks)await tgDelete(c.msgId);
-  S.db.files=S.db.files.filter(f=>f.driveId!==d.id);S.db.folders=S.db.folders.filter(f=>f.driveId!==d.id);S.db.drives=S.db.drives.filter(x=>x.id!==d.id);
-  await saveDB();renderHome();toast(`Drive ${d.letter}: deleted`,'success');
+
+function deleteUser(userId,username){
+  if(!confirm(`Delete user "${username}"?`))return;
+  apiDeleteUser(userId).then(async r=>{
+    if(r.ok){toast('User deleted','success');S.db=await apiFetchDB();showAdminTab('users');}
+    else toast(r.error||'Failed','error');
+  });
 }
