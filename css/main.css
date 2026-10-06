@@ -719,3 +719,135 @@ body {
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(78, 134, 245, 0.15) !important;
   border: 1px solid var(--glass-border);
 }
+/* ═══ Media Thumbnails in Grid Cards ═══ */
+.fg-thumb-wrap {
+  width: 100%;
+  height: 110px;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.35rem;
+}
+.fg-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.35s ease;
+}
+.fg-card:hover .fg-thumb {
+  transform: scale(1.08);
+}
+.thumb-hover-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 1.2rem;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.fg-card:hover .thumb-hover-overlay {
+  opacity: 1;
+}
+.video-thumb-wrap {
+  background: #000;
+}
+.fg-thumb-vid {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.video-play-badge {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(78, 134, 245, 0.85);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+  pointer-events: none;
+  transition: transform 0.2s ease;
+}
+.fg-card:hover .video-play-badge {
+  transform: scale(1.15);
+  background: #4e86f5;
+}
+
+/* ═══ Layout Switcher Buttons ═══ */
+.layout-toggle-btns {
+  display: flex;
+  background: var(--bg4);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+.layout-toggle-btns .vsz {
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  background: none;
+  color: var(--text3);
+  font-size: 0.85rem;
+  transition: 0.15s;
+}
+.layout-toggle-btns .vsz.active {
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(78, 134, 245, 0.4);
+}
+
+/* ═══ Open Drive Badges & Settings ═══ */
+.badge-open {
+  display: inline-block;
+  background: rgba(46, 209, 88, 0.15);
+  color: #2ed158;
+  border: 1px solid rgba(46, 209, 88, 0.3);
+  font-size: 0.7rem;
+  padding: 2px 7px;
+  border-radius: 12px;
+  font-weight: 600;
+  margin-left: 0.4rem;
+}
+.open-drive-card {
+  border: 1px solid rgba(46, 209, 88, 0.4) !important;
+  box-shadow: 0 4px 20px rgba(46, 209, 88, 0.15) !important;
+}
+
+/* ═══ Modal Mode for Login Page ═══ */
+.login-fullpage.modal-mode {
+  background: rgba(10, 11, 18, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  z-index: 1200;
+}
+.lp-close-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.lp-close-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  transform: scale(1.1);
+}

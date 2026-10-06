@@ -69,11 +69,15 @@ function handleInitialHash() {
   navTo(valid.indexOf(page)>=0?page:'files', driveId, folderId);
 }
 
-function setGridSize(sz) {
-  S.view = sz;
-  document.querySelectorAll('.vsz').forEach(function(b){ b.classList.toggle('active', b.dataset.sz===sz); });
+function setLayoutMode(isList) {
+  S.listMode = !!isList;
+  var btnGrid = $('btnGridView');
+  var btnList = $('btnListView');
+  if(btnGrid) btnGrid.classList.toggle('active', !S.listMode);
+  if(btnList) btnList.classList.toggle('active', !!S.listMode);
   if(_driveId||_curPage==='files') renderFilesPage(_driveId, _folderId);
 }
+function setGridSize(sz) { setLayoutMode(sz === 'list'); }
 
 function switchTab(mode, btn) {
   btn.parentElement.querySelectorAll('.seg').forEach(function(b){ b.classList.remove('active'); });

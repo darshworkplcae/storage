@@ -21,6 +21,7 @@
   </div>
 
   <div class="lp-card">
+    <button class="lp-close-btn" onclick="hideSignInModal()" title="Close"><i class="fas fa-times"></i></button>
     <!-- Logo -->
     <div class="lp-logo">
       <div class="lp-logo-icon"><i class="fas fa-hard-drive"></i></div>
@@ -134,11 +135,10 @@
         <input type="text" id="globalSearch" placeholder="Search Documents… (Ctrl+K)">
       </div>
       <div class="topbar-right">
-        <div class="view-size-btns" title="XS=tiny grid  SM=small  MD=medium  LG=large cards">
-          <button class="vsz" data-sz="xs" onclick="setGridSize('xs')">XS</button>
-          <button class="vsz" data-sz="sm" onclick="setGridSize('sm')">SM</button>
-          <button class="vsz active" data-sz="md" onclick="setGridSize('md')">MD</button>
-          <button class="vsz" data-sz="lg" onclick="setGridSize('lg')">LG</button>
+        <button class="btn-ghost sm" id="guestSignInBtn" onclick="showSignInModal()"><i class="fas fa-arrow-right-to-bracket"></i> Sign In</button>
+        <div class="layout-toggle-btns" title="Switch layout">
+          <button class="vsz active" id="btnGridView" onclick="setLayoutMode(false)" title="Grid View"><i class="fas fa-grip"></i></button>
+          <button class="vsz" id="btnListView" onclick="setLayoutMode(true)" title="List View"><i class="fas fa-list"></i></button>
         </div>
         <div class="upload-group">
           <button class="btn-primary sm hidden" id="uploadBtn"><i class="fas fa-upload"></i> Upload</button>

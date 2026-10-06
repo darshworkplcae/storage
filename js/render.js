@@ -199,8 +199,25 @@ function folderCard(f){
 function fileCard(f){
   const cfg=ftCfg(f.name,f.mimeType),isAdmin=S.ses.role==='admin';
   const isMedia=['image','video','audio'].includes(cfg.cat);
-  return `<div class="fg-card" ondblclick="${isMedia?`openMedia('${esc(f.id)}')`:`downloadFile('${esc(f.id)}')`}" onclick="selectCard(this)">
-    <div class="fg-icon" style="color:${cfg.col}"><i class="fas ${cfg.icon}"></i></div>
+  const isImage=cfg.cat==='image';
+  const isVideo=cfg.cat==='video';
+  const driveId=f.driveId||_driveId||(S.db&&S.db.drives&&S.db.drives[0]?S.db.drives[0].id:'');
+  const previewUrl=getFileDownloadUrl(f.googleFileId, driveId, true);
+
+  return `<div class="fg-card ${isImage?'is-image':isVideo?'is-video':''}" ondblclick="${isMedia?`openMedia('${esc(f.id)}')`:`downloadFile('${esc(f.id)}')`}" onclick="selectCard(this)">
+    ${isImage ? `
+      <div class="fg-thumb-wrap">
+        <img class="fg-thumb" src="${previewUrl}" alt="${esc(f.name)}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\'fg-icon\' style=\'color:${cfg.col}\'><i class=\'fas ${cfg.icon}\'></i></div>'">
+        <div class="thumb-hover-overlay"><i class="fas fa-eye"></i></div>
+      </div>
+    ` : isVideo ? `
+      <div class="fg-thumb-wrap video-thumb-wrap">
+        <video class="fg-thumb-vid" src="${previewUrl}#t=0.5" preload="metadata" muted playsinline></video>
+        <div class="video-play-badge"><i class="fas fa-play"></i></div>
+      </div>
+    ` : `
+      <div class="fg-icon" style="color:${cfg.col}"><i class="fas ${cfg.icon}"></i></div>
+    `}
     <div class="fg-name" title="${esc(f.name)}">${esc(f.name)}</div>
     <div class="fg-meta">${fmt(f.size||0)}</div>
     <div class="fg-acts">

@@ -21,7 +21,8 @@ function renderSettingsPage() {
       ? '<div class="empty-small"><i class="fas fa-hard-drive"></i><p>No drives connected yet</p></div>'
       : '<div class="drives-grid">' + drives.map(function(d){
           var usedPct = d.capacity>0?Math.round(d.usedBytes/d.capacity*100):0;
-          return '<div class="drive-card"><div class="dc-top"><div class="dc-icon" style="background:'+d.color+'22;color:'+d.color+'"><i class="fas fa-hard-drive"></i></div><div class="dc-info"><div class="dc-name">'+esc(d.name)+'</div><div class="dc-email">'+esc(d.email)+'</div></div><button class="icon-btn danger sm" onclick="disconnectDrive(\''+d.id+'\')" title="Disconnect"><i class="fas fa-unlink"></i></button></div><div class="dc-bar"><div class="dc-fill" style="width:'+usedPct+'%;background:'+d.color+'"></div></div><div class="dc-usage">'+fmt(d.usedBytes)+' / '+fmt(d.capacity)+' ('+usedPct+'%)</div></div>';
+          var isOpen = (db.openDriveId === d.id || d.isOpenDrive);
+          return '<div class="drive-card '+(isOpen?'open-drive-card':'')+'"><div class="dc-top"><div class="dc-icon" style="background:'+d.color+'22;color:'+d.color+'"><i class="fas fa-hard-drive"></i></div><div class="dc-info"><div class="dc-name">'+esc(d.name)+' '+(isOpen?'<span class="badge-open">Open Drive</span>':'')+'</div><div class="dc-email">'+esc(d.email)+'</div></div><button class="icon-btn danger sm" onclick="disconnectDrive(\''+d.id+'\')" title="Disconnect"><i class="fas fa-unlink"></i></button></div><div class="dc-bar"><div class="dc-fill" style="width:'+usedPct+'%;background:'+d.color+'"></div></div><div class="dc-usage">'+fmt(d.usedBytes)+' / '+fmt(d.capacity)+' ('+usedPct+'%)</div><div style="margin-top:.6rem"><button class="btn-ghost xs" style="width:100%" onclick="toggleOpenDrive(\''+d.id+'\')"><i class="fas fa-users"></i> '+(isOpen?'Disable Open Access':'Make Default Open Drive')+'</button></div></div>';
         }).join('') + '</div>',
     '</div>',
 
@@ -139,4 +140,18 @@ async function changeAdminPass() {
   var r=await apiChangeAdminPass(np.value);
   if(r.ok){toast('Password updated! Please log in again.','success');doLogout();}
   else toast(r.error||'Failed','error');
+}
+
+async function toggleOpenDrive(id) {
+  var db = S.db || {};
+  db.openDriveId = (db.openDriveId === id) ? null : id;
+  (db.drives || []).forEach(function(d){ d.isOpenDrive = (d.id === db.openDriveId); });
+  var r = await apiFetch('admin/open-drive', { method: 'POST', body: JSON.stringify({ openDriveId: db.openDriveId }) });
+  if (r.ok) {
+    toast(db.openDriveId ? 'Open Drive enabled for friends!' : 'Open Drive disabled', 'success');
+    S.db = await apiFetchDB();
+    renderSettingsPage();
+  } else {
+    toast(r.error || 'Failed to update open drive', 'error');
+  }
 }

@@ -2,8 +2,38 @@ var _cancelSignal = { cancelled: false };
 
 async function uploadFiles(fileList) {
   var files = Array.from(fileList);
-  if (!S.ses || !S.ses.token) { toast('Please sign in first', 'warning'); return; }
-  if (!_driveId) { toast('Open a drive first, then upload', 'warning'); return; }
+  var isOpenTarget = (_driveId && S.db && S.db.openDriveId && _driveId === S.db.openDriveId);
+  var isAuth = (S.ses && S.ses.token);
+
+  if (!isAuth && !isOpenTarget) {
+    showSignInModal();
+    toast('Please sign in or select the open drive', 'warning');
+    return;
+  }
+  if (!_driveId) {
+    if (S.db && S.db.openDriveId) {
+      _driveId = S.db.openDriveId;
+    } else {
+      toast('Open a drive first, then upload', 'warning');
+      return;
+    }
+  }
+
+  // If guest uploading to open drive, only allow photos and videos:
+  if (!isAuth && isOpenTarget) {
+    var validFiles = files.filter(function(file) {
+      var isMedia = (file.type && (file.type.startsWith('image/') || file.type.startsWith('video/'))) ||
+                    /\.(jpg|jpeg|png|gif|webp|mp4|mov|mkv|webm|avi)$/i.test(file.name);
+      return isMedia;
+    });
+    if (validFiles.length < files.length) {
+      toast('Open drive only accepts photos and videos!', 'warning');
+    }
+    files = validFiles;
+  }
+
+  if (files.length === 0) return;
+
   for(var i=0; i<files.length; i++) {
     if(_cancelSignal.cancelled) break;
     await uploadOne(files[i]);

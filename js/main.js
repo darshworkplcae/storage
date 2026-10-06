@@ -1,3 +1,23 @@
+function showSignInModal() {
+  var lp = $('loginPage');
+  if(lp) {
+    lp.style.display = 'flex';
+    lp.classList.add('modal-mode');
+  }
+}
+function hideSignInModal() {
+  var lp = $('loginPage');
+  if(lp) {
+    if(S.ses && S.ses.token) {
+      lp.style.display = 'none';
+    } else {
+      // If guest, keep appShell visible and close modal
+      lp.style.display = 'none';
+      showAppShell();
+    }
+  }
+}
+
 // ─── Admin login overlay ──────────────────────────────────────────────────────
 function showAdminLogin(e) {
   if(e) e.preventDefault();
@@ -96,10 +116,14 @@ function updateNavVisibility() {
 }
 
 function updateUploadBtnVisibility() {
-  var show = !!S.ses.token && !!_driveId;
+  var isOpenTarget = (_driveId && S.db && S.db.openDriveId && _driveId === S.db.openDriveId);
+  var canUpload = !!S.ses.token || isOpenTarget;
+  var show = canUpload && !!_driveId;
   ['uploadBtn','folderUpBtn','newFolderBtn','syncBtn'].forEach(function(id){
     var el=$(id); if(el) el.classList.toggle('hidden',!show);
   });
+  var guestInBtn = $('guestSignInBtn');
+  if(guestInBtn) guestInBtn.classList.toggle('hidden', !!S.ses.token);
 }
 
 // ─── Wire events ─────────────────────────────────────────────────────────────
@@ -185,9 +209,20 @@ async function init() {
     }
   }
 
-  // Not logged in — show login page
-  showLoginPage();
+  // Not logged in: show Open Drive view (friends photo/video drive) with Sign In button on top!
+  S.db = await apiFetchDB().catch(function(){return null;});
+  showAppShell();
+  updateSidebarProfile();
+  updateNavVisibility();
+  renderSidebarStorage();
   wireEvents();
+  renderTM();
+  // If open drive exists, navigate to it automatically!
+  if(S.db && S.db.openDriveId) {
+    navTo('files', S.db.openDriveId);
+  } else {
+    navTo('files');
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);
