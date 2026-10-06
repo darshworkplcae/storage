@@ -14,6 +14,22 @@ function renderSidebarProfile(){
   if(syncBtn)syncBtn.classList.toggle('hidden',true); // hidden unless in explorer
 }
 
+function getAllowedDriveIds(){
+  if(!S.ses||!S.ses.token){
+    return (S.db&&S.db.openDriveId)?[S.db.openDriveId]:[];
+  }
+  if(S.ses.role==='admin'||S.ses.allowedDrives==='all'){
+    return (S.db&&S.db.drives||[]).map(d=>d.id);
+  }
+  return (S.ses.allowedDrives||'').split(',').map(s=>s.trim()).filter(Boolean);
+}
+
+function isDriveAllowed(driveId){
+  if(!driveId)return false;
+  const allowed=getAllowedDriveIds();
+  return allowed.length===0||allowed.includes(driveId);
+}
+
 function getDriveUsedBytes(driveId){
   const db = S.db;
   if (!db || !db.files) return 0;
@@ -23,7 +39,9 @@ function getDriveUsedBytes(driveId){
 
 function renderSidebarStorage(){
   const db=S.db; if(!db)return;
-  const drives=db.drives||[], files=(db.files||[]).filter(f => !f.trashed);
+  const allowed=getAllowedDriveIds();
+  const drives=(db.drives||[]).filter(d=>allowed.length===0||allowed.includes(d.id));
+  const files=(db.files||[]).filter(f=>!f.trashed&&(allowed.length===0||allowed.includes(f.driveId)));
   const byType={image:0,video:0,audio:0,doc:0,other:0};
   files.forEach(f=>{const c=ftCfg(f.name,f.mimeType).cat;byType[c]=(byType[c]||0)+(f.size||0);});
   const types=[
@@ -190,12 +208,13 @@ function driveCard(d){
   const pct = cap ? Math.min(100, Math.round(used / cap * 100)) : 0;
   const files = (S.db?.files || []).filter(f => f.driveId === d.id && !f.trashed).length;
   const isAdmin = S.ses.role === 'admin';
+  const canRename = isAdmin || (S.ses.role === 'user' && isDriveAllowed(d.id));
   return `<div class="fg-card drive-card-item" onclick="navTo('files','${esc(d.id)}')" title="${esc(d.email)}">
     <div class="fg-icon xl" style="color:${esc(d.color)}"><i class="fab fa-google-drive"></i></div>
     <div class="fg-name" style="font-weight:600;font-size:.95rem">${esc(d.name)}</div>
     <div class="fg-meta">${fmt(used)} / ${cap?fmt(cap):'∞'} · ${pct}%</div>
     <div class="fg-acts">
-      ${isAdmin?`<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameDrive('${esc(d.id)}','${esc(d.name).replace(/'/g,"\\'")}')" title="Rename"><i class="fas fa-pen"></i></button>`:''}
+      ${canRename?`<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameDrive('${esc(d.id)}','${esc(d.name).replace(/'/g,"\\'")}')" title="Rename Drive"><i class="fas fa-pen"></i></button>`:''}
       ${isAdmin?`<button class="icon-btn xs danger" onclick="event.stopPropagation();disconnectDrive('${esc(d.id)}')" title="Disconnect"><i class="fas fa-unlink"></i></button>`:''}
       <button class="icon-btn xs" onclick="event.stopPropagation();navTo('files','${esc(d.id)}')" title="Open"><i class="fas fa-folder-open"></i></button>
     </div>
@@ -362,9 +381,10 @@ async function deleteSelectedFiles() {
 // ─── Quota Tracker ─────────────────────────────────────
 async function renderQuotaPage(){
   const pc=$('pageContent');if(!pc)return;
-  const drives=S.db?.drives||[];
+  const allowed=getAllowedDriveIds();
+  const drives=(S.db?.drives||[]).filter(d=>allowed.length===0||allowed.includes(d.id));
   pc.innerHTML=`<div class="inner-page">
-    <div class="page-hd"><h2>Quota Tracker</h2><p>Live storage usage across all connected drives</p></div>
+    <div class="page-hd"><h2>Quota Tracker</h2><p>Live storage usage across ${S.ses.role==='admin'?'all connected drives':'your assigned drive'}</p></div>
     <div class="quota-grid" id="quotaGrid">
       ${drives.length?drives.map(d=>{const dynamicUsed=getDriveUsedBytes(d.id);const used=dynamicUsed>0?dynamicUsed:(d.usedBytes||0);const cap=d.capacity||0,pct=cap?Math.min(100,Math.round(used/cap*100)):0;const free=Math.max(0,cap-used);return`<div class="quota-card">
         <div class="quota-card-top">
@@ -377,8 +397,8 @@ async function renderQuotaPage(){
       </div>`}).join(''):`<div class="empty-state"><div class="empty-icon"><i class="fas fa-chart-pie"></i></div><h3>No drives connected</h3></div>`}
     </div>
   </div>`;
-  // Refresh live quota
-  if(S.ses.role==='admin'&&drives.length){
+  // Refresh live quota for admin and private user
+  if((S.ses.role==='admin'||S.ses.role==='user')&&drives.length){
     const r=await apiDriveQuota().catch(()=>null);
     if(r?.drives){r.drives.forEach(qd=>{const d=S.db?.drives?.find(x=>x.id===qd.id);if(d&&!qd.error){d.capacity=qd.capacity;d.usedBytes=qd.usedBytes;}});renderSidebarStorage();}
   }
@@ -387,7 +407,11 @@ async function renderQuotaPage(){
 // ─── Recent Page ───────────────────────────────────────
 function renderRecentPage(){
   const pc=$('pageContent');if(!pc)return;
-  const files=[...(S.db?.files||[])].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,50);
+  const allowed=getAllowedDriveIds();
+  const files=[...(S.db?.files||[])]
+    .filter(f=>!f.trashed&&(allowed.length===0||allowed.includes(f.driveId)))
+    .sort((a,b)=>new Date(b.date)-new Date(a.date))
+    .slice(0,50);
   pc.innerHTML=`<div class="inner-page">
     <div class="page-hd"><h2>Recent</h2><p>Recently uploaded files</p></div>
     ${files.length?`<div class="file-grid ${S.view||'md'}">${files.map(f=>fileCard(f)).join('')}</div>`:`<div class="empty-state"><div class="empty-icon"><i class="fas fa-clock-rotate-left"></i></div><h3>No files yet</h3></div>`}
@@ -457,7 +481,8 @@ function renderTM(){
 
 function renderStarredPage() {
   const pc = $('pageContent'); if(!pc) return;
-  const starred = (S.db&&S.db.files||[]).filter(f => !!f.starred && !f.trashed);
+  const allowed = getAllowedDriveIds();
+  const starred = (S.db&&S.db.files||[]).filter(f => !f.trashed && !!f.starred && (allowed.length === 0 || allowed.includes(f.driveId)));
   pc.innerHTML = `<div class="inner-page">
     <div class="page-hd"><h2><i class="fas fa-star" style="color:#ffcc00"></i> Starred Files</h2><p>Quick access to your favorite files</p></div>
     ${starred.length ? `<div class="file-grid md">${starred.map(f => fileCard(f)).join('')}</div>` : `<div class="empty-state"><div class="empty-icon"><i class="fas fa-star" style="color:#ffcc00"></i></div><h3>No starred files</h3><p>Click the star icon on any file to bookmark it here.</p></div>`}
@@ -466,8 +491,11 @@ function renderStarredPage() {
 
 function renderTrashPage() {
   const pc = $('pageContent'); if(!pc) return;
-  const allTrashed = (S.db&&S.db.files||[]).filter(f => !!f.trashed);
+  const allowed = getAllowedDriveIds();
+  const allTrashed = (S.db&&S.db.files||[]).filter(f => !!f.trashed && (allowed.length === 0 || allowed.includes(f.driveId)));
   const isAdmin = (S.ses && S.ses.role === 'admin');
+  const isUser = (S.ses && S.ses.role === 'user');
+  const canControl = isAdmin || isUser;
   const flt = S.trashFilter || 'all';
   const trashed = flt === 'pending' ? allTrashed.filter(f => !!f.restoreRequested) : allTrashed;
   const pendingCount = allTrashed.filter(f => !!f.restoreRequested).length;
@@ -477,10 +505,10 @@ function renderTrashPage() {
     <div class="page-hd" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem">
       <div>
         <h2><i class="fas fa-trash-can" style="color:var(--danger)"></i> Recycle Bin</h2>
-        <p>${isAdmin ? 'Manage deleted files. Approve restore requests, batch delete, or empty bin.' : 'Deleted files can be restored upon admin approval.'}</p>
+        <p>${canControl ? 'Manage deleted files. Restore files, batch delete, or empty bin.' : 'Deleted files can be restored upon admin approval.'}</p>
       </div>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-        ${isAdmin && allTrashed.length ? `
+        ${canControl && allTrashed.length ? `
           <button class="btn-ghost sm danger" onclick="adminEmptyTrash()" title="Permanently delete all trash"><i class="fas fa-trash-can"></i> Empty Bin</button>
         ` : ''}
       </div>
@@ -497,7 +525,7 @@ function renderTrashPage() {
           <button class="btn-ghost sm" onclick="selectAllTrash()"><i class="fas fa-check-double"></i> Select All</button>
           ${selCount > 0 ? `<button class="btn-ghost sm" onclick="clearTrashSelection()"><i class="fas fa-times"></i> Clear (${selCount})</button>` : ''}
         ` : ''}
-        ${selCount > 0 ? (isAdmin ? `
+        ${selCount > 0 ? (canControl ? `
           <button class="btn-primary sm" onclick="batchAdminApproveRestore()"><i class="fas fa-rotate-left"></i> Restore Selected (${selCount})</button>
           <button class="btn-danger sm" onclick="batchAdminPermanentDelete()"><i class="fas fa-trash"></i> Delete Selected (${selCount})</button>
         ` : `
@@ -524,7 +552,7 @@ function renderTrashPage() {
                 </div>
               </div>
               <div style="display:flex;gap:.5rem">
-                ${isAdmin ? `
+                ${canControl ? `
                   <button class="btn-primary sm" onclick="adminApproveRestore('${esc(f.id)}')"><i class="fas fa-rotate-left"></i> Restore</button>
                   <button class="btn-ghost sm danger" onclick="adminPermanentDelete('${esc(f.id)}','${esc(f.name)}')"><i class="fas fa-trash"></i> Delete Permanently</button>
                 ` : isReq ? `
@@ -561,7 +589,8 @@ function toggleTrashSelect(id){
 
 function selectAllTrash(){
   if(!S.selectedTrash) S.selectedTrash = new Set();
-  const allTrashed = (S.db&&S.db.files||[]).filter(f => !!f.trashed);
+  const allowed = getAllowedDriveIds();
+  const allTrashed = (S.db&&S.db.files||[]).filter(f => !!f.trashed && (allowed.length === 0 || allowed.includes(f.driveId)));
   const flt = S.trashFilter || 'all';
   const trashed = flt === 'pending' ? allTrashed.filter(f => !!f.restoreRequested) : allTrashed;
   trashed.forEach(f => S.selectedTrash.add(f.id));
@@ -609,7 +638,8 @@ async function batchAdminPermanentDelete(){
 }
 
 async function adminEmptyTrash(){
-  const trashed = (S.db&&S.db.files||[]).filter(f => !!f.trashed);
+  const allowed = getAllowedDriveIds();
+  const trashed = (S.db&&S.db.files||[]).filter(f => !!f.trashed && (allowed.length === 0 || allowed.includes(f.driveId)));
   if(!trashed.length){
     toast('Recycle Bin is already empty', 'info');
     return;

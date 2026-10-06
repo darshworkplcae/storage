@@ -44,8 +44,68 @@ function syncDriveUsage(db){
     d.usedBytes=dFiles.reduce((s,f)=>s+(f.size||0),0);
   });
 }
-async function hDB(req,env){const db=await uGet(env,'td:db');if(!db)return J(null);syncDriveUsage(db);const r=await vSes(req,env,null);return J({...db,drives:(db.drives||[]).map(d=>({...d,encToken:undefined})),activityLog:r==='admin'?(db.activityLog||[]):[],users:r==='admin'?(db.users||[]):(db.users||[]).map(u=>({id:u.id,username:u.username}))});}
-async function hQ(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const db=await uGet(env,'td:db');if(!db||!db.drives)return J({drives:[]});const res=await Promise.all(db.drives.map(async d=>{try{const at=await gAT(env,d.encToken);const q=await gDQ(at);return{id:d.id,capacity:parseInt(q.storageQuota&&q.storageQuota.limit)||d.capacity,usedBytes:parseInt(q.storageQuota&&q.storageQuota.usage)||d.usedBytes};}catch(e){return{id:d.id,error:e.message};}}));return J({drives:res});}
+async function hDB(req,env){
+  const db=await uGet(env,'td:db');
+  if(!db)return J(null);
+  syncDriveUsage(db);
+  const r=await vSes(req,env,null);
+  if(r==='admin'){
+    return J({
+      ...db,
+      drives:(db.drives||[]).map(d=>({...d,encToken:undefined})),
+      activityLog:(db.activityLog||[]),
+      users:(db.users||[])
+    });
+  }
+  if(r){
+    const u=(db.users||[]).find(x=>x.id===r);
+    const allowed = u ? u.allowedDrives : null;
+    const allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
+    const userDrives = (db.drives||[]).filter(d => !allowedList || allowedList.includes(d.id)).map(d=>({...d,encToken:undefined}));
+    const userDriveIds = userDrives.map(d => d.id);
+    const userFiles = (db.files||[]).filter(f => userDriveIds.includes(f.driveId));
+    const userFolders = (db.folders||[]).filter(f => userDriveIds.includes(f.driveId));
+    const userLogs = (db.activityLog||[]).filter(l => !l.driveId || userDriveIds.includes(l.driveId));
+    return J({
+      v: db.v,
+      openDriveId: db.openDriveId,
+      drives: userDrives,
+      files: userFiles,
+      folders: userFolders,
+      activityLog: userLogs,
+      users: u ? [{ id: u.id, username: u.username }] : []
+    });
+  }
+  const openId = db.openDriveId;
+  const guestDrives = openId ? (db.drives||[]).filter(d => d.id === openId).map(d=>({...d,encToken:undefined})) : (db.drives||[]).slice(0,1).map(d=>({...d,encToken:undefined}));
+  const guestDriveIds = guestDrives.map(d => d.id);
+  const guestFiles = (db.files||[]).filter(f => guestDriveIds.includes(f.driveId));
+  const guestFolders = (db.folders||[]).filter(f => guestDriveIds.includes(f.driveId));
+  return J({
+    v: db.v,
+    openDriveId: db.openDriveId,
+    drives: guestDrives,
+    files: guestFiles,
+    folders: guestFolders,
+    activityLog: [],
+    users: []
+  });
+}
+async function hQ(req,env){
+  const ses=await vSes(req,env,null);
+  if(!ses) return J({error:'Unauthorized'},401);
+  const db=await uGet(env,'td:db');
+  if(!db||!db.drives)return J({drives:[]});
+  let drivesToQuery = db.drives;
+  if(ses !== 'admin'){
+    const u = (db.users||[]).find(x => x.id === ses);
+    const allowed = u ? u.allowedDrives : null;
+    const allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
+    if(allowedList) drivesToQuery = drivesToQuery.filter(d => allowedList.includes(d.id));
+  }
+  const res=await Promise.all(drivesToQuery.map(async d=>{try{const at=await gAT(env,d.encToken);const q=await gDQ(at);return{id:d.id,capacity:parseInt(q.storageQuota&&q.storageQuota.limit)||d.capacity,usedBytes:parseInt(q.storageQuota&&q.storageQuota.usage)||d.usedBytes};}catch(e){return{id:d.id,error:e.message};}}));
+  return J({drives:res});
+}
 async function hDD(req,env,id){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const db=await uGet(env,'td:db');db.drives=(db.drives||[]).filter(d=>d.id!==id);await uSet(env,'td:db',db);return J({ok:true});}
 async function hUI(req,env){
   const body=await req.json().catch(()=>({}));
@@ -165,16 +225,25 @@ async function hDF(req,env,fileId){
 }
 
 async function hPermanentDelete(req,env,fileId){
-  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized - Admin only'},401);
+  const ses=await vSes(req,env,null);
+  if(!ses) return J({error:'Unauthorized'},401);
   const db=await uGet(env,'td:db');
   if(!db) return J({error:'DB error'},500);
   const file=(db.files||[]).find(f=>f.id===fileId || f.googleFileId===fileId);
   if(!file) return J({error:'File not found'},404);
+  if(ses !== 'admin'){
+    const u = (db.users||[]).find(x => x.id === ses);
+    const allowed = u ? u.allowedDrives : null;
+    const allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
+    if(!u || (allowedList && !allowedList.includes(file.driveId))){
+      return J({error:'Unauthorized for this drive'},403);
+    }
+  }
   const drv=(db.drives||[]).find(d=>d.id===file.driveId);
-  if(drv){
+  if(drv && file.googleFileId){
     try{
       const at=await gAT(env,drv.encToken);
-      await fetch(`https://www.googleapis.com/drive/v3/files/${file.googleFileId}`,{method:'DELETE',headers:{Authorization:`Bearer ${at}`}});
+      await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.googleFileId)}?supportsAllDrives=true`,{method:'DELETE',headers:{Authorization:`Bearer ${at}`}});
     }catch(err){}
   }
   db.files=(db.files||[]).filter(f=>f.id!==file.id && f.googleFileId!==file.googleFileId);
@@ -197,11 +266,20 @@ async function hRequestRestore(req,env,fileId){
 }
 
 async function hApproveRestore(req,env,fileId){
-  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized - Admin only'},401);
+  const ses=await vSes(req,env,null);
+  if(!ses) return J({error:'Unauthorized'},401);
   const db=await uGet(env,'td:db');
   if(!db) return J({error:'DB error'},500);
   const file=(db.files||[]).find(f=>f.id===fileId || f.googleFileId===fileId);
   if(!file) return J({error:'File not found'},404);
+  if(ses !== 'admin'){
+    const u = (db.users||[]).find(x => x.id === ses);
+    const allowed = u ? u.allowedDrives : null;
+    const allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
+    if(!u || (allowedList && !allowedList.includes(file.driveId))){
+      return J({error:'Unauthorized for this drive'},403);
+    }
+  }
   file.trashed = false;
   file.restoreRequested = false;
   file.trashedAt = null;
@@ -270,14 +348,21 @@ async function hBatchRequestRestore(req,env){
 }
 
 async function hBatchApproveRestore(req,env){
-  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized - Admin only'},401);
+  const ses=await vSes(req,env,null);
+  if(!ses) return J({error:'Unauthorized'},401);
   const{fileIds=[]}=await req.json().catch(()=>({}));
   if(!Array.isArray(fileIds)||!fileIds.length) return J({error:'fileIds required'},400);
   const db=await uGet(env,'td:db');
   if(!db) return J({error:'DB error'},500);
+  let allowedList = null;
+  if(ses !== 'admin'){
+    const u = (db.users||[]).find(x => x.id === ses);
+    const allowed = u ? u.allowedDrives : null;
+    allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
+  }
   let count=0;
   (db.files||[]).forEach(f=>{
-    if(fileIds.includes(f.id)||fileIds.includes(f.googleFileId)){
+    if((fileIds.includes(f.id)||fileIds.includes(f.googleFileId)) && (!allowedList || allowedList.includes(f.driveId))){
       f.trashed=false;
       f.restoreRequested=false;
       f.trashedAt=null;
@@ -286,7 +371,7 @@ async function hBatchApproveRestore(req,env){
     }
   });
   (db.folders||[]).forEach(f=>{
-    if(fileIds.includes(f.id)){
+    if(fileIds.includes(f.id) && (!allowedList || allowedList.includes(f.driveId))){
       f.trashed=false;
       f.trashedAt=null;
       count++;
@@ -300,22 +385,30 @@ async function hBatchApproveRestore(req,env){
 }
 
 async function hBatchPermanentDelete(req,env){
-  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized - Admin only'},401);
+  const ses=await vSes(req,env,null);
+  if(!ses) return J({error:'Unauthorized'},401);
   const{fileIds=[]}=await req.json().catch(()=>({}));
   if(!Array.isArray(fileIds)||!fileIds.length) return J({error:'fileIds required'},400);
   const db=await uGet(env,'td:db');
   if(!db) return J({error:'DB error'},500);
-  const toDelete=(db.files||[]).filter(f=>fileIds.includes(f.id)||fileIds.includes(f.googleFileId));
+  let allowedList = null;
+  if(ses !== 'admin'){
+    const u = (db.users||[]).find(x => x.id === ses);
+    const allowed = u ? u.allowedDrives : null;
+    allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
+  }
+  const toDelete=(db.files||[]).filter(f=>(fileIds.includes(f.id)||fileIds.includes(f.googleFileId)) && (!allowedList || allowedList.includes(f.driveId)));
   for(const f of toDelete){
     const drv=(db.drives||[]).find(d=>d.id===f.driveId);
-    if(drv){
+    if(drv && f.googleFileId){
       try{
         const at=await gAT(env,drv.encToken);
-        await fetch(`https://www.googleapis.com/drive/v3/files/${f.googleFileId}`,{method:'DELETE',headers:{Authorization:`Bearer ${at}`}});
+        await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.googleFileId)}?supportsAllDrives=true`,{method:'DELETE',headers:{Authorization:`Bearer ${at}`}});
       }catch(e){}
     }
   }
-  db.files=(db.files||[]).filter(f=>!fileIds.includes(f.id)&&!fileIds.includes(f.googleFileId));
+  const delIds = toDelete.map(x=>x.id).concat(toDelete.map(x=>x.googleFileId));
+  db.files=(db.files||[]).filter(f=>!delIds.includes(f.id) && !delIds.includes(f.googleFileId));
   db.folders=(db.folders||[]).filter(f=>!fileIds.includes(f.id));
   syncDriveUsage(db);
   if(!db.activityLog) db.activityLog=[];
@@ -325,21 +418,30 @@ async function hBatchPermanentDelete(req,env){
 }
 
 async function hEmptyTrash(req,env){
-  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized - Admin only'},401);
+  const ses=await vSes(req,env,null);
+  if(!ses) return J({error:'Unauthorized'},401);
   const db=await uGet(env,'td:db');
   if(!db) return J({error:'DB error'},500);
-  const trashedFiles=(db.files||[]).filter(f=>!!f.trashed);
+  let allowedList = null;
+  if(ses !== 'admin'){
+    const u = (db.users||[]).find(x => x.id === ses);
+    const allowed = u ? u.allowedDrives : null;
+    allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
+  }
+  const trashedFiles=(db.files||[]).filter(f=>!!f.trashed && (!allowedList || allowedList.includes(f.driveId)));
   for(const f of trashedFiles){
     const drv=(db.drives||[]).find(d=>d.id===f.driveId);
-    if(drv){
+    if(drv && f.googleFileId){
       try{
         const at=await gAT(env,drv.encToken);
-        await fetch(`https://www.googleapis.com/drive/v3/files/${f.googleFileId}`,{method:'DELETE',headers:{Authorization:`Bearer ${at}`}});
+        await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.googleFileId)}?supportsAllDrives=true`,{method:'DELETE',headers:{Authorization:`Bearer ${at}`}});
       }catch(e){}
     }
   }
-  db.files=(db.files||[]).filter(f=>!f.trashed);
-  db.folders=(db.folders||[]).filter(f=>!f.trashed);
+  const purgedIds = trashedFiles.map(x=>x.id);
+  db.files=(db.files||[]).filter(f=>!purgedIds.includes(f.id));
+  if(ses === 'admin') db.folders=(db.folders||[]).filter(f=>!f.trashed);
+  else if(allowedList) db.folders=(db.folders||[]).filter(f=>!(f.trashed && allowedList.includes(f.driveId)));
   syncDriveUsage(db);
   if(!db.activityLog) db.activityLog=[];
   db.activityLog.unshift({id:uid(),type:'empty_trash',count:trashedFiles.length,ts:new Date().toISOString()});

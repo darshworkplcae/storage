@@ -100,17 +100,22 @@ function doLogout() {
 // ─── Sidebar helpers ──────────────────────────────────────────────────────────
 function updateSidebarProfile() {
   var isAdmin = S.ses.role==='admin';
+  var isUser = S.ses && S.ses.role==='user';
   var $n=$('sbName'),$r=$('sbRole'),$a=$('sbAvatar');
-  if($n) $n.textContent = isAdmin?'Admin':(S.ses.username||'User');
-  if($r) $r.textContent = isAdmin?'Administrator':'User';
-  if($a) $a.textContent = (S.ses.username||'U')[0].toUpperCase();
-  if($a) $a.style.background = isAdmin?'#4e86f5':'#30d158';
+  if($n) $n.textContent = isAdmin?'Admin':(S.ses.username||(isUser?'User':'Guest'));
+  if($r) $r.textContent = isAdmin?'Administrator':(isUser?'Private User':'Guest Visitor');
+  if($a) $a.textContent = (S.ses.username||(isAdmin?'A':'G'))[0].toUpperCase();
+  if($a) $a.style.background = isAdmin?'#4e86f5':(isUser?'#30d158':'#64748b');
 }
 
 function updateNavVisibility() {
   var isAdmin = S.ses.role==='admin';
+  var isUserOrAdmin = isAdmin || (S.ses && S.ses.role==='user');
   document.querySelectorAll('.admin-only').forEach(function(el){
     el.classList.toggle('hidden',!isAdmin);
+  });
+  document.querySelectorAll('.user-or-admin').forEach(function(el){
+    el.classList.toggle('hidden',!isUserOrAdmin);
   });
   var adminBtn=$('adminQuickBtn'); if(adminBtn) adminBtn.classList.toggle('hidden',!isAdmin);
 }
@@ -280,6 +285,19 @@ async function init() {
   renderTM();
   // Show Drive card on landing page so users can click to open it
   navTo('files');
+
+  // Check if an upload was interrupted before reload
+  try {
+    var interruptedBatch = localStorage.getItem('td_active_batch');
+    if (interruptedBatch) {
+      var batchInfo = JSON.parse(interruptedBatch);
+      if (batchInfo && batchInfo.folderName) {
+        setTimeout(function() {
+          toast('Previous upload of folder "' + batchInfo.folderName + '" was interrupted. Selecting it again will automatically resume and skip already uploaded files!', 'info', 8000);
+        }, 1500);
+      }
+    }
+  } catch(e){}
 }
 
 document.addEventListener('DOMContentLoaded', init);

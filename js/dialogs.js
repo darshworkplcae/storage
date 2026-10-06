@@ -1,4 +1,14 @@
 var _cancelSignal = { cancelled: false, paused: false, resumeResolve: null };
+window._isUploading = false;
+
+window.addEventListener('beforeunload', function(e) {
+  if (window._isUploading) {
+    var msg = 'Upload in progress! Leaving or refreshing will stop your upload.';
+    e.preventDefault();
+    e.returnValue = msg;
+    return msg;
+  }
+});
 
 function toggleUploadPause() {
   var btn = $('upPauseBtn');
@@ -54,13 +64,18 @@ async function uploadFiles(fileList, targetFolderId) {
 
   if (files.length === 0) return;
 
-  for(var i=0; i<files.length; i++) {
-    if(_cancelSignal.cancelled) break;
-    await uploadOne(files[i], targetFolderId || _folderId);
+  window._isUploading = true;
+  try {
+    for(var i=0; i<files.length; i++) {
+      if(_cancelSignal.cancelled) break;
+      await uploadOne(files[i], targetFolderId || _folderId);
+    }
+  } finally {
+    window._isUploading = false;
   }
 }
 
-// ─── Direct Folder Upload with folder hierarchy recreation ───────────────────
+// ─── Direct Folder Upload with folder hierarchy recreation & Smart Deduplication ───
 async function uploadFolder() {
   var isOpenTarget = (_driveId && S.db && S.db.openDriveId && _driveId === S.db.openDriveId);
   var isAuth = (S.ses && S.ses.token);
@@ -100,51 +115,84 @@ async function uploadFolder() {
       }
     }
 
-    toast('Preparing folder upload: ' + files.length + ' files…', 'info');
+    var rootFolder = files[0].webkitRelativePath ? files[0].webkitRelativePath.split('/')[0] : 'Folder';
+    try {
+      localStorage.setItem('td_active_batch', JSON.stringify({ folderName: rootFolder, total: files.length, time: Date.now() }));
+    } catch(e){}
+
+    window._isUploading = true;
+    toast('Preparing folder "' + rootFolder + '" (' + files.length + ' files)…', 'info');
 
     // Build directory tree in Google Drive
     var folderMap = {}; // relative path -> folderId
-    for (var i = 0; i < files.length; i++) {
-      if (_cancelSignal.cancelled) break;
-      var file = files[i];
-      var relPath = file.webkitRelativePath || file.name;
-      var parts = relPath.split('/');
-      var parentId = _folderId || null;
+    var skippedCount = 0;
+    var uploadedCount = 0;
 
-      // If file is inside subfolders, create/find them
-      if (parts.length > 1) {
-        var pathAcc = '';
-        for (var p = 0; p < parts.length - 1; p++) {
-          var folderName = parts[p];
-          pathAcc += (pathAcc ? '/' : '') + folderName;
-          if (!folderMap[pathAcc]) {
-            // Find existing or create new folder
-            var existing = (S.db && S.db.folders || []).find(function(f){
-              return f.driveId === _driveId && f.parentId === parentId && f.name === folderName;
-            });
-            if (existing) {
-              folderMap[pathAcc] = existing.id;
-              parentId = existing.id;
-            } else {
-              var created = await apiCreateFolder({ driveId: _driveId, parentFolderId: parentId, name: folderName });
-              if (created && created.folderId) {
-                folderMap[pathAcc] = created.folderId;
-                parentId = created.folderId;
-                S.db = await apiFetchDB();
+    try {
+      for (var i = 0; i < files.length; i++) {
+        if (_cancelSignal.cancelled) break;
+        var file = files[i];
+        var relPath = file.webkitRelativePath || file.name;
+        var parts = relPath.split('/');
+        var parentId = _folderId || null;
+
+        // If file is inside subfolders, create/find them
+        if (parts.length > 1) {
+          var pathAcc = '';
+          for (var p = 0; p < parts.length - 1; p++) {
+            var folderName = parts[p];
+            pathAcc += (pathAcc ? '/' : '') + folderName;
+            if (!folderMap[pathAcc]) {
+              // Find existing or create new folder
+              var existing = (S.db && S.db.folders || []).find(function(f){
+                return f.driveId === _driveId && f.parentId === parentId && f.name === folderName;
+              });
+              if (existing) {
+                folderMap[pathAcc] = existing.id;
+                parentId = existing.id;
+              } else {
+                var created = await apiCreateFolder({ driveId: _driveId, parentFolderId: parentId, name: folderName });
+                if (created && created.folderId) {
+                  folderMap[pathAcc] = created.folderId;
+                  parentId = created.folderId;
+                  S.db = await apiFetchDB();
+                }
               }
+            } else {
+              parentId = folderMap[pathAcc];
             }
-          } else {
-            parentId = folderMap[pathAcc];
           }
         }
+
+        // Smart Resume & Deduplication:
+        // Check if file with identical name and size already exists in target folder
+        var alreadyUploaded = (S.db && S.db.files || []).find(function(f){
+          return f.driveId === _driveId && f.folderId === (parentId || null) && f.name === file.name && f.size === file.size && !f.trashed;
+        });
+
+        if (alreadyUploaded) {
+          skippedCount++;
+          var st = $('upStatus');
+          if (st) st.textContent = 'Skipping already uploaded (' + skippedCount + ' skipped): ' + file.name;
+          continue;
+        }
+
+        await uploadOne(file, parentId);
+        uploadedCount++;
       }
 
-      await uploadOne(file, parentId);
+      if (skippedCount > 0) {
+        toast('Folder upload complete! ' + uploadedCount + ' uploaded, ' + skippedCount + ' existing skipped.', 'success');
+      } else {
+        toast('Folder upload complete (' + uploadedCount + ' files)', 'success');
+      }
+    } finally {
+      window._isUploading = false;
+      try { localStorage.removeItem('td_active_batch'); } catch(e){}
+      S.db = await apiFetchDB();
+      renderSidebarStorage();
+      renderFilesPage(_driveId, _folderId);
     }
-
-    S.db = await apiFetchDB();
-    renderSidebarStorage();
-    renderFilesPage(_driveId, _folderId);
   };
 
   inp.click();

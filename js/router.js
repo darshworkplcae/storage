@@ -36,7 +36,7 @@ function navTo(page, driveId, folderId) {
   if(pc) pc.innerHTML = '<div class="loading-full"><i class="fas fa-spinner fa-spin"></i></div>';
 
   if      (page==='files')    renderFilesPage(driveId, folderId);
-  else if (page==='quota')    { if(S.ses.role==='admin') renderQuotaPage(); else navTo('files'); }
+  else if (page==='quota')    { if(S.ses.role==='admin'||S.ses.role==='user') renderQuotaPage(); else navTo('files'); }
   else if (page==='recent')   renderRecentPage();
   else if (page==='activity') { if(S.ses.role==='admin') renderActivityPage(); else navTo('files'); }
   else if (page==='settings') { if(S.ses.role==='admin') renderSettingsPage(); else navTo('files'); }
