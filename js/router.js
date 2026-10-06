@@ -3,6 +3,7 @@ var _driveId = null;
 var _folderId = null;
 
 function navTo(page, driveId, folderId) {
+  if(typeof updateUploadBtnVisibility === "function") updateUploadBtnVisibility();
   driveId = driveId || null; folderId = folderId || null;
   _curPage = page; _driveId = driveId; _folderId = folderId;
 
