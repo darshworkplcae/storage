@@ -85,6 +85,12 @@ function renderFilesPage(driveId, folderId){
   const search=($('globalSearch')?.value||'').toLowerCase();
   let folders=(db.folders||[]).filter(f=>f.driveId===driveId&&f.parentId===(folderId||null));
   let files=(db.files||[]).filter(f=>f.driveId===driveId&&f.folderId===(folderId||null));
+if(S.filter && S.filter!=='all'){
+  folders = [];
+  files = files.filter(function(f){
+    return ftCfg(f.name, f.mimeType).cat === S.filter;
+  });
+}
   if(search){folders=folders.filter(f=>f.name.toLowerCase().includes(search));files=files.filter(f=>f.name.toLowerCase().includes(search));}
 
   const sortKey=S.sort||'name';
@@ -128,12 +134,11 @@ function toolbarHtml(driveId,folderId){
     <button class="icon-btn" onclick="goUp()" title="Up"><i class="fas fa-arrow-up"></i></button>
   </div>
   <div class="filter-tabs">
-    <button class="ftab active" data-filter="all">All</button>
-    <button class="ftab" data-filter="image"><i class="fas fa-image"></i></button>
-    <button class="ftab" data-filter="video"><i class="fas fa-film"></i></button>
-    <button class="ftab" data-filter="audio"><i class="fas fa-music"></i></button>
-    <button class="ftab" data-filter="doc"><i class="fas fa-file-lines"></i></button>
-    <button class="ftab" data-filter="archive"><i class="fas fa-file-zipper"></i></button>
+    <button class="ftab ${(!S.filter||S.filter==='all')?'active':''}" data-filter="all">All</button>
+    <button class="ftab ${S.filter==='image'?'active':''}" data-filter="image" title="Photos"><i class="fas fa-image"></i> Photos</button>
+    <button class="ftab ${S.filter==='video'?'active':''}" data-filter="video" title="Videos"><i class="fas fa-film"></i> Videos</button>
+    <button class="ftab ${S.filter==='audio'?'active':''}" data-filter="audio" title="Audio"><i class="fas fa-music"></i> Audio</button>
+    <button class="ftab ${S.filter==='doc'?'active':''}" data-filter="doc" title="Documents"><i class="fas fa-file-lines"></i> Docs</button>
   </div>
   <div style="display:flex;gap:.4rem;margin-left:auto">
     <select class="inp" style="width:auto;font-size:.78rem" id="sortSel">
@@ -176,11 +181,12 @@ function driveCard(d){
   const pct=cap?Math.min(100,Math.round(used/cap*100)):0;
   const files=(S.db?.files||[]).filter(f=>f.driveId===d.id).length;
   const isAdmin=S.ses.role==='admin';
-  return `<div class="fg-card" ondblclick="navTo('files','${esc(d.id)}')" onclick="selectCard(this)" title="${esc(d.email)}">
+  return `<div class="fg-card drive-card-item" onclick="navTo('files','${esc(d.id)}')" title="${esc(d.email)}">
     <div class="fg-icon xl" style="color:${esc(d.color)}"><i class="fab fa-google-drive"></i></div>
-    <div class="fg-name">${esc(d.name)}</div>
+    <div class="fg-name" style="font-weight:600;font-size:.95rem">${esc(d.name)}</div>
     <div class="fg-meta">${fmt(used)} / ${cap?fmt(cap):'∞'} · ${pct}%</div>
     <div class="fg-acts">
+      ${isAdmin?`<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameDrive('${esc(d.id)}','${esc(d.name).replace(/'/g,"\\'")}')" title="Rename"><i class="fas fa-pen"></i></button>`:''}
       ${isAdmin?`<button class="icon-btn xs danger" onclick="event.stopPropagation();disconnectDrive('${esc(d.id)}')" title="Disconnect"><i class="fas fa-unlink"></i></button>`:''}
       <button class="icon-btn xs" onclick="event.stopPropagation();navTo('files','${esc(d.id)}')" title="Open"><i class="fas fa-folder-open"></i></button>
     </div>
@@ -221,6 +227,7 @@ function fileCard(f){
     <div class="fg-name" title="${esc(f.name)}">${esc(f.name)}</div>
     <div class="fg-meta">${fmt(f.size||0)}</div>
     <div class="fg-acts">
+      <button class="icon-btn xs ${f.starred?'starred':''}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ff9f0a':''}"></i></button>
       ${isMedia?`<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>`:''}
       <button class="icon-btn xs" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')"><i class="fas fa-download"></i></button>
       ${isAdmin?`<button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')"><i class="fas fa-trash-alt"></i></button>`:''}
@@ -242,6 +249,7 @@ function fileRow(f){
     <span><i class="fas ${cfg.icon}" style="color:${cfg.col};margin-right:.4rem"></i>${esc(f.name)}</span>
     <span>${fmt(f.size||0)}</span><span>${fmtDate(f.date)}</span>
     <span style="display:flex;gap:.2rem">
+      <button class="icon-btn xs ${f.starred?'starred':''}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ff9f0a':''}"></i></button>
       ${isMedia?`<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>`:''}
       <button class="icon-btn xs" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')"><i class="fas fa-download"></i></button>
       ${isAdmin?`<button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')"><i class="fas fa-trash-alt"></i></button>`:''}
@@ -324,18 +332,46 @@ function renderTM(){
   const active=transfers.filter(t=>t.status==='uploading');
   if(badge){badge.textContent=active.length||'';badge.classList.toggle('show',active.length>0);}
   if(!list)return;
-  if(!transfers.length){list.innerHTML=`<div class="tm-empty"><i class="fas fa-inbox"></i><span>No transfers yet</span></div>`;return;}
+  if(!transfers.length){list.innerHTML=`<div class="tm-empty"><i class="fas fa-inbox"></i><span>No active transfers</span></div>`;return;}
   list.innerHTML=transfers.map(t=>{
-    const col=t.status==='done'?'var(--success)':t.status==='failed'?'var(--danger)':'var(--primary)';
-    const ico=t.status==='done'?'fa-check-circle':t.status==='failed'?'fa-times-circle':'fa-spinner fa-spin';
+    const isPaused = t.status === 'uploading' && (typeof _cancelSignal !== 'undefined' && _cancelSignal && _cancelSignal.paused);
+    const col=t.status==='done'?'var(--success)':t.status==='failed'?'var(--danger)':isPaused?'#ff9f0a':'var(--primary)';
+    const ico=t.status==='done'?'fa-check-circle':t.status==='failed'?'fa-times-circle':isPaused?'fa-circle-pause':'fa-spinner fa-spin';
     const uMB=(t.uploaded/1048576||0).toFixed(1),tMB=(t.size/1048576||0).toFixed(1),spd=t.speed?` · ${fmtSpeed(t.speed)}`:'';
-    const sub=t.status==='uploading'?`${uMB}/${tMB} MB${spd}`:t.status==='done'?`Done · ${fmt(t.size||0)}`:'Failed';
+    const sub=t.status==='uploading'?(isPaused?`Paused · ${uMB}/${tMB} MB`:`${uMB}/${tMB} MB${spd}`):t.status==='done'?`Done · ${fmt(t.size||0)}`:'Failed';
     return `<div class="tm-item">
       <div class="tm-ico" style="color:${col}"><i class="fas ${ico}"></i></div>
-      <div class="tm-info"><div class="tm-name">${esc(t.name)}</div><div class="tm-sub">${sub}</div>
+      <div class="tm-info"><div class="tm-name" title="${esc(t.name)}">${esc(t.name)}</div><div class="tm-sub">${sub}</div>
         ${t.status==='uploading'?`<div class="tm-bar"><div class="tm-fill" style="width:${t.pct||0}%"></div></div>`:''}
       </div>
-      ${t.status==='uploading'?`<button class="tm-cancel" onclick="S.cancelUpload=true;S._xhr?.abort()"><i class="fas fa-times"></i></button>`:''}
+      ${t.status==='uploading'?`
+        <div style="display:flex;gap:4px">
+          <button class="icon-btn xs" onclick="toggleUploadPause()" title="Pause / Resume"><i class="fas ${isPaused?'fa-play':'fa-pause'}"></i></button>
+          <button class="icon-btn xs danger" onclick="_cancelSignal.cancelled=true;if(_cancelSignal.resumeResolve)_cancelSignal.resumeResolve();S.cancelUpload=true;" title="Cancel"><i class="fas fa-times"></i></button>
+        </div>
+      `:''}
     </div>`;
   }).join('');
+}
+
+function renderStarredPage() {
+  const pc = $('pageContent'); if(!pc) return;
+  const starred = (S.db&&S.db.files||[]).filter(f => !!f.starred);
+  pc.innerHTML = `<div class="inner-page">
+    <div class="page-hd"><h2><i class="fas fa-star" style="color:#ff9f0a"></i> Starred Files</h2><p>Quick access to your favorite files</p></div>
+    ${starred.length ? `<div class="file-grid md">${starred.map(f => fileCard(f)).join('')}</div>` : `<div class="empty-state"><div class="empty-icon"><i class="fas fa-star" style="color:#ff9f0a"></i></div><h3>No starred files</h3><p>Click the star icon on any file to bookmark it here.</p></div>`}
+  </div>`;
+}
+
+async function toggleStar(fileId) {
+  var r = await apiToggleStar(fileId);
+  if (r.ok) {
+    var f = (S.db&&S.db.files||[]).find(x => x.id === fileId);
+    if (f) f.starred = r.starred;
+    toast(r.starred ? 'Added to Starred' : 'Removed from Starred', 'info');
+    if (_curPage === 'starred') renderStarredPage();
+    else if (_driveId) renderFilesPage(_driveId, _folderId);
+  } else {
+    toast(r.error || 'Failed to update star', 'error');
+  }
 }

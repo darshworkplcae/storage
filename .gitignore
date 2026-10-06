@@ -1,0 +1,4 @@
+node_modules/
+.DS_Store
+*.log
+sudo docker logs.txt

@@ -140,7 +140,14 @@ function wireEvents() {
   if(nfBtn) nfBtn.onclick=showNewFolderDialog;
   // Cancel upload
   var cancelBtn=$('upCancelBtn');
-  if(cancelBtn) cancelBtn.onclick=function(){S.cancelUpload=true;};
+  if(cancelBtn) cancelBtn.onclick=function(){
+    if(typeof _cancelSignal !== 'undefined' && _cancelSignal) {
+      _cancelSignal.cancelled = true;
+      if(_cancelSignal.resumeResolve) _cancelSignal.resumeResolve();
+    }
+    S.cancelUpload=true;
+    toast('Upload cancelled', 'warning');
+  };
   // Sync
   var syncBtn=$('syncBtn');
   if(syncBtn) syncBtn.onclick=async function(){
@@ -152,14 +159,24 @@ function wireEvents() {
   // Transfer panel
   var tmBtn=$('tmBtn'),tmPanel=$('tmPanel');
   if(tmBtn&&tmPanel){
-    tmBtn.onclick=function(e){e.stopPropagation();tmPanel.classList.toggle('hidden');};
-    document.addEventListener('click',function(e){if(tmPanel&&!tmPanel.contains(e.target)&&e.target!==tmBtn)tmPanel.classList.add('hidden');});
+    tmBtn.onclick=function(e){
+      e.stopPropagation();
+      tmPanel.classList.toggle('hidden');
+      renderTM();
+    };
+    document.addEventListener('click',function(e){
+      if(tmPanel && !tmPanel.classList.contains('hidden') && !tmPanel.contains(e.target) && !tmBtn.contains(e.target)) {
+        tmPanel.classList.add('hidden');
+      }
+    });
   }
   var tmClear=$('tmClear');
   if(tmClear) tmClear.onclick=function(){tmSave([]);renderTM();};
   // Search
   var gs=$('globalSearch');
-  if(gs) gs.addEventListener('input',debounce(function(){S.filter=gs.value;if(_driveId||_curPage==='files')renderFilesPage(_driveId,_folderId);},300));
+  if(gs) gs.addEventListener('input',debounce(function(){
+    if(_driveId||_curPage==='files') renderFilesPage(_driveId,_folderId);
+  },300));
   // Drag & drop
   var main=document.querySelector('.main-area');
   if(main){
@@ -217,12 +234,8 @@ async function init() {
   renderSidebarStorage();
   wireEvents();
   renderTM();
-  // If open drive exists, navigate to it automatically!
-  if(S.db && S.db.openDriveId) {
-    navTo('files', S.db.openDriveId);
-  } else {
-    navTo('files');
-  }
+  // Show Drive card on landing page so users can click to open it
+  navTo('files');
 }
 
 document.addEventListener('DOMContentLoaded', init);

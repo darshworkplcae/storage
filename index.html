@@ -104,7 +104,7 @@
 
     <nav class="sb-nav">
       <div class="sb-nav-item" data-page="files"     onclick="navTo('files')">    <i class="fas fa-folder-open"></i><span>All Files</span></div>
-      <div class="sb-nav-item" data-page="quota"     onclick="navTo('quota')">    <i class="fas fa-chart-pie"></i><span>Quota Tracker</span></div>
+      <div class="sb-nav-item admin-only hidden" data-page="quota" onclick="navTo('quota')"><i class="fas fa-chart-pie"></i><span>Quota Tracker</span></div>
       <div class="sb-nav-item" data-page="recent"    onclick="navTo('recent')">   <i class="fas fa-clock-rotate-left"></i><span>Recent</span></div>
       <div class="sb-nav-item" data-page="starred"   onclick="navTo('starred')">  <i class="fas fa-star"></i><span>Starred</span></div>
       <div class="sb-nav-item" data-page="trash"     onclick="navTo('trash')">    <i class="fas fa-trash-can"></i><span>Recycle Bin</span></div>
@@ -114,7 +114,7 @@
       <div class="sb-nav-item admin-only hidden" data-page="apikeys"   onclick="navTo('apikeys')">  <i class="fas fa-key"></i><span>API Keys</span></div>
     </nav>
 
-    <div class="sb-storage" id="sbStorage">
+    <div class="sb-storage admin-only hidden" id="sbStorage">
       <div class="sb-storage-rows" id="sbStorageRows"></div>
       <div class="sb-quota-bar"><div class="sb-quota-fill" id="sbQuotaFill"></div></div>
       <div class="sb-quota-txt" id="sbQuotaTxt"><span>—</span><span>—</span></div>

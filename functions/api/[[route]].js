@@ -127,6 +127,27 @@ async function hMF(req,env){const ses=await vSes(req,env,null);if(!ses)return J(
 async function hRF(req,env,fId){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const db=await uGet(env,'td:db');const folder=(db.folders||[]).find(f=>f.id===fId);if(!folder)return J({error:'Folder not found'},404);if(folder.googleFolderId){const drv=(db.drives||[]).find(d=>d.id===folder.driveId);if(drv){try{const at=await gAT(env,drv.encToken);await fetch(`https://www.googleapis.com/drive/v3/files/${folder.googleFolderId}`,{method:'DELETE',headers:{Authorization:`Bearer ${at}`}});}catch(_){}}}function all(id){const ids=[id];(db.folders||[]).filter(f=>f.parentId===id).forEach(f=>ids.push(...all(f.id)));return ids;}const ids=all(fId);db.files=(db.files||[]).filter(f=>!ids.includes(f.folderId));db.folders=(db.folders||[]).filter(f=>!ids.includes(f.id));await uSet(env,'td:db',db);return J({ok:true});}
 async function hCU(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const{username,password,allowedDrives}=await req.json().catch(()=>({}));const db=await uGet(env,'td:db');if(!db.users)db.users=[];if(db.users.find(u=>u.username===username))return J({error:'Username taken'},409);db.users.push({id:uid(),username,passwordHash:await sha256(password),allowedDrives:allowedDrives||'all',createdAt:new Date().toISOString()});await uSet(env,'td:db',db);return J({ok:true});}
 async function hDU(req,env,uid2){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const db=await uGet(env,'td:db');db.users=(db.users||[]).filter(u=>u.id!==uid2);await uSet(env,'td:db',db);return J({ok:true});}
+async function hStar(req,env,fileId){
+  const ses=await vSes(req,env,null);
+  if(!ses) return J({error:'Sign in required'},401);
+  const db=await uGet(env,'td:db');
+  const file=(db&&db.files||[]).find(f=>f.id===fileId);
+  if(!file) return J({error:'File not found'},404);
+  file.starred = !file.starred;
+  await uSet(env,'td:db',db);
+  return J({ok:true,starred:file.starred});
+}
+async function hRenameDrive(req,env,driveId){
+  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized'},401);
+  const{name}=await req.json().catch(()=>({}));
+  if(!name||!name.trim()) return J({error:'Name required'},400);
+  const db=await uGet(env,'td:db');
+  const drv=(db&&db.drives||[]).find(d=>d.id===driveId);
+  if(!drv) return J({error:'Drive not found'},404);
+  drv.name=name.trim();
+  await uSet(env,'td:db',db);
+  return J({ok:true,name:drv.name});
+}
 async function hOpenDrive(req,env){
   if(!await vSes(req,env,'admin')) return J({error:'Unauthorized'},401);
   const{openDriveId}=await req.json().catch(()=>({}));
@@ -161,6 +182,8 @@ export async function onRequest({request,env}){
     if(p.startsWith('admin/users/')&&m==='DELETE')return hDU(request,env,p.replace('admin/users/',''));
     if(p==='admin/change-password'&&m==='POST')return hCP(request,env);
     if(p==='admin/open-drive'&&m==='POST')return hOpenDrive(request,env);
+    if(p.startsWith('files/star/')&&m==='POST')return hStar(request,env,p.replace('files/star/',''));
+    if(p.startsWith('drives/rename/')&&m==='POST')return hRenameDrive(request,env,p.replace('drives/rename/',''));
     if(p==='admin/init'&&m==='POST')return hInit(request,env);
     return J({error:'Not found',path:p},404);
   }catch(e){return J({error:e.message||'Server error'},500);}

@@ -107,12 +107,13 @@ function uploadToGoogle(uploadUrl, file, onProgress, cancelSignal) {
   });
 }
 // ─── Resumable Chunk Upload with Pause / Resume Support ───────────────────────
-// Chunk size: 5MB (must be a multiple of 256KB for Google Drive)
-var CHUNK_SIZE = 5 * 1024 * 1024;
+// Chunk size: 16MB (must be a multiple of 256KB for Google Drive)
+var CHUNK_SIZE = 16 * 1024 * 1024;
+var DIRECT_LIMIT = 25 * 1024 * 1024;
 
 async function uploadToGoogleResumable(uploadUrl, file, onProgress, cancelSignal) {
-  // If file is small (< 5MB), upload in 1 request directly:
-  if (file.size <= CHUNK_SIZE) {
+  // If file is moderate (< 25MB), upload in 1 fast stream directly for maximum line speed:
+  if (file.size <= DIRECT_LIMIT) {
     return uploadToGoogle(uploadUrl, file, onProgress, cancelSignal);
   }
 
@@ -183,3 +184,6 @@ function uploadChunk(uploadUrl, chunk, start, end, total, mimeType, cancelSignal
     xhr.send(chunk);
   });
 }
+
+function apiToggleStar(fileId) { return apiFetch('files/star/' + encodeURIComponent(fileId), { method: 'POST' }); }
+function apiRenameDrive(driveId, newName) { return apiFetch('drives/rename/' + encodeURIComponent(driveId), { method: 'POST', body: JSON.stringify({ name: newName }) }); }

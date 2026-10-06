@@ -62,6 +62,23 @@ async function uploadFiles(fileList, targetFolderId) {
 
 // ─── Direct Folder Upload with folder hierarchy recreation ───────────────────
 async function uploadFolder() {
+  var isOpenTarget = (_driveId && S.db && S.db.openDriveId && _driveId === S.db.openDriveId);
+  var isAuth = (S.ses && S.ses.token);
+
+  if (!isAuth && !isOpenTarget) {
+    showSignInModal();
+    toast('Please sign in or select the open drive', 'warning');
+    return;
+  }
+  if (!_driveId) {
+    if (S.db && S.db.openDriveId) {
+      _driveId = S.db.openDriveId;
+    } else {
+      toast('Open a drive first, then upload folder', 'warning');
+      return;
+    }
+  }
+
   var inp = document.createElement('input');
   inp.type = 'file';
   inp.multiple = true;
@@ -71,6 +88,18 @@ async function uploadFolder() {
   inp.onchange = async function() {
     var files = Array.from(inp.files);
     if (!files.length) return;
+
+    if (!isAuth && isOpenTarget) {
+      files = files.filter(function(file) {
+        return (file.type && (file.type.startsWith('image/') || file.type.startsWith('video/'))) ||
+               /\.(jpg|jpeg|png|gif|webp|mp4|mov|mkv|webm|avi)$/i.test(file.name);
+      });
+      if (!files.length) {
+        toast('No photos or videos found in the selected folder', 'warning');
+        return;
+      }
+    }
+
     toast('Preparing folder upload: ' + files.length + ' files…', 'info');
 
     // Build directory tree in Google Drive
@@ -112,6 +141,10 @@ async function uploadFolder() {
 
       await uploadOne(file, parentId);
     }
+
+    S.db = await apiFetchDB();
+    renderSidebarStorage();
+    renderFilesPage(_driveId, _folderId);
   };
 
   inp.click();

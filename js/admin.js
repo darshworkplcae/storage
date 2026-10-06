@@ -22,7 +22,26 @@ function renderSettingsPage() {
       : '<div class="drives-grid">' + drives.map(function(d){
           var usedPct = d.capacity>0?Math.round(d.usedBytes/d.capacity*100):0;
           var isOpen = (db.openDriveId === d.id || d.isOpenDrive);
-          return '<div class="drive-card '+(isOpen?'open-drive-card':'')+'"><div class="dc-top"><div class="dc-icon" style="background:'+d.color+'22;color:'+d.color+'"><i class="fas fa-hard-drive"></i></div><div class="dc-info"><div class="dc-name">'+esc(d.name)+' '+(isOpen?'<span class="badge-open">Open Drive</span>':'')+'</div><div class="dc-email">'+esc(d.email)+'</div></div><button class="icon-btn danger sm" onclick="disconnectDrive(\''+d.id+'\')" title="Disconnect"><i class="fas fa-unlink"></i></button></div><div class="dc-bar"><div class="dc-fill" style="width:'+usedPct+'%;background:'+d.color+'"></div></div><div class="dc-usage">'+fmt(d.usedBytes)+' / '+fmt(d.capacity)+' ('+usedPct+'%)</div><div style="margin-top:.6rem"><button class="btn-ghost xs" style="width:100%" onclick="toggleOpenDrive(\''+d.id+'\')"><i class="fas fa-users"></i> '+(isOpen?'Disable Open Access':'Make Default Open Drive')+'</button></div></div>';
+          return '<div class="drive-card '+(isOpen?'open-drive-card':'')+'">' +
+            '<div class="dc-top">' +
+              '<div class="dc-icon" style="background:'+d.color+'22;color:'+d.color+'"><i class="fas fa-hard-drive"></i></div>' +
+              '<div class="dc-info">' +
+                '<div class="dc-name" style="display:flex;align-items:center;gap:6px">' +
+                  esc(d.name) + (isOpen?'<span class="badge-open">Open Drive</span>':'') +
+                '</div>' +
+                '<div class="dc-email">'+esc(d.email)+'</div>' +
+              '</div>' +
+              '<div style="display:flex;gap:4px">' +
+                '<button class="icon-btn danger sm" onclick="disconnectDrive(\''+d.id+'\')" title="Disconnect"><i class="fas fa-unlink"></i></button>' +
+              '</div>' +
+            '</div>' +
+            '<div class="dc-bar"><div class="dc-fill" style="width:'+usedPct+'%;background:'+d.color+'"></div></div>' +
+            '<div class="dc-usage">'+fmt(d.usedBytes)+' / '+fmt(d.capacity)+' ('+usedPct+'%)</div>' +
+            '<div style="margin-top:.6rem;display:flex;gap:6px">' +
+              '<button class="btn-ghost xs" style="flex:1" onclick="promptRenameDrive(\''+d.id+'\',\''+esc(d.name).replace(/'/g,"\\'")+'\')"><i class="fas fa-pen"></i> Rename</button>' +
+              '<button class="btn-ghost xs" style="flex:1" onclick="toggleOpenDrive(\''+d.id+'\')"><i class="fas fa-users"></i> '+(isOpen?'Disable Open':'Make Open')+'</button>' +
+            '</div>' +
+          '</div>';
         }).join('') + '</div>',
     '</div>',
 
@@ -153,5 +172,20 @@ async function toggleOpenDrive(id) {
     renderSettingsPage();
   } else {
     toast(r.error || 'Failed to update open drive', 'error');
+  }
+}
+
+async function promptRenameDrive(driveId, currentName) {
+  var newName = prompt('Enter new display name for this drive (friends will see this name):', currentName);
+  if (!newName || !newName.trim() || newName.trim() === currentName) return;
+  toast('Updating drive name…', 'info');
+  var res = await apiRenameDrive(driveId, newName.trim());
+  if (res && res.ok) {
+    toast('Drive renamed to: ' + res.name, 'success');
+    S.db = await apiFetchDB();
+    renderSettingsPage();
+    renderSidebarStorage();
+  } else {
+    toast(res ? (res.error || 'Failed to rename drive') : 'Network error', 'error');
   }
 }
