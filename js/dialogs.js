@@ -1,6 +1,26 @@
-var _cancelSignal = { cancelled: false };
+var _cancelSignal = { cancelled: false, paused: false, resumeResolve: null };
 
-async function uploadFiles(fileList) {
+function toggleUploadPause() {
+  var btn = $('upPauseBtn');
+  if (!_cancelSignal) return;
+  if (!_cancelSignal.paused) {
+    _cancelSignal.paused = true;
+    if (btn) btn.innerHTML = '<i class="fas fa-play"></i>';
+    var st = $('upStatus');
+    if (st) st.textContent = 'Paused';
+    toast('Upload paused', 'info');
+  } else {
+    _cancelSignal.paused = false;
+    if (btn) btn.innerHTML = '<i class="fas fa-pause"></i>';
+    if (_cancelSignal.resumeResolve) {
+      _cancelSignal.resumeResolve();
+      _cancelSignal.resumeResolve = null;
+    }
+    toast('Upload resumed', 'info');
+  }
+}
+
+async function uploadFiles(fileList, targetFolderId) {
   var files = Array.from(fileList);
   var isOpenTarget = (_driveId && S.db && S.db.openDriveId && _driveId === S.db.openDriveId);
   var isAuth = (S.ses && S.ses.token);
@@ -36,43 +56,98 @@ async function uploadFiles(fileList) {
 
   for(var i=0; i<files.length; i++) {
     if(_cancelSignal.cancelled) break;
-    await uploadOne(files[i]);
+    await uploadOne(files[i], targetFolderId || _folderId);
   }
 }
 
+// ─── Direct Folder Upload with folder hierarchy recreation ───────────────────
 async function uploadFolder() {
   var inp = document.createElement('input');
-  inp.type='file'; inp.multiple=true; inp.webkitdirectory=true;
-  inp.onchange=function(){if(inp.files.length)uploadFiles(inp.files);};
+  inp.type = 'file';
+  inp.multiple = true;
+  inp.webkitdirectory = true;
+  inp.setAttribute('directory', '');
+
+  inp.onchange = async function() {
+    var files = Array.from(inp.files);
+    if (!files.length) return;
+    toast('Preparing folder upload: ' + files.length + ' files…', 'info');
+
+    // Build directory tree in Google Drive
+    var folderMap = {}; // relative path -> folderId
+    for (var i = 0; i < files.length; i++) {
+      if (_cancelSignal.cancelled) break;
+      var file = files[i];
+      var relPath = file.webkitRelativePath || file.name;
+      var parts = relPath.split('/');
+      var parentId = _folderId || null;
+
+      // If file is inside subfolders, create/find them
+      if (parts.length > 1) {
+        var pathAcc = '';
+        for (var p = 0; p < parts.length - 1; p++) {
+          var folderName = parts[p];
+          pathAcc += (pathAcc ? '/' : '') + folderName;
+          if (!folderMap[pathAcc]) {
+            // Find existing or create new folder
+            var existing = (S.db && S.db.folders || []).find(function(f){
+              return f.driveId === _driveId && f.parentId === parentId && f.name === folderName;
+            });
+            if (existing) {
+              folderMap[pathAcc] = existing.id;
+              parentId = existing.id;
+            } else {
+              var created = await apiCreateFolder({ driveId: _driveId, parentFolderId: parentId, name: folderName });
+              if (created && created.folderId) {
+                folderMap[pathAcc] = created.folderId;
+                parentId = created.folderId;
+                S.db = await apiFetchDB();
+              }
+            }
+          } else {
+            parentId = folderMap[pathAcc];
+          }
+        }
+      }
+
+      await uploadOne(file, parentId);
+    }
+  };
+
   inp.click();
 }
 
-async function uploadOne(file) {
-  _cancelSignal = { cancelled: false };
+async function uploadOne(file, targetFolderId) {
+  _cancelSignal = { cancelled: false, paused: false, resumeResolve: null };
   var tId = uid();
-  var upBar=$('upBar'), upName=$('upName'), upStatus=$('upStatus'), upFill=$('upFill'), upPct=$('upPct');
+  var upBar=$('upBar'), upName=$('upName'), upStatus=$('upStatus'), upFill=$('upFill'), upPct=$('upPct'), upPauseBtn=$('upPauseBtn');
 
   if(upBar) upBar.classList.remove('hidden');
+  if(upPauseBtn) {
+    upPauseBtn.innerHTML = '<i class="fas fa-pause"></i>';
+    upPauseBtn.onclick = toggleUploadPause;
+  }
   if(upName) upName.textContent = file.name;
   if(upStatus) upStatus.textContent = 'Initializing…';
   tmAdd(tId, file.name, file.size);
 
   try {
-    // Step 1: Get Google Drive resumable upload URL from our backend
-    if(upStatus) upStatus.textContent = 'Getting upload URL…';
-    var init = await apiUploadInit(_driveId, _folderId, file.name, file.size, file.type||'application/octet-stream');
+    var destFolder = targetFolderId || _folderId || null;
+    // Step 1: Get Google Drive resumable upload URL from backend
+    if(upStatus) upStatus.textContent = 'Connecting…';
+    var init = await apiUploadInit(_driveId, destFolder, file.name, file.size, file.type||'application/octet-stream');
 
     if(!init.uploadUrl) {
       throw new Error(init.error || 'Upload init failed — check that drive is connected');
     }
 
-    // Step 2: Upload directly to Google Drive (XHR with progress)
+    // Step 2: Upload directly to Google Drive (with Pause & Resume capability!)
     if(upStatus) upStatus.textContent = 'Uploading…';
-    var result = await uploadToGoogle(init.uploadUrl, file, function(loaded, total, speed) {
+    var result = await uploadToGoogleResumable(init.uploadUrl, file, function(loaded, total, speed) {
       var pct = total>0 ? Math.round(loaded/total*100) : 0;
       if(upFill) upFill.style.width = pct + '%';
       if(upPct) upPct.textContent = pct + '%';
-      if(upStatus) upStatus.textContent = fmt(loaded) + ' / ' + fmt(total) + (speed>0 ? ' · ' + fmtSpeed(speed) : '');
+      if(upStatus && !_cancelSignal.paused) upStatus.textContent = fmt(loaded) + ' / ' + fmt(total) + (speed>0 ? ' · ' + fmtSpeed(speed) : '');
       tmUpdate(tId, pct, speed, loaded);
     }, _cancelSignal);
 
@@ -83,7 +158,7 @@ async function uploadOne(file) {
       fileLocalId: init.fileLocalId,
       googleFileId: result.googleFileId,
       driveId: activeDriveId,
-      folderId: _folderId || null,
+      folderId: destFolder,
       name: file.name,
       size: file.size,
       mimeType: file.type || 'application/octet-stream'
@@ -109,7 +184,12 @@ async function uploadOne(file) {
 }
 
 async function downloadFile(fileLocalId) {
-  if(!S.ses||!S.ses.token){toast('Sign in required','warning');return;}
+  if(!S.ses||!S.ses.token){
+    var fGuest = (S.db&&S.db.files||[]).find(function(x){return x.id===fileLocalId;});
+    var dGuest = fGuest?fGuest.driveId:_driveId;
+    var isPub = (S.db && S.db.openDriveId && dGuest === S.db.openDriveId);
+    if (!isPub) { toast('Sign in required','warning'); return; }
+  }
   var f=(S.db&&S.db.files||[]).find(function(x){return x.id===fileLocalId;});
   if(!f)return;
   var driveId = f.driveId || _driveId || (S.db&&S.db.drives&&S.db.drives[0]?S.db.drives[0].id:'');
@@ -125,7 +205,7 @@ async function downloadFile(fileLocalId) {
 
 async function openMedia(fileLocalId) {
   var f=(S.db&&S.db.files||[]).find(function(x){return x.id===fileLocalId;});
-  if(!f||!S.ses||!S.ses.token){downloadFile(fileLocalId);return;}
+  if(!f) return;
   var driveId = f.driveId || _driveId || (S.db&&S.db.drives&&S.db.drives[0]?S.db.drives[0].id:'');
   var mediaUrl = getFileDownloadUrl(f.googleFileId, driveId, true);
   var dlUrl = getFileDownloadUrl(f.googleFileId, driveId, false);

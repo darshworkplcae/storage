@@ -39,14 +39,47 @@ async function hUI(req,env){
   if(isOpenTarget && !ses){
     const isMedia = (mimeType && (mimeType.startsWith('image/') || mimeType.startsWith('video/'))) || (name && /\.(jpg|jpeg|png|gif|webp|mp4|mov|mkv|webm|avi)$/i.test(name));
     if(!isMedia) return J({error:'Open drive only allows photos and videos'},400);
-  }const{driveId,folderId,name,size,mimeType}=await req.json().catch(()=>({}));const db=await uGet(env,'td:db');const drv=(db&&db.drives||[]).find(d=>d.id===driveId);if(!drv)return J({error:'Drive not found'},404);const at=await gAT(env,drv.encToken);let pid=drv.rootFolderId;if(folderId){const f=(db.folders||[]).find(x=>x.id===folderId);if(f&&f.googleFolderId)pid=f.googleFolderId;}const ir=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name',{method:'POST',headers:{Authorization:`Bearer ${at}`,'Content-Type':'application/json','X-Upload-Content-Type':mimeType||'application/octet-stream','X-Upload-Content-Length':String(size),'Origin':(new URL(req.url).origin)},body:JSON.stringify({name,mimeType:mimeType||'application/octet-stream',parents:[pid]})});const uUrl=ir.headers.get('Location');if(!uUrl)return J({error:'Upload session failed',detail:await ir.text()},500);return J({uploadUrl:uUrl,fileLocalId:uid()});}
+  }
+  const drv=(db&&db.drives||[]).find(d=>d.id===driveId);
+  if(!drv) return J({error:'Drive not found'},404);
+  const at=await gAT(env,drv.encToken);
+  let pid=drv.rootFolderId;
+  if(folderId){
+    const f=(db.folders||[]).find(x=>x.id===folderId);
+    if(f&&f.googleFolderId) pid=f.googleFolderId;
+  }
+  const ir=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name',{
+    method:'POST',
+    headers:{
+      Authorization:`Bearer ${at}`,
+      'Content-Type':'application/json',
+      'X-Upload-Content-Type':mimeType||'application/octet-stream',
+      'X-Upload-Content-Length':String(size),
+      'Origin':(new URL(req.url).origin)
+    },
+    body:JSON.stringify({name,mimeType:mimeType||'application/octet-stream',parents:[pid]})
+  });
+  const uUrl=ir.headers.get('Location');
+  if(!uUrl) return J({error:'Upload session failed',detail:await ir.text()},500);
+  return J({uploadUrl:uUrl,fileLocalId:uid()});
+}
 async function hUC(req,env){
   const body=await req.json().catch(()=>({}));
   const{fileLocalId,googleFileId,driveId,folderId,name,size,mimeType}=body;
   const db=await uGet(env,'td:db');
   const isOpenTarget=(db&&db.openDriveId&&driveId===db.openDriveId);
   const ses=await vSes(req,env,null);
-  if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);const{fileLocalId,googleFileId,driveId,folderId,name,size,mimeType}=await req.json().catch(()=>({}));const db=await uGet(env,'td:db');if(!db)return J({error:'DB error'},500);if(!db.files)db.files=[];db.files.push({id:fileLocalId,googleFileId,driveId,folderId:folderId||null,name,size,mimeType:mimeType||'application/octet-stream',uploadedBy:ses,date:new Date().toISOString()});if(!db.activityLog)db.activityLog=[];const drv=(db.drives||[]).find(d=>d.id===driveId);db.activityLog.unshift({id:uid(),type:'upload',name,size,driveId,driveLetter:drv?drv.email:'?',ts:new Date().toISOString()});if(db.activityLog.length>500)db.activityLog=db.activityLog.slice(0,500);await uSet(env,'td:db',db);return J({ok:true});}
+  if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
+  if(!db) return J({error:'DB error'},500);
+  if(!db.files) db.files=[];
+  db.files.push({id:fileLocalId,googleFileId,driveId,folderId:folderId||null,name,size,mimeType:mimeType||'application/octet-stream',uploadedBy:ses||'guest',date:new Date().toISOString()});
+  if(!db.activityLog) db.activityLog=[];
+  const drv=(db.drives||[]).find(d=>d.id===driveId);
+  db.activityLog.unshift({id:uid(),type:'upload',name,size,driveId,driveLetter:drv?drv.email:'?',ts:new Date().toISOString()});
+  if(db.activityLog.length>500) db.activityLog=db.activityLog.slice(0,500);
+  await uSet(env,'td:db',db);
+  return J({ok:true});
+}
 async function hDL(req,env,gId){
   const url=new URL(req.url);
   const tokenParam=url.searchParams.get('token');

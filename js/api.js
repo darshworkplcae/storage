@@ -106,3 +106,80 @@ function uploadToGoogle(uploadUrl, file, onProgress, cancelSignal) {
     xhr.send(file);
   });
 }
+// ─── Resumable Chunk Upload with Pause / Resume Support ───────────────────────
+// Chunk size: 5MB (must be a multiple of 256KB for Google Drive)
+var CHUNK_SIZE = 5 * 1024 * 1024;
+
+async function uploadToGoogleResumable(uploadUrl, file, onProgress, cancelSignal) {
+  // If file is small (< 5MB), upload in 1 request directly:
+  if (file.size <= CHUNK_SIZE) {
+    return uploadToGoogle(uploadUrl, file, onProgress, cancelSignal);
+  }
+
+  var startOffset = 0;
+  var total = file.size;
+
+  while (startOffset < total) {
+    if (cancelSignal && cancelSignal.cancelled) throw new Error('Cancelled');
+
+    // Handle Pause
+    if (cancelSignal && cancelSignal.paused) {
+      await new Promise(function(resolve) {
+        cancelSignal.resumeResolve = resolve;
+      });
+      if (cancelSignal && cancelSignal.cancelled) throw new Error('Cancelled');
+    }
+
+    var endOffset = Math.min(startOffset + CHUNK_SIZE, total);
+    var chunk = file.slice(startOffset, endOffset);
+
+    var res = await uploadChunk(uploadUrl, chunk, startOffset, endOffset - 1, total, file.type, cancelSignal);
+
+    if (res.status === 200 || res.status === 201) {
+      onProgress(total, total, 0);
+      return { googleFileId: res.googleFileId };
+    } else if (res.status === 308) {
+      // Chunk uploaded successfully, advance offset
+      startOffset = res.nextOffset || endOffset;
+      onProgress(startOffset, total, 0);
+    } else {
+      throw new Error(res.error || ('Upload chunk failed HTTP ' + res.status));
+    }
+  }
+
+  return { googleFileId: null };
+}
+
+function uploadChunk(uploadUrl, chunk, start, end, total, mimeType, cancelSignal) {
+  return new Promise(function(resolve, reject) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('PUT', uploadUrl);
+    xhr.setRequestHeader('Content-Range', 'bytes ' + start + '-' + end + '/' + total);
+    xhr.setRequestHeader('Content-Type', mimeType || 'application/octet-stream');
+
+    xhr.onload = function() {
+      if (xhr.status === 200 || xhr.status === 201) {
+        var id = null;
+        try { id = JSON.parse(xhr.responseText).id; } catch(e){}
+        resolve({ status: xhr.status, googleFileId: id });
+      } else if (xhr.status === 308) {
+        var range = xhr.getResponseHeader('Range');
+        var next = end + 1;
+        if (range) {
+          var m = range.match(/bytes=0-(\d+)/);
+          if (m) next = parseInt(m[1], 10) + 1;
+        }
+        resolve({ status: 308, nextOffset: next });
+      } else {
+        resolve({ status: xhr.status, error: xhr.responseText });
+      }
+    };
+
+    xhr.onerror = function() {
+      reject(new Error('Network error during chunk upload'));
+    };
+    xhr.onabort = function() { reject(new Error('Cancelled')); };
+
+    xhr.send(chunk);
+  });
+}
