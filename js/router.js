@@ -1,54 +1,56 @@
-// TELEDRIVE — Router
-function nav(driveId,folderId=null){
-  if(S.navIdx<S.navHist.length-1)S.navHist=S.navHist.slice(0,S.navIdx+1);
-  S.navHist.push({driveId,folderId});S.navIdx=S.navHist.length-1;
-  S.driveId=driveId;S.folderId=folderId;S.selectedId=null;
-  const d=S.db.drives.find(x=>x.id===driveId);
-  if(d)window.location.hash=folderId?`#/${d.letter}/${folderId}`:`#/${d.letter}`;
-  showExplorer();
+// TeleDrive — Router
+function pushNav(driveId,folderId){
+  S.navHist=S.navHist.slice(0,S.navIdx+1);
+  S.navHist.push({driveId,folderId});
+  S.navIdx=S.navHist.length-1;
+  updateHash();
 }
-function navBack(){if(S.navIdx>0){S.navIdx--;const n=S.navHist[S.navIdx];S.driveId=n.driveId;S.folderId=n.folderId;const d=S.db.drives.find(x=>x.id===n.driveId);if(d)window.location.hash=n.folderId?`#/${d.letter}/${n.folderId}`:`#/${d.letter}`;showExplorer();}}
-function navFwd(){if(S.navIdx<S.navHist.length-1){S.navIdx++;const n=S.navHist[S.navIdx];S.driveId=n.driveId;S.folderId=n.folderId;const d=S.db.drives.find(x=>x.id===n.driveId);if(d)window.location.hash=n.folderId?`#/${d.letter}/${n.folderId}`:`#/${d.letter}`;showExplorer();}}
-function navUp(){if(!S.driveId)return;if(!S.folderId){goHome();return;}const f=S.db.folders.find(x=>x.id===S.folderId);nav(S.driveId,f?.parentId||null);}
-
-function goHome(){
-  S.driveId=null;S.folderId=null;S.selectedId=null;
-  window.location.hash='#/';
-  $('homeScreen').classList.remove('hidden');
-  $('explorerView').classList.add('hidden');
-  $('adminScreen').classList.add('hidden');
-  renderHome();
+function navBack(){if(S.navIdx>0){S.navIdx--;const n=S.navHist[S.navIdx];S.driveId=n.driveId;S.folderId=n.folderId;updateHash();renderExplorer();}}
+function navFwd(){if(S.navIdx<S.navHist.length-1){S.navIdx++;const n=S.navHist[S.navIdx];S.driveId=n.driveId;S.folderId=n.folderId;updateHash();renderExplorer();}}
+function navUp(){
+  if(S.folderId){
+    const parent=S.db?.folders?.find(f=>f.id===S.folderId)?.parentId||null;
+    S.folderId=parent;
+    pushNav(S.driveId,S.folderId);renderExplorer();
+  }else if(S.driveId){
+    S.driveId=null;S.folderId=null;updateHash();
+    showScreen('homeScreen');renderHome();
+  }
 }
-function showExplorer(){
-  $('homeScreen').classList.add('hidden');
-  $('explorerView').classList.remove('hidden');
-  $('adminScreen').classList.add('hidden');
-  renderExplorer();
+function goHome(){S.driveId=null;S.folderId=null;window.location.hash='#/';showScreen('homeScreen');renderHome();}
+function updateHash(){
+  if(!S.driveId){window.location.hash='#/';return;}
+  window.location.hash=S.folderId?`#/${S.driveId}/${S.folderId}`:`#/${S.driveId}`;
+}
+function handleHash(){
+  const h=window.location.hash.replace('#/','').split('/').filter(Boolean);
+  if(!h.length){goHome();return;}
+  if(h[0]==='admin'){showAdminScreen();return;}
+  if(h[0]==='login'){showLoginScreen();return;}
+  // Drive navigation
+  const driveId=h[0];const folderId=h[1]||null;
+  if(!S.db){return;}
+  const drive=S.db.drives?.find(d=>d.id===driveId);
+  if(!drive){goHome();return;}
+  S.driveId=driveId;S.folderId=folderId;
+  pushNav(driveId,folderId);
+  showScreen('explorerView');syncToolbar();renderExplorer();
+}
+function showScreen(id){
+  ['homeScreen','explorerView','adminScreen','authScreen'].forEach(s=>{
+    const el=$(s);if(el)el.classList.toggle('hidden',s!==id);
+  });
 }
 function showAdminScreen(){
-  $('homeScreen').classList.add('hidden');
-  $('explorerView').classList.add('hidden');
-  $('adminScreen').classList.remove('hidden');
-  renderAdminScreen();
+  if(S.ses.role!=='admin'){showLoginScreen('admin');return;}
+  showScreen('adminScreen');renderAdminScreen();
 }
-
-function handleHash(){
-  const hash=window.location.hash;
-  if(!hash||hash==='#'||hash==='#/'){if(S.db.adminHash)goHome();return;}
-  // Admin route
-  if(hash==='#/admin'){
-    if(!S.ses.isAdmin){showAdminLogin();return;}
-    showAdminScreen();return;
-  }
-  const parts=hash.slice(2).split('/');
-  const letter=parts[0];const folderId=parts[1]||null;
-  if(!letter)return;
-  const drive=S.db.drives.find(d=>d.letter===letter);
-  if(!drive)return;
-  const locked=drive.passwordHash&&!S.ses.unlocked.includes(drive.id)&&!S.ses.isAdmin;
-  if(locked){promptPass(drive);return;}
-  S.driveId=drive.id;S.folderId=folderId;S.selectedId=null;
-  if(S.navIdx<S.navHist.length-1)S.navHist=S.navHist.slice(0,S.navIdx+1);
-  S.navHist.push({driveId:drive.id,folderId});S.navIdx=S.navHist.length-1;
-  showExplorer();
+function showLoginScreen(returnTo=''){
+  showScreen('authScreen');renderLoginScreen(returnTo);
+}
+function syncToolbar(){
+  const isAdmin=S.ses.role==='admin';
+  const admin=$('adminFab');if(admin)admin.classList.toggle('hidden',!isAdmin);
+  // Show back-to-home when in drive
+  const hb=$('homeBreadBtn');if(hb)hb.classList.toggle('hidden',!S.driveId);
 }
