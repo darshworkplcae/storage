@@ -8,149 +8,158 @@
   <link rel="stylesheet" href="css/main.css">
 </head>
 <body>
-  <!-- Ambient background -->
-  <div class="bg-canvas">
-    <div class="bg-blob b1"></div>
-    <div class="bg-blob b2"></div>
-    <div class="bg-blob b3"></div>
-  </div>
 
-  <div id="app">
-    <!-- ── Top Bar ── -->
-    <header class="top-bar">
-      <div class="tb-left">
-        <div class="logo" onclick="goHome()">
-          <i class="fas fa-hard-drive"></i>
-          <span>TeleDrive</span>
-        </div>
-        <button class="icon-btn tb-btn hidden" id="homeBreadBtn" onclick="goHome()" title="Home">
-          <i class="fas fa-house"></i>
-        </button>
-        <button class="icon-btn tb-btn" id="navBack" title="Back"><i class="fas fa-chevron-left"></i></button>
-        <button class="icon-btn tb-btn" id="navFwd" title="Forward"><i class="fas fa-chevron-right"></i></button>
-        <button class="icon-btn tb-btn" id="navUp" title="Up"><i class="fas fa-arrow-up"></i></button>
+<!-- Auth Gate -->
+<div id="authGate" class="auth-gate hidden">
+  <div class="auth-bg-blobs"><div class="abl a1"></div><div class="abl a2"></div></div>
+  <div class="auth-card">
+    <div class="auth-logo"><i class="fas fa-hard-drive"></i></div>
+    <h2 class="auth-title">TeleDrive</h2>
+    <p class="auth-sub">Sign in to continue</p>
+    <div id="authErr" class="auth-err hidden"></div>
+    <div class="seg-tabs" id="authTabs">
+      <button class="seg active" onclick="switchTab('user',this)">User</button>
+      <button class="seg" onclick="switchTab('admin',this)">Admin</button>
+    </div>
+    <div id="userForm">
+      <input class="inp" id="authUser" type="text" placeholder="Username" autocomplete="username">
+      <input class="inp" id="authPass" type="password" placeholder="Password" autocomplete="current-password">
+      <button class="btn-primary w100" onclick="doLogin()"><i class="fas fa-sign-in-alt"></i> Sign In</button>
+    </div>
+    <div id="adminForm" class="hidden">
+      <input class="inp" id="adminPass" type="password" placeholder="Admin password" autocomplete="current-password">
+      <button class="btn-primary w100" onclick="doAdminLogin()"><i class="fas fa-shield-halved"></i> Admin Login</button>
+    </div>
+  </div>
+</div>
+
+<!-- Main App (hidden until logged in OR public browse) -->
+<div id="appShell" class="app-shell hidden">
+
+  <!-- ─── Sidebar ─── -->
+  <aside class="sidebar">
+    <!-- Logo -->
+    <div class="sb-logo" onclick="navTo('files')">
+      <div class="sb-logo-icon"><i class="fas fa-hard-drive"></i></div>
+      <span class="sb-logo-txt">TeleDrive</span>
+    </div>
+
+    <!-- User Profile -->
+    <div class="sb-profile" id="sbProfile">
+      <div class="sb-avatar" id="sbAvatar">?</div>
+      <div class="sb-pinfo">
+        <div class="sb-pname" id="sbName">Guest</div>
+        <div class="sb-pemail" id="sbRole">Not signed in</div>
       </div>
-      <div class="tb-search">
+      <button class="icon-btn xs" id="sbMenuBtn" onclick="toggleSbMenu()"><i class="fas fa-ellipsis-v"></i></button>
+      <div class="sb-pmenu hidden" id="sbMenu">
+        <div class="pmenu-item" onclick="navTo('settings')"><i class="fas fa-gear"></i> Settings</div>
+        <div class="pmenu-item danger" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
+      </div>
+    </div>
+
+    <!-- Nav -->
+    <nav class="sb-nav">
+      <div class="sb-nav-item" data-page="files" onclick="navTo('files')"><i class="fas fa-folder-open"></i><span>All Files</span></div>
+      <div class="sb-nav-item" data-page="quota" onclick="navTo('quota')"><i class="fas fa-chart-pie"></i><span>Quota Tracker</span></div>
+      <div class="sb-nav-item" data-page="recent" onclick="navTo('recent')"><i class="fas fa-clock-rotate-left"></i><span>Recent</span></div>
+      <div class="sb-nav-item" data-page="starred" onclick="navTo('starred')"><i class="fas fa-star"></i><span>Starred</span></div>
+      <div class="sb-nav-item" data-page="trash" onclick="navTo('trash')"><i class="fas fa-trash-can"></i><span>Recycle Bin</span></div>
+      <div class="sb-divider"></div>
+      <div class="sb-nav-item" data-page="activity" onclick="navTo('activity')"><i class="fas fa-list-ul"></i><span>Activity Log</span></div>
+      <div class="sb-nav-item" data-page="settings" onclick="navTo('settings')"><i class="fas fa-gear"></i><span>Setting</span></div>
+      <div class="sb-nav-item" data-page="apikeys" onclick="navTo('apikeys')"><i class="fas fa-key"></i><span>API Keys</span></div>
+    </nav>
+
+    <!-- Storage Stats -->
+    <div class="sb-storage" id="sbStorage">
+      <div class="sb-storage-rows" id="sbStorageRows"></div>
+      <div class="sb-quota-bar"><div class="sb-quota-fill" id="sbQuotaFill"></div></div>
+      <div class="sb-quota-txt" id="sbQuotaTxt">Loading…</div>
+    </div>
+
+    <!-- Logout -->
+    <button class="sb-logout" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Log Out</button>
+  </aside>
+
+  <!-- ─── Main Area ─── -->
+  <div class="main-area">
+
+    <!-- Top Bar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <!-- Breadcrumb / page title injected here -->
+        <div id="breadcrumb" class="breadcrumb"></div>
+      </div>
+      <div class="topbar-search">
         <i class="fas fa-magnifying-glass"></i>
-        <input type="text" id="globalSearch" placeholder="Search files and drives… (Ctrl+K)">
+        <input type="text" id="globalSearch" placeholder="Search Documents… (Ctrl+K)">
       </div>
-      <div class="tb-right">
-        <div class="tm-wrap">
-          <button class="icon-btn tb-btn" id="tmBtn" title="Transfers">
+      <div class="topbar-right">
+        <div class="view-size-btns">
+          <button class="vsz" data-sz="xs" onclick="setGridSize('xs')">XS</button>
+          <button class="vsz" data-sz="sm" onclick="setGridSize('sm')">SM</button>
+          <button class="vsz active" data-sz="md" onclick="setGridSize('md')">MD</button>
+          <button class="vsz" data-sz="lg" onclick="setGridSize('lg')">LG</button>
+        </div>
+        <button class="btn-primary sm" id="uploadBtn"><i class="fas fa-upload"></i> Upload</button>
+        <button class="btn-ghost sm" id="newFolderBtn"><i class="fas fa-folder-plus"></i> New Folder</button>
+        <button class="btn-ghost sm" id="syncBtn" title="Sync from Drive"><i class="fas fa-rotate"></i> Sync</button>
+        <div class="tb-divider"></div>
+        <!-- Transfer indicator -->
+        <div class="tm-btn-wrap">
+          <button class="icon-btn" id="tmBtn" title="Transfers">
             <i class="fas fa-arrow-right-arrow-left"></i>
-            <span class="badge-count" id="tmBadge"></span>
+            <span class="tm-badge" id="tmBadge"></span>
           </button>
           <div class="tm-panel" id="tmPanel">
             <div class="tm-hd"><span>Transfers</span><button class="btn-ghost xs" id="tmClear">Clear</button></div>
-            <div class="tm-list" id="tmList"></div>
+            <div id="tmList" class="tm-list"></div>
           </div>
         </div>
-        <button class="icon-btn tb-btn hidden" id="logoutBtn" onclick="doLogout()" title="Logout">
-          <i class="fas fa-sign-out-alt"></i>
-        </button>
-        <button class="icon-btn tb-btn hidden" id="adminFab" onclick="showAdminScreen()" title="Admin Panel">
-          <i class="fas fa-shield-halved"></i>
-        </button>
-        <button class="btn-ghost xs" onclick="showLoginScreen()">Sign In</button>
+        <button class="icon-btn" title="Notifications"><i class="fas fa-bell"></i></button>
+        <!-- Admin shield if admin -->
+        <button class="icon-btn hidden" id="adminQuickBtn" onclick="navTo('settings')" title="Admin"><i class="fas fa-shield-halved" style="color:var(--primary)"></i></button>
       </div>
     </header>
 
-    <div class="app-body">
-      <!-- ── Home Screen ── -->
-      <div id="homeScreen" class="screen">
-        <div class="home-header">
-          <h1>Your Drives</h1>
-          <p>Fast cloud storage powered by Google Drive</p>
+    <!-- Page Content -->
+    <div class="page-content" id="pageContent">
+      <div class="loading-full"><i class="fas fa-spinner fa-spin"></i></div>
+    </div>
+
+    <!-- Upload bar -->
+    <div class="up-bar hidden" id="upBar">
+      <div class="up-inner">
+        <i class="fas fa-cloud-arrow-up up-ico"></i>
+        <div class="up-info">
+          <div class="up-name" id="upName">Uploading…</div>
+          <div class="up-status" id="upStatus"></div>
         </div>
-        <div class="drives-grid" id="drivesGrid">
-          <div class="loading-state"><i class="fas fa-spinner fa-spin"></i><span>Loading…</span></div>
+        <div class="up-track-wrap">
+          <div class="up-track"><div class="up-fill" id="upFill"></div></div>
+          <span class="up-pct" id="upPct">0%</span>
         </div>
+        <button class="icon-btn danger" id="upCancelBtn" title="Cancel"><i class="fas fa-times"></i></button>
       </div>
-
-      <!-- ── Explorer View ── -->
-      <div id="explorerView" class="screen hidden">
-        <div class="ex-sidebar" id="exSidebar">
-          <div class="sb-section">
-            <div class="sb-label">QUICK ACCESS</div>
-            <div id="sidebarTree"></div>
-          </div>
-        </div>
-        <div class="ex-main">
-          <!-- Toolbar -->
-          <div class="toolbar">
-            <div class="addr-bar" id="addrBar"></div>
-            <div class="tb-actions">
-              <button class="btn-p sm" id="uploadBtn"><i class="fas fa-upload"></i> Upload</button>
-              <button class="btn-ghost sm" id="newFolderBtn"><i class="fas fa-folder-plus"></i> New Folder</button>
-              <div class="divider-v"></div>
-              <div class="filter-tabs">
-                <button class="ftab active" data-filter="all">All</button>
-                <button class="ftab" data-filter="image"><i class="fas fa-image"></i></button>
-                <button class="ftab" data-filter="video"><i class="fas fa-film"></i></button>
-                <button class="ftab" data-filter="audio"><i class="fas fa-music"></i></button>
-                <button class="ftab" data-filter="doc"><i class="fas fa-file-lines"></i></button>
-                <button class="ftab" data-filter="archive"><i class="fas fa-file-zipper"></i></button>
-                <input class="inp xs" id="extInput" placeholder=".ext">
-              </div>
-              <div class="divider-v"></div>
-              <select class="inp xs" id="sortSelect">
-                <option value="name">Name</option>
-                <option value="date">Date</option>
-                <option value="size">Size</option>
-              </select>
-              <button class="icon-btn active" id="viewGrid" title="Grid"><i class="fas fa-grip"></i></button>
-              <button class="icon-btn" id="viewList" title="List"><i class="fas fa-list"></i></button>
-            </div>
-          </div>
-          <!-- Content -->
-          <div class="ex-content" id="exContent">
-            <div class="loading-state"><i class="fas fa-spinner fa-spin"></i><span>Loading…</span></div>
-          </div>
-          <!-- Status bar -->
-          <div class="status-bar" id="statusBar"></div>
-        </div>
-      </div>
-
-      <!-- ── Admin Screen ── -->
-      <div id="adminScreen" class="screen hidden"></div>
-
-      <!-- ── Auth Screen ── -->
-      <div id="authScreen" class="screen hidden"></div>
     </div>
   </div>
+</div>
 
-  <!-- Upload progress bar -->
-  <div class="up-bar hidden" id="upBar">
-    <div class="up-inner">
-      <i class="fas fa-cloud-arrow-up up-ico"></i>
-      <div class="up-info">
-        <div class="up-name" id="upName">Uploading…</div>
-        <div class="up-status" id="upStatus"></div>
-      </div>
-      <div class="up-prog">
-        <div class="up-track"><div class="up-fill" id="upFill"></div></div>
-        <span class="up-pct" id="upPct">0%</span>
-      </div>
-      <button class="icon-btn" id="upCancelBtn" title="Cancel"><i class="fas fa-times"></i></button>
-    </div>
-  </div>
+<!-- Toast -->
+<div class="toast-wrap" id="toastWrap"></div>
+<!-- Hidden file input -->
+<input type="file" id="fileInput" multiple hidden>
 
-  <!-- Toast notifications -->
-  <div class="toast-wrap" id="toastWrap"></div>
-
-  <!-- Hidden file input -->
-  <input type="file" id="fileInput" multiple hidden>
-
-  <!-- Scripts (order matters) -->
-  <script src="js/config.js"></script>
-  <script src="js/state.js"></script>
-  <script src="js/utils.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/db.js"></script>
-  <script src="js/router.js"></script>
-  <script src="js/render.js"></script>
-  <script src="js/dialogs.js"></script>
-  <script src="js/admin.js"></script>
-  <script src="js/main.js"></script>
+<script src="js/config.js"></script>
+<script src="js/state.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/api.js"></script>
+<script src="js/db.js"></script>
+<script src="js/router.js"></script>
+<script src="js/render.js"></script>
+<script src="js/dialogs.js"></script>
+<script src="js/admin.js"></script>
+<script src="js/main.js"></script>
 </body>
 </html>
