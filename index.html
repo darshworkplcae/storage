@@ -10,9 +10,10 @@
 <body>
 
 <!-- ═══ LOGIN PAGE (shown only when navigating to #/login) ═══ -->
-<div id="authGate" class="auth-gate hidden">
+<div id="authGate" class="auth-gate hidden" onclick="if(event.target===this)hideSignIn()">
   <div class="auth-bg-blobs"><div class="abl a1"></div><div class="abl a2"></div></div>
   <div class="auth-card">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:.5rem"><button class="icon-btn" onclick="hideSignIn()"><i class="fas fa-times"></i></button></div>
     <div class="auth-logo"><i class="fas fa-hard-drive"></i></div>
     <h2 class="auth-title">TeleDrive</h2>
     <p class="auth-sub">Sign in to continue</p>
@@ -111,7 +112,7 @@
         <button class="icon-btn hidden" id="adminQuickBtn" onclick="navTo('settings')" title="Admin Panel">
           <i class="fas fa-shield-halved" style="color:var(--primary)"></i>
         </button>
-        <button class="btn-ghost xs" id="signinBtn">Sign In</button>
+        <button class="btn-ghost xs" id="signinBtn" onclick="showSignIn()">Sign In</button>
       </div>
     </header>
 

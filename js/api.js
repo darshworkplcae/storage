@@ -1,83 +1,68 @@
-// TeleDrive — API Client (calls Cloudflare Pages Function at /api/*)
-function authHdr(){return S.ses.token?{Authorization:`Bearer ${S.ses.token}`,'Content-Type':'application/json'}:{'Content-Type':'application/json'};}
-async function apiFetch(path,opts={}){
-  const r=await fetch(`${API}/${path}`,{headers:authHdr(),...opts});
-  const ct=r.headers.get('Content-Type')||'';
-  if(!ct.includes('application/json'))return {ok:r.ok,status:r.status};
-  const d=await r.json();
-  return d;
+function authHdr() {
+  var h = { 'Content-Type': 'application/json' };
+  if (S.ses.token) h['Authorization'] = 'Bearer ' + S.ses.token;
+  return h;
 }
 
-// Auth
-async function apiAdminLogin(password){return apiFetch('auth/login',{method:'POST',body:JSON.stringify({password})});}
-async function apiUserLogin(username,password){return apiFetch('auth/user-login',{method:'POST',body:JSON.stringify({username,password})});}
-
-// DB
-async function apiFetchDB(){return apiFetch('db');}
-
-// Drives
-async function apiDriveQuota(){return apiFetch('drives/quota');}
-async function apiConnectDrive(){
-  // Open Google OAuth in popup
-  const r=await apiFetch('auth/google',{method:'GET',redirect:'manual'}).catch(()=>null);
-  // Actually redirect to oauth url returned by Function
-  const d=await fetch(`${API}/auth/google`,{headers:authHdr()});
-  const j=await d.json();
-  if(j.url){
-    const popup=window.open(j.url,'GDrive OAuth','width=560,height=600');
-    return new Promise(res=>{
-      const handler=e=>{if(e.data==='drive-connected'){window.removeEventListener('message',handler);popup?.close();res(true);}};
-      window.addEventListener('message',handler);
-      const t=setInterval(()=>{if(popup?.closed){clearInterval(t);window.removeEventListener('message',handler);res(false);}},1000);
-    });
+async function apiFetch(path, opts) {
+  opts = opts || {};
+  try {
+    var r = await fetch(API + '/' + path, Object.assign({ headers: authHdr() }, opts));
+    var ct = r.headers.get('Content-Type') || '';
+    if (!ct.includes('application/json')) return { ok: r.ok, status: r.status };
+    return await r.json();
+  } catch (e) {
+    console.error('apiFetch error:', path, e.message);
+    return { error: e.message };
   }
-  return false;
 }
-async function apiDisconnectDrive(id){return apiFetch(`drives/${id}`,{method:'DELETE'});}
 
-// Upload
-async function apiUploadInit(driveId,folderId,name,size,mimeType){
-  return apiFetch('upload/init',{method:'POST',body:JSON.stringify({driveId,folderId,name,size,mimeType})});
+function apiFetchDB()              { return apiFetch('db'); }
+function apiAdminLogin(pass)       { return apiFetch('auth/login',      { method:'POST', body: JSON.stringify({ password: pass }) }); }
+function apiUserLogin(user, pass)  { return apiFetch('auth/user-login', { method:'POST', body: JSON.stringify({ username: user, password: pass }) }); }
+function apiInit(pass)             { return apiFetch('admin/init',      { method:'POST', body: JSON.stringify({ adminPassword: pass || 'admin123' }) }); }
+function apiDriveQuota()           { return apiFetch('drives/quota'); }
+function apiDisconnectDrive(id)    { return apiFetch('drives/'+id,      { method:'DELETE' }); }
+function apiUploadInit(body)       { return apiFetch('upload/init',     { method:'POST', body: JSON.stringify(body) }); }
+function apiUploadComplete(body)   { return apiFetch('upload/complete', { method:'POST', body: JSON.stringify(body) }); }
+function apiDownload(gId, drvId)   { return apiFetch('download/'+gId+'?driveId='+drvId); }
+function apiDeleteFile(gId, drvId) { return apiFetch('files/'+gId+'?driveId='+drvId, { method:'DELETE' }); }
+function apiCreateFolder(body)     { return apiFetch('folders',         { method:'POST', body: JSON.stringify(body) }); }
+function apiDeleteFolder(id)       { return apiFetch('folders/'+id,     { method:'DELETE' }); }
+function apiCreateUser(u, p, d)    { return apiFetch('admin/users',     { method:'POST', body: JSON.stringify({ username: u, password: p, allowedDrives: d }) }); }
+function apiDeleteUser(id)         { return apiFetch('admin/users/'+id, { method:'DELETE' }); }
+function apiChangeAdminPassword(p) { return apiFetch('admin/change-password', { method:'POST', body: JSON.stringify({ newPassword: p }) }); }
+
+async function apiConnectDrive() {
+  var r = await apiFetch('auth/google');
+  if (!r.url) { toast(r.error || 'Cannot get OAuth URL', 'error'); return false; }
+  var popup = window.open(r.url, 'google-auth', 'width=520,height=620,menubar=no,toolbar=no');
+  return new Promise(function(resolve) {
+    var done = false;
+    function onMsg(e) { if (e.data === 'drive-connected') { done = true; window.removeEventListener('message', onMsg); resolve(true); } }
+    window.addEventListener('message', onMsg);
+    var t = setInterval(function() {
+      if (!popup || popup.closed) { clearInterval(t); window.removeEventListener('message', onMsg); resolve(done); }
+    }, 800);
+    setTimeout(function() { clearInterval(t); window.removeEventListener('message', onMsg); resolve(done); }, 120000);
+  });
 }
-async function apiUploadComplete(data){return apiFetch('upload/complete',{method:'POST',body:JSON.stringify(data)});}
 
-// Download
-async function apiDownload(googleFileId,driveId){return apiFetch(`download/${googleFileId}?driveId=${driveId}`);}
-
-// File delete
-async function apiDeleteFile(googleFileId,driveId){return apiFetch(`files/${googleFileId}?driveId=${driveId}`,{method:'DELETE'});}
-
-// Folders
-async function apiCreateFolder(driveId,parentFolderId,name){return apiFetch('folders',{method:'POST',body:JSON.stringify({driveId,parentFolderId,name})});}
-async function apiDeleteFolder(folderId){return apiFetch(`folders/${folderId}`,{method:'DELETE'});}
-
-// Admin
-async function apiCreateUser(username,password,allowedDrives){return apiFetch('admin/users',{method:'POST',body:JSON.stringify({username,password,allowedDrives})});}
-async function apiDeleteUser(userId){return apiFetch(`admin/users/${userId}`,{method:'DELETE'});}
-async function apiChangeAdminPassword(newPassword){return apiFetch('admin/change-password',{method:'POST',body:JSON.stringify({newPassword})});}
-async function apiInit(){return apiFetch('admin/init',{method:'POST',body:JSON.stringify({})});}
-
-// Upload a file with resumable upload directly to Google Drive
-// Returns a promise that resolves when done
-function uploadFileToGDrive(uploadUrl,file,onProgress,onDone,onError){
-  const xhr=new XMLHttpRequest();xhr.open('PUT',uploadUrl);
-  xhr.setRequestHeader('Content-Type',file.type||'application/octet-stream');
-  let lastLoaded=0,lastTime=Date.now(),speed=0;
-  xhr.upload.onprogress=e=>{
-    if(!e.lengthComputable)return;
-    const now=Date.now();const dt=(now-lastTime)/1000;
-    if(dt>=0.5){speed=(e.loaded-lastLoaded)/dt;lastLoaded=e.loaded;lastTime=now;}
-    if(onProgress)onProgress(e.loaded,e.total,speed);
-  };
-  xhr.onload=()=>{
-    if(xhr.status>=200&&xhr.status<300){
-      try{const d=JSON.parse(xhr.responseText);onDone&&onDone(d);}
-      catch{onDone&&onDone({id:null});}
-    }else{onError&&onError(new Error(`HTTP ${xhr.status}: ${xhr.statusText}`));}
-  };
-  xhr.onerror=()=>onError&&onError(new Error('Network error during upload'));
-  xhr.onabort=()=>onError&&onError(new Error('Cancelled'));
-  xhr.send(file);
-  S._xhr=xhr;
-  return xhr;
+async function uploadFileToGDrive(uploadUrl, file, onProgress) {
+  return new Promise(function(resolve, reject) {
+    var xhr = new XMLHttpRequest();
+    S._xhr = xhr;
+    xhr.open('PUT', uploadUrl);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.upload.onprogress = function(e) { if (e.lengthComputable) onProgress(e.loaded, e.total); };
+    xhr.onload = function() {
+      S._xhr = null;
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText)); } catch(e) { resolve({}); }
+      } else { reject(new Error('Upload failed: ' + xhr.status)); }
+    };
+    xhr.onerror = function() { S._xhr = null; reject(new Error('Network error')); };
+    xhr.onabort = function() { S._xhr = null; reject(new Error('Cancelled')); };
+    xhr.send(file);
+  });
 }

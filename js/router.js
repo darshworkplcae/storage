@@ -1,88 +1,111 @@
-// TeleDrive — Router & Nav State
-let _curPage='files', _driveId=null, _folderId=null, _navHist=[], _navIdx=-1;
+// TeleDrive — Router
+var _curPage = 'files';
+var _driveId = null;
+var _folderId = null;
 
-function navTo(page, driveId=null, folderId=null){
-  // Update sidebar active
-  document.querySelectorAll('.sb-nav-item').forEach(el=>{
-    el.classList.toggle('active', el.dataset.page===page);
+function navTo(page, driveId, folderId) {
+  driveId = driveId || null;
+  folderId = folderId || null;
+  _curPage = page; _driveId = driveId; _folderId = folderId;
+
+  // Update sidebar active state
+  document.querySelectorAll('.sb-nav-item').forEach(function(el) {
+    el.classList.toggle('active', el.dataset.page === page);
   });
-  // Show/hide toolbar buttons based on page
-  const isExplorer=(page==='files'||driveId);
-  $('uploadBtn')?.classList.toggle('hidden', !isExplorer);
-  $('newFolderBtn')?.classList.toggle('hidden', !isExplorer);
-  $('syncBtn')?.classList.toggle('hidden', !isExplorer);
-  document.querySelector('.view-size-btns')?.classList.toggle('hidden', !isExplorer);
 
-  _curPage=page; _driveId=driveId; _folderId=folderId;
-  const pc=$('pageContent'); if(!pc)return;
-  pc.innerHTML='<div class="loading-full"><i class="fas fa-spinner fa-spin"></i></div>';
+  // Show/hide toolbar buttons
+  var isExplorer = (page === 'files' && driveId);
+  ['uploadBtn','newFolderBtn','syncBtn'].forEach(function(id) {
+    var el = $(id);
+    if (el) el.classList.toggle('hidden', !isExplorer);
+  });
 
-  switch(page){
-    case 'files':   renderFilesPage(driveId, folderId); break;
-    case 'quota':   renderQuotaPage();  break;
-    case 'recent':  renderRecentPage(); break;
-    case 'starred': renderPage('Starred','fa-star','#ff9f0a','No starred files yet.'); break;
-    case 'trash':   renderPage('Recycle Bin','fa-trash-can','var(--danger)','Recycle bin is empty.'); break;
-    case 'activity':renderActivityPage(); break;
-    case 'settings':renderSettingsPage(); break;
-    case 'apikeys': renderApiKeysPage(); break;
-    default: renderFilesPage(null, null);
-  }
+  // Update breadcrumb
   updateBreadcrumb(page, driveId, folderId);
-  window.history.replaceState({}, '', `#/${page}${driveId?'/'+driveId:''}${folderId?'/'+folderId:''}`);
+
+  // Render page
+  var pc = $('pageContent');
+  if (pc) pc.innerHTML = '<div class="loading-full"><i class="fas fa-spinner fa-spin"></i></div>';
+
+  if      (page === 'files')    renderFilesPage(driveId, folderId);
+  else if (page === 'quota')    renderQuotaPage();
+  else if (page === 'recent')   renderRecentPage();
+  else if (page === 'activity') renderActivityPage();
+  else if (page === 'settings') renderSettingsPage();
+  else if (page === 'apikeys')  renderApiKeysPage();
+  else if (page === 'starred')  renderSimplePage('Starred', 'fa-star', '#ff9f0a', 'No starred files yet.');
+  else if (page === 'trash')    renderSimplePage('Recycle Bin', 'fa-trash-can', 'var(--danger)', 'Recycle bin is empty.');
+  else renderFilesPage(null, null);
 }
 
-function updateBreadcrumb(page, driveId, folderId){
-  const el=$('breadcrumb'); if(!el)return;
-  const labels={files:'All Files',quota:'Quota Tracker',recent:'Recent',starred:'Starred',trash:'Recycle Bin',activity:'Activity Log',settings:'Setting',apikeys:'API Keys'};
-  let parts=[];
-  if(driveId){
-    const drive=S.db?.drives?.find(d=>d.id===driveId);
-    parts.push(`<span class="bc-item" onclick="navTo('files')" style="color:var(--text2)">All Files</span>`);
-    parts.push(`<i class="fas fa-chevron-right bc-sep"></i>`);
-    parts.push(`<span class="bc-item ${!folderId?'active':''}" onclick="navTo('files','${esc(driveId)}')" style="color:${esc(drive?.color||'var(--primary)')}">${esc(drive?.name||'Drive')}</span>`);
-    if(folderId){
-      const chain=getFolderChain(folderId);
-      chain.forEach(f=>{
-        parts.push(`<i class="fas fa-chevron-right bc-sep"></i>`);
-        parts.push(`<span class="bc-item ${f.id===folderId?'active':''}" onclick="navTo('files','${esc(driveId)}','${esc(f.id)}')">${esc(f.name)}</span>`);
+function updateBreadcrumb(page, driveId, folderId) {
+  var el = $('breadcrumb');
+  if (!el) return;
+  var labels = { files:'All Files', quota:'Quota Tracker', recent:'Recent', starred:'Starred', trash:'Recycle Bin', activity:'Activity Log', settings:'Setting', apikeys:'API Keys' };
+  var parts = [];
+  if (driveId) {
+    var drive = (S.db && S.db.drives || []).find(function(d) { return d.id === driveId; });
+    parts.push('<span class="bc-item" onclick="navTo(\'files\')" style="color:var(--text2)">All Files</span>');
+    parts.push('<i class="fas fa-chevron-right bc-sep"></i>');
+    parts.push('<span class="bc-item' + (!folderId?' active':'') + '" onclick="navTo(\'files\',\'' + (drive?drive.id:'') + '\')" style="color:' + (drive?drive.color:'var(--primary)') + '">' + esc(drive?drive.name:'Drive') + '</span>');
+    if (folderId) {
+      var chain = getFolderChain(folderId);
+      chain.forEach(function(f) {
+        parts.push('<i class="fas fa-chevron-right bc-sep"></i>');
+        parts.push('<span class="bc-item' + (f.id===folderId?' active':'') + '" onclick="navTo(\'files\',\'' + esc(driveId) + '\',\'' + esc(f.id) + '\')">' + esc(f.name) + '</span>');
       });
     }
-  }else{
-    parts.push(`<span class="bc-item active">${labels[page]||page}</span>`);
+  } else {
+    parts.push('<span class="bc-item active">' + (labels[page]||page) + '</span>');
   }
-  el.innerHTML=parts.join('');
+  el.innerHTML = parts.join('');
 }
 
-function getFolderChain(folderId){
-  const chain=[];let cur=S.db?.folders?.find(f=>f.id===folderId);
-  while(cur){chain.unshift(cur);cur=S.db?.folders?.find(f=>f.id===cur.parentId);}
+function getFolderChain(folderId) {
+  var chain = [];
+  var cur = (S.db && S.db.folders || []).find(function(f) { return f.id === folderId; });
+  while (cur) {
+    chain.unshift(cur);
+    var parentId = cur.parentId;
+    cur = parentId ? (S.db && S.db.folders || []).find(function(f) { return f.id === parentId; }) : null;
+  }
   return chain;
 }
 
-function handleInitialHash(){
-  const h=window.location.hash.replace('#/','').split('/').filter(Boolean);
-  if(!h.length){navTo('files');return;}
-  const page=h[0]; const driveId=h[1]||null; const folderId=h[2]||null;
-  if(['files','quota','recent','starred','trash','activity','settings','apikeys'].includes(page)){
-    navTo(page,driveId,folderId);
-  }else navTo('files');
+function handleInitialHash() {
+  var h = window.location.hash.replace('#/', '').split('/').filter(Boolean);
+  if (!h.length) { navTo('files'); return; }
+  var page = h[0], driveId = h[1] || null, folderId = h[2] || null;
+  var valid = ['files','quota','recent','starred','trash','activity','settings','apikeys'];
+  navTo(valid.indexOf(page) >= 0 ? page : 'files', driveId, folderId);
 }
 
-function setGridSize(sz){
-  S.view=sz;
-  document.querySelectorAll('.vsz').forEach(b=>b.classList.toggle('active',b.dataset.sz===sz));
-  if(_driveId||_curPage==='files')navTo('files',_driveId,_folderId);
+function setGridSize(sz) {
+  S.view = sz;
+  document.querySelectorAll('.vsz').forEach(function(b) { b.classList.toggle('active', b.dataset.sz === sz); });
+  if (_driveId || _curPage === 'files') renderFilesPage(_driveId, _folderId);
 }
 
-function switchTab(mode,btn){
-  document.querySelectorAll('#authTabs .seg').forEach(b=>b.classList.remove('active'));
+function switchTab(mode, btn) {
+  btn.parentElement.querySelectorAll('.seg').forEach(function(b) { b.classList.remove('active'); });
   btn.classList.add('active');
-  $('userForm').classList.toggle('hidden', mode==='admin');
-  $('adminForm').classList.toggle('hidden', mode==='user');
+  var uf = $('userForm'), af = $('adminForm');
+  if (uf) uf.classList.toggle('hidden', mode === 'admin');
+  if (af) af.classList.toggle('hidden', mode === 'user');
 }
 
-function toggleSbMenu(){
-  $('sbMenu').classList.toggle('hidden');
-  setTimeout(()=>document.addEventListener('click',()=>$('sbMenu')?.classList.add('hidden'),{once:true}),0);
+function toggleSbMenu() {
+  var m = $('sbMenu'); if (!m) return;
+  m.classList.toggle('hidden');
+  setTimeout(function() {
+    document.addEventListener('click', function closeFn() {
+      m.classList.add('hidden');
+      document.removeEventListener('click', closeFn);
+    });
+  }, 0);
+}
+
+function renderSimplePage(title, icon, color, msg) {
+  var pc = $('pageContent'); if (!pc) return;
+  pc.innerHTML = '<div class="inner-page"><div class="page-hd"><h2>' + title + '</h2></div><div class="empty-state" style="min-height:300px"><div class="empty-icon"><i class="fas ' + icon + '" style="color:' + color + '"></i></div><h3>' + msg + '</h3><p>Coming soon</p></div></div>';
 }

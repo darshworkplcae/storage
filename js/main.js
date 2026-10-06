@@ -1,3 +1,12 @@
+// Called by Sign In button onclick — must be defined globally
+function showSignIn() {
+  var gate = $('authGate');
+  if (gate) gate.classList.remove('hidden');
+}
+function hideSignIn() {
+  var gate = $('authGate');
+  if (gate) gate.classList.add('hidden');
+}
 // TeleDrive — Init & Events
 
 async function init(){

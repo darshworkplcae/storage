@@ -1,144 +1,152 @@
-// TeleDrive — Dialogs + Upload + Download + Media Preview
+// Upload queue, download, media preview, new folder
+var _uploadQueue = [];
 
-// ─── Upload Queue ─────────────────────────────────────────
-const _Q=[];let _Qrunning=false;
-async function uploadFiles(files){
-  if(!S.driveId){toast('Open a drive first','warning');return;}
-  if(!S.db?.drives?.find(d=>d.id===S.driveId)){toast('Drive not found','error');return;}
-  Array.from(files).forEach(f=>_Q.push(f));
-  $('fileInput').value='';
-  toast(`${files.length} file${files.length>1?'s':''} queued`,'info');
-  _processQueue();
+async function uploadFiles(fileList) {
+  var files = Array.from(fileList);
+  if (!S.ses.token) { toast('Please sign in to upload', 'warning'); return; }
+  if (!_driveId) { toast('Open a drive first', 'warning'); return; }
+  _uploadQueue = _uploadQueue.concat(files);
+  if (_uploadQueue.length === files.length) processQueue();
 }
-async function _processQueue(){
-  if(_Qrunning||!_Q.length)return;
-  _Qrunning=true;S.uploading=true;S.cancelUpload=false;
-  $('upBar').classList.remove('hidden');
-  while(_Q.length){
-    const f=_Q[0];
-    try{await uploadOne(f);}
-    catch(e){if(e.message!=='Cancelled')toast(`Failed: ${f.name} — ${e.message}`,'error');}
-    _Q.shift();S.cancelUpload=false;
-    // Refresh DB
-    S.db=await apiFetchDB();renderExplorer();renderHome();renderTM();
+
+async function processQueue() {
+  while (_uploadQueue.length > 0) {
+    var file = _uploadQueue.shift();
+    await uploadOne(file);
   }
-  _Qrunning=false;S.uploading=false;$('upBar').classList.add('hidden');
 }
-async function uploadOne(file){
-  const tid=uid();
-  const name=file.name;const size=file.size;const mimeType=file.type||'application/octet-stream';
-  $('upName').textContent=name;$('upPct').textContent='0%';$('upFill').style.width='0%';$('upStatus').textContent='Starting…';
-  tmAdd(tid,name,size);
-  // Get resumable upload URL
-  const init=await apiUploadInit(S.driveId,S.folderId||null,name,size,mimeType);
-  if(!init.uploadUrl)throw new Error(init.error||'Could not init upload');
-  // Upload directly to Google Drive
-  const googleFile=await new Promise((res,rej)=>{
-    uploadFileToGDrive(init.uploadUrl,file,(loaded,total,speed)=>{
-      if(S.cancelUpload){S._xhr?.abort();return;}
-      const pct=Math.round(loaded/total*100);
-      const uMB=(loaded/1048576).toFixed(1);const tMB=(total/1048576).toFixed(1);
-      $('upStatus').textContent=`${uMB} / ${tMB} MB · ${fmtSpeed(speed)}`;
-      $('upPct').textContent=pct+'%';$('upFill').style.width=pct+'%';
-      tmUpdate(tid,pct,speed,loaded);
-    },res,rej);
+
+async function uploadOne(file) {
+  S.cancelUpload = false;
+  var tId = uid();
+  var upBar = $('upBar'), upName = $('upName'), upStatus = $('upStatus'), upFill = $('upFill'), upPct = $('upPct');
+
+  if (upBar) upBar.classList.remove('hidden');
+  if (upName) upName.textContent = file.name;
+  if (upStatus) upStatus.textContent = 'Preparing…';
+
+  tmAdd(tId, file.name, file.size);
+
+  try {
+    var initData = {
+      driveId: _driveId, folderId: _folderId || null,
+      name: file.name, size: file.size,
+      mimeType: file.type || 'application/octet-stream'
+    };
+    var ir = await apiUploadInit(initData);
+    if (!ir.uploadUrl) throw new Error(ir.error || 'Failed to init upload');
+
+    var googleFileId = null;
+    var startTime = Date.now(), lastLoaded = 0;
+
+    var gf = await uploadFileToGDrive(ir.uploadUrl, file, function(loaded, total) {
+      if (S.cancelUpload) return;
+      var pct = Math.round(loaded / total * 100);
+      var elapsed = (Date.now() - startTime) / 1000;
+      var speed = elapsed > 0 ? (loaded - lastLoaded) / elapsed : 0;
+      lastLoaded = loaded;
+
+      if (upFill) upFill.style.width = pct + '%';
+      if (upPct) upPct.textContent = pct + '%';
+      if (upStatus) upStatus.textContent = fmt(loaded) + ' / ' + fmt(total) + (speed > 0 ? ' · ' + fmtSpeed(speed) : '');
+      tmUpdate(tId, pct, speed, loaded);
+    });
+
+    googleFileId = gf.id;
+    if (!googleFileId) throw new Error('No file ID returned from Google');
+
+    await apiUploadComplete({
+      fileLocalId: ir.fileLocalId, googleFileId: googleFileId,
+      driveId: _driveId, folderId: _folderId || null,
+      name: file.name, size: file.size,
+      mimeType: file.type || 'application/octet-stream'
+    });
+
+    S.db = await apiFetchDB();
+    tmDone(tId, true);
+    toast(file.name + ' uploaded!', 'success');
+    renderSidebarStorage();
+    renderFilesPage(_driveId, _folderId);
+  } catch (e) {
+    if (e.message === 'Cancelled') { toast('Upload cancelled', 'warning'); }
+    else { toast('Upload failed: ' + e.message, 'error'); }
+    tmDone(tId, false);
+  } finally {
+    if (upBar) upBar.classList.add('hidden');
+    if (upFill) upFill.style.width = '0%';
+    if (upPct) upPct.textContent = '0%';
+  }
+}
+
+async function downloadFile(fileLocalId) {
+  if (!S.ses.token) { toast('Please sign in to download', 'warning'); return; }
+  var f = (S.db && S.db.files || []).find(function(x) { return x.id === fileLocalId; });
+  if (!f) return;
+  toast('Getting download link…', 'info');
+  var r = await apiDownload(f.googleFileId, f.driveId);
+  if (r.url) {
+    var a = document.createElement('a');
+    a.href = r.url; a.download = f.name; a.target = '_blank';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    var log = { id: uid(), type: 'download', name: f.name, size: f.size, driveId: f.driveId, ts: new Date().toISOString() };
+    if (S.db && S.db.activityLog) S.db.activityLog.unshift(log);
+  } else { toast(r.error || 'Download failed', 'error'); }
+}
+
+async function openMedia(fileLocalId) {
+  var f = (S.db && S.db.files || []).find(function(x) { return x.id === fileLocalId; });
+  if (!f || !S.ses.token) { downloadFile(fileLocalId); return; }
+  var r = await apiDownload(f.googleFileId, f.driveId);
+  if (!r.url) { toast(r.error || 'Cannot open preview', 'error'); return; }
+  var cfg = ftCfg(f.name, f.mimeType);
+  var isImg = cfg.cat === 'image';
+  var isVid = cfg.cat === 'video';
+  var isAud = cfg.cat === 'audio';
+  var ov = document.createElement('div');
+  ov.className = 'media-ov';
+  ov.innerHTML = [
+    '<div class="media-hd">',
+    '<div class="media-title"><i class="fas ' + cfg.icon + '" style="color:' + cfg.col + '"></i> ' + esc(f.name) + '</div>',
+    '<div style="display:flex;gap:.4rem">',
+    '<a href="' + r.url + '" download="' + esc(f.name) + '" class="btn-ghost sm"><i class="fas fa-download"></i> Download</a>',
+    '<button class="icon-btn" onclick="this.closest(\'.media-ov\').remove()"><i class="fas fa-times"></i></button>',
+    '</div></div>',
+    '<div class="media-body">',
+    isImg ? '<img class="media-img" src="' + r.url + '" alt="' + esc(f.name) + '">' :
+    isVid ? '<video class="media-vid" src="' + r.url + '" controls autoplay></video>' :
+    isAud ? '<audio src="' + r.url + '" controls autoplay style="width:80%;max-width:500px"></audio>' :
+    '<div style="color:var(--text2);text-align:center"><p>Cannot preview this file type.</p><a href="' + r.url + '" class="btn-primary" target="_blank">Open in new tab</a></div>',
+    '</div>'
+  ].join('');
+  ov.addEventListener('click', function(e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
+function confirmDeleteFile(fileLocalId, name) {
+  if (!confirm('Delete "' + name + '"?\nThis removes it from Google Drive permanently.')) return;
+  var f = (S.db && S.db.files || []).find(function(x) { return x.id === fileLocalId; });
+  if (!f) return;
+  apiDeleteFile(f.googleFileId, f.driveId).then(async function(r) {
+    if (r.ok) { toast('Deleted "' + name + '"', 'success'); S.db = await apiFetchDB(); renderSidebarStorage(); renderFilesPage(_driveId, _folderId); }
+    else toast(r.error || 'Delete failed', 'error');
   });
-  if(S.cancelUpload){tmDone(tid,false);throw new Error('Cancelled');}
-  const googleFileId=googleFile.id;
-  if(!googleFileId)throw new Error('Upload completed but no file ID returned');
-  // Save metadata
-  await apiUploadComplete({fileLocalId:init.fileLocalId,googleFileId,driveId:S.driveId,folderId:S.folderId||null,name,size,mimeType});
-  tmDone(tid,true);
-  toast(`✓ ${name}`,'success');
 }
 
-// ─── Download ─────────────────────────────────────────────
-async function downloadFile(fileId){
-  const f=S.db?.files?.find(x=>x.id===fileId);if(!f)return;
-  toast(`Preparing download…`,'info');
-  const r=await apiDownload(f.googleFileId,f.driveId);
-  if(r.url){dlLink(r.url,f.name);toast(`↓ ${f.name}`,'success');}
-  else toast('Download failed','error');
-}
-
-// ─── Media Preview ────────────────────────────────────────
-async function openMedia(fileId){
-  const f=S.db?.files?.find(x=>x.id===fileId);if(!f)return;
-  const cfg=ftCfg(f.name,f.mimeType);
-  const r=await apiDownload(f.googleFileId,f.driveId);
-  if(!r.url){toast('Cannot preview','error');return;}
-  const ov=document.createElement('div');ov.className='media-ov';ov.tabIndex=0;
-  const isImg=cfg.cat==='image',isVid=cfg.cat==='video',isAud=cfg.cat==='audio';
-  let body='';
-  if(isImg)body=`<img class="media-img" src="${esc(r.url)}" alt="${esc(f.name)}">`;
-  else if(isVid)body=`<video class="media-vid" src="${esc(r.url)}" controls autoplay></video>`;
-  else if(isAud)body=`<div style="text-align:center;padding:3rem 2rem"><i class="fas fa-music" style="font-size:5rem;color:var(--primary);display:block;margin-bottom:2rem"></i><audio src="${esc(r.url)}" controls style="width:80%;max-width:420px"></audio></div>`;
-  ov.innerHTML=`<div class="media-hd"><div class="media-title"><i class="fas ${cfg.icon}" style="color:${cfg.col}"></i>${esc(f.name)}</div><div style="display:flex;gap:.5rem"><button class="icon-btn" onclick="downloadFile('${esc(f.id)}')"><i class="fas fa-download"></i></button><button class="icon-btn" onclick="this.closest('.media-ov').remove()"><i class="fas fa-times"></i></button></div></div><div class="media-body">${body}</div>`;
-  document.body.appendChild(ov);ov.focus();
-  ov.addEventListener('keydown',e=>{if(e.key==='Escape')ov.remove();});
-}
-
-// ─── Delete ───────────────────────────────────────────────
-function confirmDeleteFile(fileId,name){
-  if(!confirm(`Delete "${name}"?\nThis will permanently delete from Google Drive.`))return;
-  const f=S.db?.files?.find(x=>x.id===fileId);if(!f)return;
-  apiDeleteFile(f.googleFileId,f.driveId).then(async r=>{
-    if(r.ok){toast(`${name} deleted`,'success');S.db=await apiFetchDB();renderExplorer();}
-    else toast(r.error||'Delete failed','error');
-  });
-}
-function confirmDeleteFolder(folderId,name){
-  if(!confirm(`Delete folder "${name}" and ALL its contents?\nThis cannot be undone.`))return;
-  apiDeleteFolder(folderId).then(async r=>{
-    if(r.ok){toast(`Folder deleted`,'success');S.db=await apiFetchDB();renderExplorer();}
-    else toast(r.error||'Delete failed','error');
+function confirmDeleteFolder(folderId, name) {
+  if (!confirm('Delete folder "' + name + '" and all its contents?')) return;
+  apiDeleteFolder(folderId).then(async function(r) {
+    if (r.ok) { toast('Folder deleted', 'success'); S.db = await apiFetchDB(); renderFilesPage(_driveId, _folderId); }
+    else toast(r.error || 'Delete failed', 'error');
   });
 }
 
-// ─── New Folder ───────────────────────────────────────────
-function showNewFolderDialog(){
-  const name=prompt('New folder name:');if(!name?.trim())return;
-  apiCreateFolder(S.driveId,S.folderId||null,name.trim()).then(async r=>{
-    if(r.ok){S.db=await apiFetchDB();renderExplorer();toast(`Folder created`,'success');}
-    else toast(r.error||'Failed','error');
+function showNewFolderDialog() {
+  if (!S.ses.token) { toast('Sign in required', 'warning'); return; }
+  if (!_driveId) { toast('Open a drive first', 'warning'); return; }
+  var name = prompt('Folder name:');
+  if (!name || !name.trim()) return;
+  apiCreateFolder({ driveId: _driveId, parentFolderId: _folderId || null, name: name.trim() }).then(async function(r) {
+    if (r.ok) { toast('Folder created', 'success'); S.db = await apiFetchDB(); renderFilesPage(_driveId, _folderId); }
+    else toast(r.error || 'Failed to create folder', 'error');
   });
 }
-
-// ─── Drive Menu ───────────────────────────────────────────
-function showDriveMenu(driveId,btn){
-  document.querySelectorAll('.ctx-menu').forEach(m=>m.remove());
-  const m=document.createElement('div');m.className='ctx-menu';
-  m.innerHTML=`<div class="ctx-item danger" onclick="disconnectDrive('${esc(driveId)}')"><i class="fas fa-unlink"></i>Disconnect Drive</div>`;
-  btn.appendChild(m);
-  setTimeout(()=>document.addEventListener('click',()=>m.remove(),{once:true}),0);
-}
-async function disconnectDrive(driveId){
-  if(!confirm('Disconnect this Google Drive?\nFiles already uploaded will remain in Google Drive but won\'t appear here.'))return;
-  const r=await apiDisconnectDrive(driveId);
-  if(r.ok){toast('Drive disconnected','success');S.db=await apiFetchDB();renderHome();}
-  else toast(r.error||'Failed','error');
-}
-
-// ─── Auth actions ─────────────────────────────────────────
-async function doLogin(){
-  const u=($('authUsername')?.value||'').trim();const p=$('authPassword')?.value||'';
-  if(!u||!p){showAuthErr('Please fill in all fields');return;}
-  const btn=$('authLoginBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fas fa-spinner fa-spin"></i> Signing in…';}
-  const r=await apiUserLogin(u,p);
-  if(r.token){
-    Object.assign(S.ses,{token:r.token,role:r.role,userId:r.userId,username:r.username,allowedDrives:r.allowedDrives||'all'});
-    saveSes();S.db=await apiFetchDB();syncAdminUI();goHome();
-  }else{showAuthErr(r.error||'Login failed');}
-  if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-sign-in-alt"></i> Sign In';}
-}
-async function doAdminLogin(){
-  const p=$('authAdminPass')?.value||'';
-  if(!p){showAuthErr('Enter admin password');return;}
-  const r=await apiAdminLogin(p);
-  if(r.token){
-    Object.assign(S.ses,{token:r.token,role:'admin',userId:null,username:'admin',allowedDrives:'all'});
-    saveSes();S.db=await apiFetchDB();syncAdminUI();goHome();toast('Admin access granted','success');
-  }else showAuthErr(r.error||'Wrong password');
-}
-function showAuthErr(msg){const el=$('authError');if(el){el.textContent=msg;el.classList.remove('hidden');}}
-function doLogout(){clearSes();S.ses={token:null,role:null,userId:null,username:null,allowedDrives:'all'};syncAdminUI();goHome();toast('Logged out','info');}
