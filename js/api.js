@@ -111,6 +111,7 @@ function uploadToGoogle(uploadUrl, file, onProgress, cancelSignal) {
 async function uploadToGoogleResumable(uploadUrl, file, onProgress, cancelSignal) {
   var total = file.size;
   var startOffset = 0;
+  var retries = 0;
 
   while (startOffset < total) {
     if (cancelSignal && cancelSignal.cancelled) throw new Error('Cancelled');
@@ -169,7 +170,7 @@ async function uploadToGoogleResumable(uploadUrl, file, onProgress, cancelSignal
         }
       };
 
-      xhr.onerror = function() { reject(new Error('Network error — upload interrupted')); };
+      xhr.onerror = function() { resolve({ error: 'network' }); };
       xhr.onabort = function() {
         if (cancelSignal && cancelSignal.paused) resolve({ paused: true });
         else reject(new Error('Cancelled'));
@@ -185,6 +186,13 @@ async function uploadToGoogleResumable(uploadUrl, file, onProgress, cancelSignal
       continue;
     } else if (res.status === 308) {
       startOffset = res.nextOffset;
+      retryCount = 0;
+    } else if (res.error === 'network') {
+      retries++;
+      if (retries > 3) throw new Error('Network error — connection dropped after 3 retries');
+      await new Promise(function(r){ setTimeout(r, 1500); });
+      startOffset = await queryGoogleUploadedBytes(uploadUrl, total);
+      continue;
     } else {
       break;
     }
@@ -223,3 +231,7 @@ function apiBatchRequestRestore(fileIds) { return apiFetch('files/trash/batch-re
 function apiBatchApproveRestore(fileIds) { return apiFetch('files/trash/batch-approve-restore', { method: 'POST', body: JSON.stringify({ fileIds: fileIds }) }); }
 function apiBatchPermanentDelete(fileIds) { return apiFetch('files/trash/batch-permanent-delete', { method: 'POST', body: JSON.stringify({ fileIds: fileIds }) }); }
 function apiEmptyTrash() { return apiFetch('files/trash/empty', { method: 'POST' }); }
+function apiLockFolder(folderId, password) { return apiFetch('folders/lock/' + encodeURIComponent(folderId), { method: 'POST', body: JSON.stringify({ password: password }) }); }
+function apiUnlockFolder(folderId, password) { return apiFetch('folders/unlock/' + encodeURIComponent(folderId), { method: 'POST', body: JSON.stringify({ password: password }) }); }
+function apiRemoveFolderLock(folderId, password) { return apiFetch('folders/remove-lock/' + encodeURIComponent(folderId), { method: 'POST', body: JSON.stringify({ password: password }) }); }
+function apiGetAdminLockedFolders() { return apiFetch('admin/locked-folders'); }

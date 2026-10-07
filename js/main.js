@@ -135,12 +135,20 @@ function updateSidebarProfile() {
 function updateNavVisibility() {
   var isAdmin = S.ses.role==='admin';
   var isUserOrAdmin = isAdmin || (S.ses && S.ses.role==='user');
+  var isAuth = !!(S.ses && S.ses.token && S.ses.role);
   document.querySelectorAll('.admin-only').forEach(function(el){
     el.classList.toggle('hidden',!isAdmin);
   });
   document.querySelectorAll('.user-or-admin').forEach(function(el){
     el.classList.toggle('hidden',!isUserOrAdmin);
   });
+  document.querySelectorAll('.guest-only').forEach(function(el){
+    el.classList.toggle('hidden', isAuth);
+  });
+  var sbLogout = $('sbLogout'); if(sbLogout) sbLogout.classList.toggle('hidden', !isAuth);
+  var sbLoginBtn = $('sbLoginBtn'); if(sbLoginBtn) sbLoginBtn.classList.toggle('hidden', isAuth);
+  var pmenuLogout = $('pmenuLogout'); if(pmenuLogout) pmenuLogout.classList.toggle('hidden', !isAuth);
+  var pmenuLogin = $('pmenuLogin'); if(pmenuLogin) pmenuLogin.classList.toggle('hidden', isAuth);
   var adminBtn=$('adminQuickBtn'); if(adminBtn) adminBtn.classList.toggle('hidden',!isAdmin);
 }
 

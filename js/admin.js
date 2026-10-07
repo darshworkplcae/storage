@@ -78,6 +78,13 @@ function renderSettingsPage() {
     '</div>',
     '</div>',
 
+    // Folder Security & Password Recovery (Admin recovery for encrypted folders)
+    '<div class="settings-section">',
+    '<div class="sect-hd"><i class="fas fa-lock" style="color:#ffd700"></i><div><h3>Folder Security & Password Recovery</h3><p>View and manage encrypted folders created by Private Users and Guests. Passwords can be decoded and recovered here.</p></div>',
+    '<button class="btn-ghost sm" onclick="loadAdminLockedFolders()"><i class="fas fa-rotate"></i> Refresh</button></div>',
+    '<div id="lockedFoldersContainer" style="margin-top:1rem"><div class="empty-small"><i class="fas fa-spinner fa-spin"></i><p>Loading encrypted folders…</p></div></div>',
+    '</div>',
+
     // Change admin password
     '<div class="settings-section">',
     '<h3 class="sect-title"><i class="fas fa-shield-halved"></i> Admin Password</h3>',
@@ -97,6 +104,70 @@ function renderSettingsPage() {
 
     '</div>'
   ].join('');
+
+  loadAdminLockedFolders();
+}
+
+async function loadAdminLockedFolders() {
+  var el = $('lockedFoldersContainer');
+  if(!el) return;
+  el.innerHTML = '<div class="empty-small"><i class="fas fa-spinner fa-spin"></i><p>Loading encrypted folders…</p></div>';
+  var res = await apiGetAdminLockedFolders();
+  if(!res || !res.folders || res.folders.length === 0){
+    el.innerHTML = '<div class="empty-small"><i class="fas fa-lock-open" style="color:var(--text3)"></i><p>No locked folders found across any drive.</p></div>';
+    return;
+  }
+
+  var userFolders = res.folders.filter(function(f){ return f.lockedRole !== 'guest'; });
+  var guestFolders = res.folders.filter(function(f){ return f.lockedRole === 'guest'; });
+
+  function renderTable(list, typeLabel) {
+    if(!list.length) return '<div style="padding:1rem;color:var(--text3);font-size:.82rem;font-style:italic">No '+typeLabel+' locked folders.</div>';
+    return '<table class="users-table" style="margin-bottom:1rem">' +
+      '<thead><tr><th>Folder</th><th>Drive</th><th>Locked By</th><th>Locked Date</th><th>Plain Password</th><th>Action</th></tr></thead>' +
+      '<tbody>' + list.map(function(f, idx){
+        var inputId = 'lfp_' + f.id + '_' + idx;
+        return '<tr>' +
+          '<td><strong style="display:flex;align-items:center;gap:6px"><i class="fas fa-folder" style="color:#ffd700"></i> ' + esc(f.name) + '</strong></td>' +
+          '<td>' + esc(f.driveName) + '</td>' +
+          '<td><span class="badge ' + (f.lockedRole==='guest'?'badge-guest':'badge-user') + '">' + esc(f.lockedBy) + '</span></td>' +
+          '<td>' + fmtDate(f.lockedAt) + '</td>' +
+          '<td>' +
+            '<div style="display:flex;align-items:center;gap:6px">' +
+              '<input type="password" id="' + inputId + '" value="' + esc(f.plainPassword) + '" readonly class="inp xs" style="width:110px;font-family:monospace;background:rgba(255,255,255,0.06);border-color:transparent">' +
+              '<button class="icon-btn xs" onclick="var el=document.getElementById(\'' + inputId + '\');el.type=el.type===\'password\'?\'text\':\'password\';this.innerHTML=\'<i class=\\\'fas fa-\'+(el.type===\'password\'?\'eye\':\'eye-slash\')+\'\\\'></i>\';" title="Reveal Password"><i class="fas fa-eye"></i></button>' +
+              '<button class="icon-btn xs" onclick="navigator.clipboard.writeText(\'' + esc(f.plainPassword).replace(/'/g,"\\'") + '\');toast(\'Password copied!\',\'success\');" title="Copy Password"><i class="fas fa-copy"></i></button>' +
+            '</div>' +
+          '</td>' +
+          '<td>' +
+            '<button class="btn-ghost xs danger" onclick="adminRemoveFolderLock(\'' + f.id + '\',\'' + esc(f.name).replace(/'/g,"\\'") + '\')" title="Remove Lock"><i class="fas fa-lock-open"></i> Unlock</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('') +
+      '</tbody></table>';
+  }
+
+  el.innerHTML = [
+    '<div class="locked-folders-wrap">',
+    '<h4 style="margin:.8rem 0 .4rem;font-size:.86rem;color:var(--primary);display:flex;align-items:center;gap:6px"><i class="fas fa-user-shield"></i> Private User Folders (' + userFolders.length + ')</h4>',
+    renderTable(userFolders, 'private user'),
+    '<h4 style="margin:1.2rem 0 .4rem;font-size:.86rem;color:#ff9f0a;display:flex;align-items:center;gap:6px"><i class="fas fa-users"></i> Guest / Public Trip Folders (' + guestFolders.length + ')</h4>',
+    renderTable(guestFolders, 'guest'),
+    '</div>'
+  ].join('');
+}
+
+async function adminRemoveFolderLock(folderId, folderName) {
+  if(!confirm('Permanently remove password lock from "' + folderName + '"?')) return;
+  toast('Removing password…', 'info');
+  var res = await apiRemoveFolderLock(folderId, '');
+  if(res && res.ok){
+    toast('Folder unlocked successfully!', 'success');
+    S.db = await apiFetchDB();
+    loadAdminLockedFolders();
+  } else {
+    toast(res ? (res.error || 'Failed') : 'Error', 'error');
+  }
 }
 
 function renderApiKeysPage() {

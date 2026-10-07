@@ -15,10 +15,14 @@ function toggleUploadPause() {
   if (!_cancelSignal) return;
   if (!_cancelSignal.paused) {
     _cancelSignal.paused = true;
+    if (_cancelSignal.xhr) {
+      try { _cancelSignal.xhr.abort(); } catch(e){}
+    }
     if (btn) btn.innerHTML = '<i class="fas fa-play"></i>';
     var st = $('upStatus');
     if (st) st.textContent = 'Paused';
     toast('Upload paused', 'info');
+    if (typeof renderTM === 'function') renderTM();
   } else {
     _cancelSignal.paused = false;
     if (btn) btn.innerHTML = '<i class="fas fa-pause"></i>';
@@ -27,6 +31,7 @@ function toggleUploadPause() {
       _cancelSignal.resumeResolve = null;
     }
     toast('Upload resumed', 'info');
+    if (typeof renderTM === 'function') renderTM();
   }
 }
 
@@ -64,11 +69,19 @@ async function uploadFiles(fileList, targetFolderId) {
 
   if (files.length === 0) return;
 
+  // Pre-queue all files in Transfers Manager upfront so user sees the full queue!
+  var fileItems = files.map(function(f) {
+    var tId = uid();
+    tmAddQueued(tId, f.name, f.size);
+    return { file: f, tId: tId };
+  });
+  renderTM();
+
   window._isUploading = true;
   try {
-    for(var i=0; i<files.length; i++) {
+    for(var i=0; i<fileItems.length; i++) {
       if(_cancelSignal.cancelled) break;
-      await uploadOne(files[i], targetFolderId || _folderId);
+      await uploadOne(fileItems[i].file, targetFolderId || _folderId, fileItems[i].tId);
     }
   } finally {
     window._isUploading = false;
@@ -123,15 +136,27 @@ async function uploadFolder() {
     window._isUploading = true;
     toast('Preparing folder "' + rootFolder + '" (' + files.length + ' files)…', 'info');
 
+    // Pre-queue all folder files upfront so user sees the complete 75-item queue in Transfers!
+    var fileItems = files.map(function(f) {
+      var tId = uid();
+      tmAddQueued(tId, f.name, f.size);
+      return { file: f, tId: tId };
+    });
+    renderTM();
+
+    window._isUploading = true;
+    toast('Preparing folder "' + rootFolder + '" (' + files.length + ' files)…', 'info');
+
     // Build directory tree in Google Drive
     var folderMap = {}; // relative path -> folderId
     var skippedCount = 0;
     var uploadedCount = 0;
 
     try {
-      for (var i = 0; i < files.length; i++) {
+      for (var i = 0; i < fileItems.length; i++) {
         if (_cancelSignal.cancelled) break;
-        var file = files[i];
+        var item = fileItems[i];
+        var file = item.file;
         var relPath = file.webkitRelativePath || file.name;
         var parts = relPath.split('/');
         var parentId = _folderId || null;
@@ -145,7 +170,7 @@ async function uploadFolder() {
             if (!folderMap[pathAcc]) {
               // Find existing or create new folder
               var existing = (S.db && S.db.folders || []).find(function(f){
-                return f.driveId === _driveId && f.parentId === parentId && f.name === folderName;
+                return f.driveId === _driveId && f.parentId === parentId && f.name.toLowerCase() === folderName.toLowerCase() && !f.trashed;
               });
               if (existing) {
                 folderMap[pathAcc] = existing.id;
@@ -172,12 +197,13 @@ async function uploadFolder() {
 
         if (alreadyUploaded) {
           skippedCount++;
+          tmDone(item.tId, true); // Mark as done/skipped in TM
           var st = $('upStatus');
           if (st) st.textContent = 'Skipping already uploaded (' + skippedCount + ' skipped): ' + file.name;
           continue;
         }
 
-        await uploadOne(file, parentId);
+        await uploadOne(file, parentId, item.tId);
         uploadedCount++;
       }
 
@@ -198,9 +224,9 @@ async function uploadFolder() {
   inp.click();
 }
 
-async function uploadOne(file, targetFolderId) {
-  _cancelSignal = { cancelled: false, paused: false, resumeResolve: null };
-  var tId = uid();
+async function uploadOne(file, targetFolderId, existingTid) {
+  _cancelSignal = { cancelled: false, paused: false, resumeResolve: null, xhr: null };
+  var tId = existingTid || uid();
   var upBar=$('upBar'), upName=$('upName'), upStatus=$('upStatus'), upFill=$('upFill'), upPct=$('upPct'), upPauseBtn=$('upPauseBtn');
 
   if(upBar) upBar.classList.remove('hidden');
@@ -262,6 +288,149 @@ async function uploadOne(file, targetFolderId) {
     if(upFill) upFill.style.width = '0%';
     if(upPct) upPct.textContent = '0%';
   }
+}
+
+// ─── Folder Security & Lock Dialogs ──────────────────────
+function showLockFolderDialog(folderId, folderName) {
+  var ov = document.createElement('div');
+  ov.className = 'modal-backdrop';
+  ov.innerHTML = `
+    <div class="modal" style="max-width:420px;text-align:center">
+      <div class="modal-hd" style="justify-content:center;position:relative">
+        <div style="width:48px;height:48px;border-radius:50%;background:rgba(255,159,10,0.15);color:#ff9f0a;display:flex;align-items:center;justify-content:center;font-size:1.4rem;margin:0 auto .5rem">
+          <i class="fas fa-lock"></i>
+        </div>
+        <button class="icon-btn xs" style="position:absolute;right:1rem;top:1rem" onclick="this.closest('.modal-backdrop').remove()"><i class="fas fa-times"></i></button>
+      </div>
+      <h3 style="margin-bottom:.3rem">Lock Folder</h3>
+      <p style="font-size:.84rem;color:var(--text3);margin-bottom:1.2rem">Set a password for <strong>${esc(folderName)}</strong>. The folder will be encrypted and inaccessible without this password.</p>
+      <form id="lockFolderForm" onsubmit="return false;" style="text-align:left">
+        <div style="margin-bottom:1rem">
+          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem">Folder Password</label>
+          <div style="position:relative">
+            <input type="password" id="lockFolderPass" class="inp" placeholder="Enter password (e.g. secret123)" required style="width:100%;padding-right:40px">
+            <button type="button" class="icon-btn xs" style="position:absolute;right:8px;top:50%;transform:translateY(-50%)" onclick="var p=document.getElementById('lockFolderPass');p.type=p.type==='password'?'text':'password';this.innerHTML='<i class=\\'fas fa-'+(p.type==='password'?'eye':'eye-slash')+'\\'></i>';"><i class="fas fa-eye"></i></button>
+          </div>
+        </div>
+        <div style="display:flex;gap:.6rem;justify-content:flex-end;margin-top:1.4rem">
+          <button type="button" class="btn-ghost sm" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
+          <button type="submit" class="btn-primary sm" id="submitLockBtn" style="background:linear-gradient(135deg,#ff9f0a,#ff453a)"><i class="fas fa-lock"></i> Lock Folder</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(ov);
+  var passInp = ov.querySelector('#lockFolderPass');
+  if (passInp) passInp.focus();
+
+  ov.querySelector('#lockFolderForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    var val = passInp.value.trim();
+    if (!val) return;
+    var btn = ov.querySelector('#submitLockBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Locking…';
+    var res = await apiLockFolder(folderId, val);
+    if (res && res.ok) {
+      toast('Folder locked! Protected with password.', 'success');
+      ov.remove();
+      S.db = await apiFetchDB();
+      renderFilesPage(_driveId, _folderId);
+    } else {
+      toast(res ? (res.error || 'Failed to lock folder') : 'Network error', 'error');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-lock"></i> Lock Folder';
+    }
+  });
+}
+
+function showUnlockFolderDialog(folder, onUnlocked) {
+  var ov = document.createElement('div');
+  ov.className = 'modal-backdrop';
+  ov.innerHTML = `
+    <div class="modal" style="max-width:400px;text-align:center">
+      <div class="modal-hd" style="justify-content:center;position:relative">
+        <div style="width:52px;height:52px;border-radius:50%;background:rgba(255,215,0,0.18);color:#ffd700;display:flex;align-items:center;justify-content:center;font-size:1.5rem;margin:0 auto .5rem;box-shadow:0 0 20px rgba(255,215,0,0.25)">
+          <i class="fas fa-lock"></i>
+        </div>
+        <button class="icon-btn xs" style="position:absolute;right:1rem;top:1rem" onclick="this.closest('.modal-backdrop').remove()"><i class="fas fa-times"></i></button>
+      </div>
+      <h3 style="margin-bottom:.3rem">Protected Folder</h3>
+      <p style="font-size:.84rem;color:var(--text3);margin-bottom:1.2rem"><strong>${esc(folder.name)}</strong> is encrypted. Enter the password to view and upload files inside.</p>
+      <form id="unlockFolderForm" onsubmit="return false;" style="text-align:left">
+        <div style="margin-bottom:1rem">
+          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem">Enter Folder Password</label>
+          <div style="position:relative">
+            <input type="password" id="unlockFolderPass" class="inp" placeholder="Password" required style="width:100%;padding-right:40px">
+            <button type="button" class="icon-btn xs" style="position:absolute;right:8px;top:50%;transform:translateY(-50%)" onclick="var p=document.getElementById('unlockFolderPass');p.type=p.type==='password'?'text':'password';this.innerHTML='<i class=\\'fas fa-'+(p.type==='password'?'eye':'eye-slash')+'\\'></i>';"><i class="fas fa-eye"></i></button>
+          </div>
+        </div>
+        <div style="display:flex;gap:.6rem;justify-content:flex-end;margin-top:1.4rem">
+          <button type="button" class="btn-ghost sm" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
+          <button type="submit" class="btn-primary sm" id="submitUnlockBtn" style="background:linear-gradient(135deg,var(--primary),#7928ca)"><i class="fas fa-lock-open"></i> Unlock & Open</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(ov);
+  var passInp = ov.querySelector('#unlockFolderPass');
+  if (passInp) passInp.focus();
+
+  ov.querySelector('#unlockFolderForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    var val = passInp.value;
+    if (!val) return;
+    var btn = ov.querySelector('#submitUnlockBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking…';
+    var res = await apiUnlockFolder(folder.id, val);
+    if (res && res.ok) {
+      toast('Folder unlocked successfully!', 'success');
+      S.unlockedFolders.add(folder.id);
+      ov.remove();
+      if (typeof onUnlocked === 'function') onUnlocked();
+      else renderFilesPage(_driveId, folder.id);
+    } else {
+      toast(res ? (res.error || 'Incorrect password') : 'Network error', 'error');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-lock-open"></i> Unlock & Open';
+      passInp.value = '';
+      passInp.focus();
+    }
+  });
+}
+
+function showRemoveFolderLockDialog(folderId, folderName) {
+  var isAdmin = (S.ses && S.ses.role === 'admin');
+  if (isAdmin) {
+    if (!confirm('Remove password protection from "' + folderName + '"? The folder will become accessible without a password.')) return;
+    toast('Removing lock…', 'info');
+    apiRemoveFolderLock(folderId, '').then(async function(r) {
+      if (r && r.ok) {
+        toast('Folder protection removed!', 'success');
+        S.unlockedFolders.delete(folderId);
+        S.db = await apiFetchDB();
+        renderFilesPage(_driveId, _folderId);
+      } else {
+        toast(r ? (r.error || 'Failed to remove lock') : 'Error', 'error');
+      }
+    });
+    return;
+  }
+
+  var pass = prompt('Enter folder password to remove protection from "' + folderName + '":');
+  if (!pass) return;
+  toast('Removing lock…', 'info');
+  apiRemoveFolderLock(folderId, pass).then(async function(r) {
+    if (r && r.ok) {
+      toast('Folder protection removed!', 'success');
+      S.unlockedFolders.delete(folderId);
+      S.db = await apiFetchDB();
+      renderFilesPage(_driveId, _folderId);
+    } else {
+      toast(r ? (r.error || 'Incorrect password') : 'Error', 'error');
+    }
+  });
 }
 
 async function downloadFile(fileLocalId) {

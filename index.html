@@ -100,8 +100,9 @@
       </div>
       <button class="icon-btn xs" onclick="toggleSbMenu()"><i class="fas fa-ellipsis-v"></i></button>
       <div class="sb-pmenu hidden" id="sbMenu">
-        <div class="pmenu-item" onclick="navTo('settings')"><i class="fas fa-gear"></i> Settings</div>
-        <div class="pmenu-item danger" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
+        <div class="pmenu-item admin-only hidden" onclick="navTo('settings')"><i class="fas fa-gear"></i> Settings</div>
+        <div class="pmenu-item danger user-or-admin hidden" id="pmenuLogout" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
+        <div class="pmenu-item guest-only" id="pmenuLogin" onclick="showSignInModal()"><i class="fas fa-arrow-right-to-bracket"></i> Sign In</div>
       </div>
     </div>
 
@@ -123,8 +124,11 @@
       <div class="sb-quota-txt" id="sbQuotaTxt"><span>—</span><span>—</span></div>
     </div>
 
-    <button class="sb-logout" onclick="doLogout()">
+    <button class="sb-logout hidden" id="sbLogout" onclick="doLogout()">
       <i class="fas fa-sign-out-alt"></i> Log Out
+    </button>
+    <button class="sb-logout guest-only" id="sbLoginBtn" onclick="showSignInModal()" style="background:linear-gradient(135deg,rgba(78,134,245,0.2),rgba(121,40,202,0.2));color:var(--primary);border:1px solid rgba(78,134,245,0.3)">
+      <i class="fas fa-arrow-right-to-bracket"></i> Sign In
     </button>
   </aside>
 
@@ -139,7 +143,7 @@
         <input type="text" id="globalSearch" placeholder="Search Documents… (Ctrl+K)">
       </div>
       <div class="topbar-right">
-        <button class="btn-ghost sm" id="guestSignInBtn" onclick="showSignInModal()"><i class="fas fa-arrow-right-to-bracket"></i> Sign In</button>
+        <button class="btn-ghost sm guest-only" id="guestSignInBtn" onclick="showSignInModal()"><i class="fas fa-arrow-right-to-bracket"></i> Sign In</button>
         <div class="layout-toggle-btns" title="Switch layout">
           <button class="vsz active" id="btnGridView" onclick="setLayoutMode(false)" title="Grid View"><i class="fas fa-grip"></i></button>
           <button class="vsz" id="btnListView" onclick="setLayoutMode(true)" title="List View"><i class="fas fa-list"></i></button>
@@ -152,12 +156,19 @@
         <button class="btn-ghost sm hidden" id="syncBtn"><i class="fas fa-rotate"></i></button>
         <div class="tb-divider"></div>
         <div class="tm-btn-wrap">
-          <button class="icon-btn" id="tmBtn" title="Transfers">
-            <i class="fas fa-arrow-right-arrow-left"></i>
+          <button class="icon-btn tm-network-btn" id="tmBtn" title="Transfers & Live Network Speed">
+            <i class="fas fa-arrow-right-arrow-left" id="tmIcon"></i>
             <span class="tm-badge" id="tmBadge"></span>
+            <span class="tm-live-speed" id="tmLiveSpeed"></span>
           </button>
           <div class="tm-panel hidden" id="tmPanel">
-            <div class="tm-hd"><span>Transfers</span><button class="btn-ghost xs" id="tmClear">Clear</button></div>
+            <div class="tm-hd">
+              <div class="tm-title-wrap">
+                <span>Transfers</span>
+                <span class="tm-hd-speed" id="tmHdSpeed"></span>
+              </div>
+              <button class="btn-ghost xs" id="tmClear" onclick="tmClear()">Clear</button>
+            </div>
             <div id="tmList" class="tm-list"></div>
           </div>
         </div>

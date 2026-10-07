@@ -39,6 +39,13 @@ async function hCB(req,env){const url=new URL(req.url),code=url.searchParams.get
 function syncDriveUsage(db){
   // Preserve real Google Drive quota (do not overwrite with only TeleDrive-uploaded files)
 }
+function sFold(f){
+  if(!f) return f;
+  const o = {...f};
+  delete o.passwordHash;
+  delete o.encPassword;
+  return o;
+}
 async function hDB(req,env){
   const db=await uGet(env,'td:db');
   if(!db)return J(null);
@@ -47,6 +54,7 @@ async function hDB(req,env){
     return J({
       ...db,
       drives:(db.drives||[]).map(d=>({...d,encToken:undefined})),
+      folders:(db.folders||[]).map(sFold),
       activityLog:(db.activityLog||[]),
       users:(db.users||[])
     });
@@ -58,7 +66,7 @@ async function hDB(req,env){
     const userDrives = (db.drives||[]).filter(d => !allowedList || allowedList.includes(d.id)).map(d=>({...d,encToken:undefined}));
     const userDriveIds = userDrives.map(d => d.id);
     const userFiles = (db.files||[]).filter(f => userDriveIds.includes(f.driveId));
-    const userFolders = (db.folders||[]).filter(f => userDriveIds.includes(f.driveId));
+    const userFolders = (db.folders||[]).filter(f => userDriveIds.includes(f.driveId)).map(sFold);
     const userLogs = (db.activityLog||[]).filter(l => !l.driveId || userDriveIds.includes(l.driveId));
     return J({
       v: db.v,
@@ -75,7 +83,7 @@ async function hDB(req,env){
   const guestDrives = openId ? (db.drives||[]).filter(d => d.id === openId).map(d=>({...d,encToken:undefined})) : [];
   const guestDriveIds = guestDrives.map(d => d.id);
   const guestFiles = (db.files||[]).filter(f => guestDriveIds.includes(f.driveId));
-  const guestFolders = (db.folders||[]).filter(f => guestDriveIds.includes(f.driveId));
+  const guestFolders = (db.folders||[]).filter(f => guestDriveIds.includes(f.driveId)).map(sFold);
   return J({
     v: db.v,
     openDriveId: db.openDriveId,
@@ -412,16 +420,39 @@ async function hBatchPermanentDelete(req,env){
     allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
   }
   const toDelete=(db.files||[]).filter(f=>(fileIds.includes(f.id)||fileIds.includes(f.googleFileId)) && (!allowedList || allowedList.includes(f.driveId)));
-  for(const f of toDelete){
-    const drv=(db.drives||[]).find(d=>d.id===f.driveId);
-    if(drv && typeof f.size === 'number') drv.usedBytes = Math.max(0, (drv.usedBytes || 0) - f.size);
-    if(drv && f.googleFileId){
-      try{
-        const at=await gAT(env,drv.encToken);
-        await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.googleFileId)}?supportsAllDrives=true`,{method:'DELETE',headers:{Authorization:`Bearer ${at}`}});
-      }catch(e){}
+
+  // Cache access tokens once per drive (prevents exceeding Cloudflare subrequest limit!)
+  const driveTokens = {};
+  for(const drv of (db.drives||[])){
+    if(!driveTokens[drv.id] && drv.encToken){
+      try {
+        driveTokens[drv.id] = await gAT(env, drv.encToken);
+      } catch(e){}
     }
   }
+
+  // Safely delete Google Drive files in parallel with cached tokens (max 35 to stay safely under limit)
+  const gDelTasks = [];
+  const gFilesToDelete = toDelete.filter(f => f.googleFileId && driveTokens[f.driveId]).slice(0, 35);
+  for(const f of gFilesToDelete){
+    const token = driveTokens[f.driveId];
+    gDelTasks.push(
+      fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.googleFileId)}?supportsAllDrives=true`,{
+        method:'DELETE',
+        headers:{Authorization:`Bearer ${token}`}
+      }).catch(()=>{})
+    );
+  }
+  if(gDelTasks.length) {
+    await Promise.allSettled(gDelTasks);
+  }
+
+  // Update drive used bytes
+  toDelete.forEach(f => {
+    const drv = (db.drives||[]).find(d => d.id === f.driveId);
+    if(drv && typeof f.size === 'number') drv.usedBytes = Math.max(0, (drv.usedBytes || 0) - f.size);
+  });
+
   const delIds = toDelete.map(x=>x.id).concat(toDelete.map(x=>x.googleFileId));
   db.files=(db.files||[]).filter(f=>!delIds.includes(f.id) && !delIds.includes(f.googleFileId));
   db.folders=(db.folders||[]).filter(f=>!fileIds.includes(f.id));
@@ -443,16 +474,38 @@ async function hEmptyTrash(req,env){
     allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
   }
   const trashedFiles=(db.files||[]).filter(f=>!!f.trashed && (!allowedList || allowedList.includes(f.driveId)));
-  for(const f of trashedFiles){
-    const drv=(db.drives||[]).find(d=>d.id===f.driveId);
-    if(drv && typeof f.size === 'number') drv.usedBytes = Math.max(0, (drv.usedBytes || 0) - f.size);
-    if(drv && f.googleFileId){
-      try{
-        const at=await gAT(env,drv.encToken);
-        await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.googleFileId)}?supportsAllDrives=true`,{method:'DELETE',headers:{Authorization:`Bearer ${at}`}});
-      }catch(e){}
+
+  // Cache access tokens once per drive (prevents Cloudflare subrequest limit failure!)
+  const driveTokens = {};
+  for(const drv of (db.drives||[])){
+    if(!driveTokens[drv.id] && drv.encToken){
+      try {
+        driveTokens[drv.id] = await gAT(env, drv.encToken);
+      } catch(e){}
     }
   }
+
+  // Safely delete Google Drive files in parallel (up to 35 files)
+  const gDelTasks = [];
+  const gFilesToDelete = trashedFiles.filter(f => f.googleFileId && driveTokens[f.driveId]).slice(0, 35);
+  for(const f of gFilesToDelete){
+    const token = driveTokens[f.driveId];
+    gDelTasks.push(
+      fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.googleFileId)}?supportsAllDrives=true`,{
+        method:'DELETE',
+        headers:{Authorization:`Bearer ${token}`}
+      }).catch(()=>{})
+    );
+  }
+  if(gDelTasks.length) {
+    await Promise.allSettled(gDelTasks);
+  }
+
+  trashedFiles.forEach(f => {
+    const drv = (db.drives||[]).find(d => d.id === f.driveId);
+    if(drv && typeof f.size === 'number') drv.usedBytes = Math.max(0, (drv.usedBytes || 0) - f.size);
+  });
+
   const purgedIds = trashedFiles.map(x=>x.id);
   db.files=(db.files||[]).filter(f=>!purgedIds.includes(f.id));
   if(ses === 'admin') db.folders=(db.folders||[]).filter(f=>!f.trashed);
@@ -504,6 +557,121 @@ async function hRF(req,env,fId){
   (db.files||[]).forEach(f=>{ if(fIds.includes(f.folderId)){ f.trashed=true; f.trashedAt=new Date().toISOString(); } });
   await uSet(env,'td:db',db);
   return J({ok:true,trashed:true});
+}
+
+async function hLockFolder(req,env,folderId){
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const folder=(db.folders||[]).find(f=>f.id===folderId);
+  if(!folder) return J({error:'Folder not found'},404);
+  const isOpenTarget=(db.openDriveId&&folder.driveId===db.openDriveId);
+  const ses=await vSes(req,env,null);
+  if(!ses&&!isOpenTarget) return J({error:'Unauthorized'},401);
+  const{password}=await req.json().catch(()=>({}));
+  if(!password||!password.trim()) return J({error:'Password required'},400);
+
+  let userName='Guest';
+  let role='guest';
+  if(ses==='admin'){
+    userName='Admin';
+    role='admin';
+  } else if(ses){
+    const u=(db.users||[]).find(x=>x.id===ses);
+    userName=u?u.username:'User';
+    role='user';
+  }
+
+  folder.isLocked=true;
+  folder.passwordHash=await sha256(password.trim());
+  folder.encPassword=await enc(password.trim(),gEK(env));
+  folder.lockedBy=userName;
+  folder.lockedRole=role;
+  folder.lockedAt=new Date().toISOString();
+
+  await uSet(env,'td:db',db);
+  return J({ok:true,isLocked:true});
+}
+
+async function hUnlockFolder(req,env,folderId){
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const folder=(db.folders||[]).find(f=>f.id===folderId);
+  if(!folder) return J({error:'Folder not found'},404);
+  if(!folder.isLocked) return J({ok:true,unlocked:true});
+
+  const ses=await vSes(req,env,null);
+  if(ses==='admin') return J({ok:true,unlocked:true});
+
+  const{password}=await req.json().catch(()=>({}));
+  if(!password) return J({error:'Password required'},400);
+
+  const testHash=await sha256(password.trim());
+  if(testHash!==folder.passwordHash){
+    return J({error:'Incorrect folder password',ok:false},403);
+  }
+  return J({ok:true,unlocked:true});
+}
+
+async function hRemoveFolderLock(req,env,folderId){
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const folder=(db.folders||[]).find(f=>f.id===folderId);
+  if(!folder) return J({error:'Folder not found'},404);
+
+  const ses=await vSes(req,env,null);
+  const isAdmin=(ses==='admin');
+
+  if(!isAdmin){
+    const{password}=await req.json().catch(()=>({}));
+    if(!password) return J({error:'Password required'},400);
+    const testHash=await sha256(password.trim());
+    if(testHash!==folder.passwordHash){
+      return J({error:'Incorrect password'},403);
+    }
+  }
+
+  folder.isLocked=false;
+  folder.passwordHash=null;
+  folder.encPassword=null;
+  folder.lockedBy=null;
+  folder.lockedRole=null;
+  folder.lockedAt=null;
+
+  await uSet(env,'td:db',db);
+  return J({ok:true,unlocked:true,lockRemoved:true});
+}
+
+async function hGetAdminLockedFolders(req,env){
+  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized'},401);
+  const db=await uGet(env,'td:db');
+  if(!db) return J({folders:[]});
+
+  const lockedFolders=(db.folders||[]).filter(f=>!!f.isLocked);
+  const result=[];
+
+  for(const f of lockedFolders){
+    let plainPassword='';
+    if(f.encPassword){
+      try{
+        plainPassword=await dec(f.encPassword,gEK(env));
+      }catch(e){
+        plainPassword='[Decryption failed]';
+      }
+    }
+    const drv=(db.drives||[]).find(d=>d.id===f.driveId);
+    result.push({
+      id:f.id,
+      name:f.name,
+      driveId:f.driveId,
+      driveName:drv?drv.name:'Unknown Drive',
+      lockedBy:f.lockedBy||'Unknown',
+      lockedRole:f.lockedRole||(f.lockedBy==='Guest'?'guest':'user'),
+      lockedAt:f.lockedAt||null,
+      plainPassword:plainPassword
+    });
+  }
+
+  return J({folders:result});
 }
 
 async function hCU(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const{username,password,allowedDrives}=await req.json().catch(()=>({}));const db=await uGet(env,'td:db');if(!db.users)db.users=[];if(db.users.find(u=>u.username===username))return J({error:'Username taken'},409);db.users.push({id:uid(),username,passwordHash:await sha256(password),allowedDrives:allowedDrives||'all',createdAt:new Date().toISOString()});await uSet(env,'td:db',db);return J({ok:true});}
@@ -572,9 +740,13 @@ export async function onRequest({request,env}){
     if(p.startsWith('files/star/')&&m==='POST')return hStar(request,env,p.replace('files/star/',''));
     if(p.startsWith('files/')&&m==='DELETE')return hDF(request,env,p.replace('files/',''));
     if(p==='folders'&&m==='POST')return hMF(request,env);
+    if(p.startsWith('folders/lock/')&&m==='POST')return hLockFolder(request,env,p.replace('folders/lock/',''));
+    if(p.startsWith('folders/unlock/')&&m==='POST')return hUnlockFolder(request,env,p.replace('folders/unlock/',''));
+    if(p.startsWith('folders/remove-lock/')&&m==='POST')return hRemoveFolderLock(request,env,p.replace('folders/remove-lock/',''));
     if(p.startsWith('folders/')&&m==='DELETE')return hRF(request,env,p.replace('folders/',''));
     if(p==='admin/users'&&m==='POST')return hCU(request,env);
     if(p.startsWith('admin/users/')&&m==='DELETE')return hDU(request,env,p.replace('admin/users/',''));
+    if(p==='admin/locked-folders'&&m==='GET')return hGetAdminLockedFolders(request,env);
     if(p==='admin/change-password'&&m==='POST')return hCP(request,env);
     if(p==='admin/open-drive'&&m==='POST')return hOpenDrive(request,env);
     if(p.startsWith('drives/rename/')&&m==='POST')return hRenameDrive(request,env,p.replace('drives/rename/',''));

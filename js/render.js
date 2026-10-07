@@ -3,12 +3,20 @@
 // ─── Sidebar storage stats ──────────────────────────────
 function renderSidebarProfile(){
   const role=S.ses.role, name=S.ses.username||'Guest';
+  const isAuth = !!(S.ses && S.ses.token && S.ses.role);
   $('sbName').textContent=role==='admin'?'Admin':name;
   $('sbRole').textContent=role==='admin'?'Administrator':role==='user'?'User':'Not signed in';
   $('sbAvatar').textContent=(name[0]||'?').toUpperCase();
   $('sbAvatar').style.background=role==='admin'?'var(--primary)':role==='user'?'var(--purple)':'var(--bg5)';
-  $('adminQuickBtn').classList.toggle('hidden', role!=='admin');
-  $('sbLogout').classList.toggle('hidden', !role);
+  const adminQuickBtn=$('adminQuickBtn'); if(adminQuickBtn) adminQuickBtn.classList.toggle('hidden', role!=='admin');
+  const sbLogout=$('sbLogout'); if(sbLogout) sbLogout.classList.toggle('hidden', !isAuth);
+  const sbLoginBtn=$('sbLoginBtn'); if(sbLoginBtn) sbLoginBtn.classList.toggle('hidden', isAuth);
+  const pmenuLogout=$('pmenuLogout'); if(pmenuLogout) pmenuLogout.classList.toggle('hidden', !isAuth);
+  const pmenuLogin=$('pmenuLogin'); if(pmenuLogin) pmenuLogin.classList.toggle('hidden', isAuth);
+  const guestSignInBtn=$('guestSignInBtn'); if(guestSignInBtn) guestSignInBtn.classList.toggle('hidden', isAuth);
+  document.querySelectorAll('.guest-only').forEach(function(el){ el.classList.toggle('hidden', isAuth); });
+  document.querySelectorAll('.user-or-admin').forEach(function(el){ el.classList.toggle('hidden', !isAuth); });
+  document.querySelectorAll('.admin-only').forEach(function(el){ el.classList.toggle('hidden', role!=='admin'); });
   // Sync button
   const syncBtn=$('syncBtn');
   if(syncBtn)syncBtn.classList.toggle('hidden',true); // hidden unless in explorer
@@ -221,16 +229,52 @@ function driveCard(d){
   </div>`;
 }
 
+function openFolderTarget(driveId, folderId){
+  const folder = (S.db && S.db.folders || []).find(f => f.id === folderId);
+  const isAdmin = (S.ses && S.ses.role === 'admin');
+  if(folder && folder.isLocked && !isAdmin && !S.unlockedFolders.has(folderId)){
+    showUnlockFolderDialog(folder, function(){
+      navTo('files', driveId, folderId);
+    });
+    return;
+  }
+  navTo('files', driveId, folderId);
+}
+
+function handleFolderCardClick(driveId, folderId, event){
+  if (event.ctrlKey || event.metaKey || event.shiftKey) {
+    toggleFileSelect(folderId);
+    return;
+  }
+  if (S.selectedFiles && S.selectedFiles.size > 0) {
+    toggleFileSelect(folderId);
+    return;
+  }
+  openFolderTarget(driveId, folderId);
+}
+
 // ─── Folder / File cards ───────────────────────────────
 function folderCard(f){
   const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
-  return `<div class="fg-card ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="navTo('files','${esc(f.driveId)}','${esc(f.id)}')" onclick="handleCardClick('${esc(f.id)}', event)">
+  const isLocked = !!f.isLocked;
+  return `<div class="fg-card ${isSelected ? 'is-selected' : ''} ${isLocked ? 'is-locked-folder' : ''}" data-item-id="${esc(f.id)}" ondblclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')" onclick="handleFolderCardClick('${esc(f.driveId)}','${esc(f.id)}', event)">
     <div class="card-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select folder">
       <i class="fas fa-check"></i>
     </div>
-    <div class="fg-icon xl"><i class="fas fa-folder" style="color:#ff9f0a"></i></div>
-    <div class="fg-name">${esc(f.name)}</div>
+    <div class="fg-icon xl" style="position:relative">
+      <i class="fas ${isLocked ? 'fa-folder-closed' : 'fa-folder'}" style="color:${isLocked ? '#ffd700' : '#ff9f0a'}"></i>
+      ${isLocked ? `<span class="folder-lock-badge" title="Protected folder"><i class="fas fa-lock"></i></span>` : ''}
+    </div>
+    <div class="fg-name" style="display:flex;align-items:center;justify-content:center;gap:4px">
+      ${isLocked ? `<i class="fas fa-lock" style="color:#ffd700;font-size:.78rem"></i>` : ''}
+      <span class="truncate">${esc(f.name)}</span>
+    </div>
     <div class="fg-acts">
+      ${isLocked ? `
+        <button class="icon-btn xs" style="color:#ffd700" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected folder - Click to remove password"><i class="fas fa-lock"></i></button>
+      ` : `
+        <button class="icon-btn xs" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Set Folder Password"><i class="fas fa-lock-open"></i></button>
+      `}
       <button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete folder"><i class="fas fa-trash-alt"></i></button>
     </div>
   </div>`;
@@ -273,13 +317,24 @@ function fileCard(f){
 }
 function folderRow(f){
   const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
-  return `<div class="fl-row ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="navTo('files','${esc(f.driveId)}','${esc(f.id)}')">
+  const isLocked = !!f.isLocked;
+  return `<div class="fl-row ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')" onclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')">
     <span style="display:flex;align-items:center;gap:8px">
       <input type="checkbox" class="row-select-check" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')">
-      <i class="fas fa-folder" style="color:#ff9f0a;margin-right:.4rem"></i>${esc(f.name)}
+      <i class="fas ${isLocked ? 'fa-folder-closed' : 'fa-folder'}" style="color:${isLocked ? '#ffd700' : '#ff9f0a'};margin-right:.4rem"></i>
+      ${isLocked ? `<i class="fas fa-lock" style="color:#ffd700;font-size:.75rem;margin-right:4px"></i>` : ''}
+      ${esc(f.name)}
+      ${isLocked ? `<span class="badge-locked sm" style="margin-left:6px;font-size:.7rem;padding:2px 6px;border-radius:4px;background:rgba(255,215,0,0.15);color:#ffd700;border:1px solid rgba(255,215,0,0.3)">Protected</span>` : ''}
     </span>
     <span>—</span><span>${fmtDate(f.date)}</span>
-    <span><button class="icon-btn xs danger" onclick="confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button></span>
+    <span style="display:flex;gap:.2rem">
+      ${isLocked ? `
+        <button class="icon-btn xs" style="color:#ffd700" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected folder - Click to remove password"><i class="fas fa-lock"></i></button>
+      ` : `
+        <button class="icon-btn xs" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Set Folder Password"><i class="fas fa-lock-open"></i></button>
+      `}
+      <button class="icon-btn xs danger" onclick="confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+    </span>
   </div>`;
 }
 function fileRow(f){
@@ -468,29 +523,76 @@ function renderPage(title,icon,color,msg){
 
 // ─── TM Panel ─────────────────────────────────────────
 function renderTM(){
-  const badge=$('tmBadge'),list=$('tmList');
+  const badge=$('tmBadge'), list=$('tmList'), speedEl=$('tmLiveSpeed'), hdSpeed=$('tmHdSpeed');
   const transfers=tmLoad();
-  const active=transfers.filter(t=>t.status==='uploading');
-  if(badge){badge.textContent=active.length||'';badge.classList.toggle('show',active.length>0);}
+  const active=transfers.filter(t=>t.status==='uploading'||t.status==='queued');
+  const uploading=transfers.filter(t=>t.status==='uploading');
+  const totalSpeed=uploading.reduce((sum, t) => sum + (t.speed || 0), 0);
+
+  if(badge){
+    badge.textContent=active.length||'';
+    badge.classList.toggle('show', active.length>0);
+  }
+
+  // Update live speed in topbar network meter
+  if(speedEl){
+    if(totalSpeed > 0){
+      speedEl.textContent = fmtSpeed(totalSpeed);
+      speedEl.classList.add('active');
+    } else if(uploading.length > 0){
+      speedEl.textContent = 'Active';
+      speedEl.classList.add('active');
+    } else if(active.length > 0){
+      speedEl.textContent = `${active.length} queued`;
+      speedEl.classList.remove('active');
+    } else {
+      speedEl.textContent = '';
+      speedEl.classList.remove('active');
+    }
+  }
+
+  if(hdSpeed){
+    if(totalSpeed > 0) hdSpeed.textContent = `(${fmtSpeed(totalSpeed)})`;
+    else if(uploading.length > 0) hdSpeed.textContent = `(${uploading.length} active)`;
+    else hdSpeed.textContent = '';
+  }
+
   if(!list)return;
-  if(!transfers.length){list.innerHTML=`<div class="tm-empty"><i class="fas fa-inbox"></i><span>No active transfers</span></div>`;return;}
+  if(!transfers.length){
+    list.innerHTML=`<div class="tm-empty"><i class="fas fa-inbox"></i><span>No transfers</span></div>`;
+    return;
+  }
+
   list.innerHTML=transfers.map(t=>{
     const isPaused = t.status === 'uploading' && (typeof _cancelSignal !== 'undefined' && _cancelSignal && _cancelSignal.paused);
-    const col=t.status==='done'?'var(--success)':t.status==='failed'?'var(--danger)':isPaused?'#ff9f0a':'var(--primary)';
-    const ico=t.status==='done'?'fa-check-circle':t.status==='failed'?'fa-times-circle':isPaused?'fa-circle-pause':'fa-spinner fa-spin';
-    const uMB=(t.uploaded/1048576||0).toFixed(1),tMB=(t.size/1048576||0).toFixed(1),spd=t.speed?` · ${fmtSpeed(t.speed)}`:'';
-    const sub=t.status==='uploading'?(isPaused?`Paused · ${uMB}/${tMB} MB`:`${uMB}/${tMB} MB${spd}`):t.status==='done'?`Done · ${fmt(t.size||0)}`:'Failed';
+    const isInterrupted = t.status === 'interrupted';
+    const isQueued = t.status === 'queued';
+    const isDone = t.status === 'done';
+    const isFailed = t.status === 'failed';
+
+    const col = isDone ? 'var(--success)' : (isFailed || isInterrupted) ? 'var(--danger)' : isPaused ? '#ff9f0a' : isQueued ? 'var(--text3)' : 'var(--primary)';
+    const ico = isDone ? 'fa-check-circle' : isFailed ? 'fa-times-circle' : isInterrupted ? 'fa-triangle-exclamation' : isPaused ? 'fa-circle-pause' : isQueued ? 'fa-clock' : 'fa-spinner fa-spin';
+
+    const uMB=(t.uploaded/1048576||0).toFixed(1), tMB=(t.size/1048576||0).toFixed(1), spd=t.speed?` · ${fmtSpeed(t.speed)}`:'';
+    const sub = isQueued ? `Queued · ${fmt(t.size||0)}` :
+                isInterrupted ? `Interrupted (Browser closed)` :
+                isFailed ? `Failed` :
+                isDone ? `Done · ${fmt(t.size||0)}` :
+                (isPaused ? `Paused · ${uMB}/${tMB} MB` : `${uMB}/${tMB} MB${spd}`);
+
     return `<div class="tm-item">
       <div class="tm-ico" style="color:${col}"><i class="fas ${ico}"></i></div>
-      <div class="tm-info"><div class="tm-name" title="${esc(t.name)}">${esc(t.name)}</div><div class="tm-sub">${sub}</div>
-        ${t.status==='uploading'?`<div class="tm-bar"><div class="tm-fill" style="width:${t.pct||0}%"></div></div>`:''}
+      <div class="tm-info">
+        <div class="tm-name" title="${esc(t.name)}">${esc(t.name)}</div>
+        <div class="tm-sub">${sub}</div>
+        ${t.status==='uploading' ? `<div class="tm-bar"><div class="tm-fill" style="width:${t.pct||0}%"></div></div>` : ''}
       </div>
-      ${t.status==='uploading'?`
+      ${t.status==='uploading' ? `
         <div style="display:flex;gap:4px">
           <button class="icon-btn xs" onclick="toggleUploadPause()" title="Pause / Resume"><i class="fas ${isPaused?'fa-play':'fa-pause'}"></i></button>
-          <button class="icon-btn xs danger" onclick="_cancelSignal.cancelled=true;if(_cancelSignal.resumeResolve)_cancelSignal.resumeResolve();S.cancelUpload=true;" title="Cancel"><i class="fas fa-times"></i></button>
+          <button class="icon-btn xs danger" onclick="_cancelSignal.cancelled=true;if(_cancelSignal.xhr)_cancelSignal.xhr.abort();if(_cancelSignal.resumeResolve)_cancelSignal.resumeResolve();S.cancelUpload=true;" title="Cancel"><i class="fas fa-times"></i></button>
         </div>
-      `:''}
+      ` : ''}
     </div>`;
   }).join('');
 }
