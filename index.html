@@ -13,7 +13,7 @@
      LOGIN PAGE — shown to ALL unauthenticated visitors
      Hidden only after successful login
 ═══════════════════════════════════════════════════════════ -->
-<div id="loginPage" class="login-fullpage">
+<div id="loginPage" class="login-fullpage" style="display:none">
   <div class="lp-bg">
     <div class="lp-blob b1"></div>
     <div class="lp-blob b2"></div>
@@ -81,9 +81,9 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════
-     APP SHELL — hidden until login, then revealed
+     APP SHELL — ready by default with zero login flash
 ═══════════════════════════════════════════════════════════ -->
-<div id="appShell" class="app-shell" style="display:none">
+<div id="appShell" class="app-shell" style="display:flex">
 
   <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeMobileSidebar()"></div>
   <aside class="sidebar" id="appSidebar">
@@ -235,6 +235,7 @@
 <input type="file" id="fileInput" multiple hidden>
 <input type="file" id="folderInput" multiple hidden webkitdirectory directory>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="js/config.js"></script>
 <script src="js/state.js"></script>

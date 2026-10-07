@@ -44,3 +44,34 @@ function ftCfg(name, mime) {
   if (['js','ts','py','java','c','cpp','cs','go','rs','php','rb','html','css'].includes(ext)) return { icon:'fa-file-code', col:'#64d2ff', cat:'doc' };
   return { icon:'fa-file', col:'#8f91a8', cat:'other' };
 }
+
+function isFolderDescendant(childId, ancestorId) {
+  if (!childId || !ancestorId) return false;
+  if (childId === ancestorId) return true;
+  var db = (typeof S !== 'undefined' && S.db) ? S.db : {};
+  var folders = db.folders || [];
+  var curr = folders.find(function(f){ return f.id === childId; });
+  var visited = new Set();
+  while (curr && !visited.has(curr.id)) {
+    visited.add(curr.id);
+    if (curr.parentId === ancestorId) return true;
+    curr = curr.parentId ? folders.find(function(f){ return f.id === curr.parentId; }) : null;
+  }
+  return false;
+}
+
+function getFirstLockedFolder(folderId) {
+  if (!folderId) return null;
+  var db = (typeof S !== 'undefined' && S.db) ? S.db : {};
+  var folders = db.folders || [];
+  var curr = folders.find(function(f){ return f.id === folderId; });
+  var visited = new Set();
+  while (curr && !visited.has(curr.id)) {
+    visited.add(curr.id);
+    if (curr.isLocked && typeof isFolderCurrentlyUnlocked === 'function' && !isFolderCurrentlyUnlocked(curr.id)) {
+      return curr;
+    }
+    curr = curr.parentId ? folders.find(function(f){ return f.id === curr.parentId; }) : null;
+  }
+  return null;
+}

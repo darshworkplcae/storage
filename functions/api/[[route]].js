@@ -49,10 +49,12 @@ function sFold(f){
 async function hDB(req,env){
   const db=await uGet(env,'td:db');
   if(!db)return J(null);
+  const policy = db.policy || { allowUserDownload: true, allowUserDelete: true };
   const r=await vSes(req,env,null);
   if(r==='admin'){
     return J({
       ...db,
+      policy,
       drives:(db.drives||[]).map(d=>({...d,encToken:undefined})),
       folders:(db.folders||[]).map(sFold),
       activityLog:(db.activityLog||[]),
@@ -65,12 +67,14 @@ async function hDB(req,env){
     const allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
     const userDrives = (db.drives||[]).filter(d => !allowedList || allowedList.includes(d.id)).map(d=>({...d,encToken:undefined}));
     const userDriveIds = userDrives.map(d => d.id);
-    const userFiles = (db.files||[]).filter(f => userDriveIds.includes(f.driveId));
-    const userFolders = (db.folders||[]).filter(f => userDriveIds.includes(f.driveId)).map(sFold);
+    const userFolders = (db.folders||[]).filter(f => userDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly).map(sFold);
+    const visibleFolderIds = new Set(userFolders.map(f => f.id));
+    const userFiles = (db.files||[]).filter(f => userDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly && (!f.folderId || visibleFolderIds.has(f.folderId)));
     const userLogs = (db.activityLog||[]).filter(l => !l.driveId || userDriveIds.includes(l.driveId));
     return J({
       v: db.v,
       openDriveId: db.openDriveId,
+      policy,
       drives: userDrives,
       files: userFiles,
       folders: userFolders,
@@ -82,11 +86,13 @@ async function hDB(req,env){
   const openId = db.openDriveId;
   const guestDrives = openId ? (db.drives||[]).filter(d => d.id === openId).map(d=>({...d,encToken:undefined})) : [];
   const guestDriveIds = guestDrives.map(d => d.id);
-  const guestFiles = (db.files||[]).filter(f => guestDriveIds.includes(f.driveId));
-  const guestFolders = (db.folders||[]).filter(f => guestDriveIds.includes(f.driveId)).map(sFold);
+  const guestFolders = (db.folders||[]).filter(f => guestDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly).map(sFold);
+  const visibleFolderIds = new Set(guestFolders.map(f => f.id));
+  const guestFiles = (db.files||[]).filter(f => guestDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly && (!f.folderId || visibleFolderIds.has(f.folderId)));
   return J({
     v: db.v,
     openDriveId: db.openDriveId,
+    policy,
     drives: guestDrives,
     files: guestFiles,
     folders: guestFolders,
@@ -190,14 +196,17 @@ async function hDL(req,env,gId){
     ses=String(v||'').replace(/^"|"$/g,'')||null;
   }
   if(!ses) ses=await vSes(req,env,null);
-    if(!ses){
+  const db=await uGet(env,'td:db');
+  const isInline=url.searchParams.get('inline')==='1';
+  if(!isInline && db && db.policy && db.policy.allowUserDownload === false && ses !== 'admin'){
+    return J({error:'File downloads are disabled by administrator'}, 403);
+  }
+  if(!ses){
     const dIdParam=url.searchParams.get('driveId');
-    const dbCheck=await uGet(env,'td:db');
-    const isPublicDrive=(dbCheck&&dbCheck.openDriveId&&(dIdParam===dbCheck.openDriveId || !dIdParam));
+    const isPublicDrive=(db&&db.openDriveId&&(dIdParam===db.openDriveId || !dIdParam));
     if(!isPublicDrive) return J({error:'Sign in required'},401);
   }
   const dId=url.searchParams.get('driveId');
-  const db=await uGet(env,'td:db');
   const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
   const at=await gAT(env,drv.encToken);
@@ -208,7 +217,7 @@ async function hDL(req,env,gId){
       ...(range?{Range:range}:{})
     }
   });
-  const fileObj=(db.files||[]).find(f=>f.googleFileId===gId);
+  const fileObj=(db&&db.files||[]).find(f=>f.googleFileId===gId);
   const fileName=encodeURIComponent(fileObj?fileObj.name:'download');
   const respHeaders=new Headers();
   respHeaders.set('Access-Control-Allow-Origin','*');
@@ -216,7 +225,6 @@ async function hDL(req,env,gId){
   if(gResp.headers.get('Content-Length')) respHeaders.set('Content-Length',gResp.headers.get('Content-Length'));
   if(gResp.headers.get('Content-Range')) respHeaders.set('Content-Range',gResp.headers.get('Content-Range'));
   respHeaders.set('Accept-Ranges','bytes');
-  const isInline=url.searchParams.get('inline')==='1';
   respHeaders.set('Content-Disposition',`${isInline?'inline':'attachment'}; filename="${fileName}"; filename*=UTF-8''${fileName}`);
   return new Response(gResp.body,{
     status:gResp.status,
@@ -231,6 +239,9 @@ async function hDF(req,env,fileId){
   const isOpenTarget=(db.openDriveId && file.driveId===db.openDriveId);
   const ses=await vSes(req,env,null);
   if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
+  if(db.policy && db.policy.allowUserDelete === false && ses !== 'admin'){
+    return J({error:'File deletions are disabled by administrator'}, 403);
+  }
 
   // Soft delete to Recycle Bin
   file.trashed = true;
@@ -319,6 +330,9 @@ async function hBatchTrash(req,env){
   const db=await uGet(env,'td:db');
   if(!db) return J({error:'DB error'},500);
   const ses=await vSes(req,env,null);
+  if(db.policy && db.policy.allowUserDelete === false && ses !== 'admin'){
+    return J({error:'File deletions are disabled by administrator'}, 403);
+  }
   const now=new Date().toISOString();
   let count=0;
   (db.files||[]).forEach(f=>{
@@ -546,6 +560,9 @@ async function hRF(req,env,fId){
   const isOpenTarget=(db.openDriveId && folder.driveId===db.openDriveId);
   const ses=await vSes(req,env,null);
   if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
+  if(db.policy && db.policy.allowUserDelete === false && ses !== 'admin'){
+    return J({error:'Folder deletions are disabled by administrator'}, 403);
+  }
 
   function allFolderIds(id){
     const ids=[id];
@@ -611,17 +628,33 @@ async function hUnlockFolder(req,env,folderId){
     const remaining = 5 - folder.failedAttempts;
 
     if (remaining <= 0) {
-      // Security breach: destroy folder & all nested folders/files permanently!
+      // Security breach: mark folder & nested items as destroyed, retained in Admin Vault
       function allFolderIds(id){
         const ids=[id];
         (db.folders||[]).filter(f=>f.parentId===id).forEach(f=>ids.push(...allFolderIds(f.id)));
         return ids;
       }
       const fIds=allFolderIds(folder.id);
-      db.folders = (db.folders||[]).filter(f => !fIds.includes(f.id));
-      db.files = (db.files||[]).filter(f => !fIds.includes(f.folderId));
+      const destroyDate=new Date().toISOString();
+      (db.folders||[]).forEach(f => {
+        if(fIds.includes(f.id)){
+          f.destroyed = true;
+          f.destroyedAt = destroyDate;
+          f.destroyedReason = 'Exceeded 5 failed password attempts';
+          f.adminOnly = true;
+          f.failedAttempts = 5;
+        }
+      });
+      (db.files||[]).forEach(f => {
+        if(fIds.includes(f.folderId)){
+          f.destroyed = true;
+          f.destroyedAt = destroyDate;
+          f.destroyedReason = 'Exceeded 5 failed password attempts';
+          f.adminOnly = true;
+        }
+      });
       if(!db.activityLog) db.activityLog=[];
-      db.activityLog.unshift({id:uid(),type:'folder_security_destroy',name:folder.name,driveId:folder.driveId,ts:new Date().toISOString()});
+      db.activityLog.unshift({id:uid(),type:'folder_security_destroy',name:folder.name,driveId:folder.driveId,ts:destroyDate});
       await uSet(env,'td:db',db);
       return J({error:'Security breach: 5 failed attempts exceeded! Folder has been permanently destroyed.', destroyed:true, remainingAttempts:0, ok:false}, 403);
     }
@@ -698,6 +731,89 @@ async function hGetAdminLockedFolders(req,env){
   return J({folders:result});
 }
 
+async function hGetDestroyedFolders(req,env){
+  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized'},401);
+  const db=await uGet(env,'td:db');
+  if(!db) return J({folders:[]});
+  const destroyedFolders=(db.folders||[]).filter(f=>!!f.destroyed);
+  const result=[];
+  for(const f of destroyedFolders){
+    let plainPassword='';
+    if(f.encPassword){
+      try{ plainPassword=await dec(f.encPassword,gEK(env)); }catch(e){ plainPassword='[Unavailable]'; }
+    }
+    const drv=(db.drives||[]).find(d=>d.id===f.driveId);
+    result.push({
+      id:f.id,
+      name:f.name,
+      driveId:f.driveId,
+      driveName:drv?drv.name:'Unknown Drive',
+      destroyedAt:f.destroyedAt||null,
+      destroyedReason:f.destroyedReason||'Exceeded 5 failed password attempts',
+      failedAttempts:f.failedAttempts||5,
+      lockedBy:f.lockedBy||'Unknown',
+      plainPassword:plainPassword
+    });
+  }
+  return J({folders:result});
+}
+
+async function hRecoverFolder(req,env,folderId){
+  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized'},401);
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const folder=(db.folders||[]).find(f=>f.id===folderId);
+  if(!folder) return J({error:'Folder not found'},404);
+
+  function allFolderIds(id){
+    const ids=[id];
+    (db.folders||[]).filter(f=>f.parentId===id).forEach(f=>ids.push(...allFolderIds(f.id)));
+    return ids;
+  }
+  const fIds=allFolderIds(folder.id);
+  (db.folders||[]).forEach(f => {
+    if(fIds.includes(f.id)){
+      delete f.destroyed;
+      delete f.destroyedAt;
+      delete f.destroyedReason;
+      f.failedAttempts=0;
+      f.adminOnly=true; // Strictly preserved in Admin view only!
+    }
+  });
+  (db.files||[]).forEach(f => {
+    if(fIds.includes(f.folderId)){
+      delete f.destroyed;
+      delete f.destroyedAt;
+      delete f.destroyedReason;
+      f.adminOnly=true; // Strictly preserved in Admin view only!
+    }
+  });
+
+  if(!db.activityLog) db.activityLog=[];
+  db.activityLog.unshift({id:uid(),type:'folder_recovered',name:folder.name,driveId:folder.driveId,ts:new Date().toISOString()});
+  await uSet(env,'td:db',db);
+  return J({ok:true,recovered:true,name:folder.name});
+}
+
+async function hGetPolicy(req,env){
+  const db=await uGet(env,'td:db');
+  const policy=(db&&db.policy)||{allowUserDownload:true,allowUserDelete:true};
+  return J({ok:true,policy});
+}
+
+async function hSetPolicy(req,env){
+  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized'},401);
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const body=await req.json().catch(()=>({}));
+  db.policy={
+    allowUserDownload: body.allowUserDownload !== false,
+    allowUserDelete: body.allowUserDelete !== false
+  };
+  await uSet(env,'td:db',db);
+  return J({ok:true,policy:db.policy});
+}
+
 async function hCU(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const{username,password,allowedDrives}=await req.json().catch(()=>({}));const db=await uGet(env,'td:db');if(!db.users)db.users=[];if(db.users.find(u=>u.username===username))return J({error:'Username taken'},409);db.users.push({id:uid(),username,passwordHash:await sha256(password),allowedDrives:allowedDrives||'all',createdAt:new Date().toISOString()});await uSet(env,'td:db',db);return J({ok:true});}
 async function hDU(req,env,uid2){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const db=await uGet(env,'td:db');db.users=(db.users||[]).filter(u=>u.id!==uid2);await uSet(env,'td:db',db);return J({ok:true});}
 
@@ -771,6 +887,9 @@ export async function onRequest({request,env}){
     if(p==='admin/users'&&m==='POST')return hCU(request,env);
     if(p.startsWith('admin/users/')&&m==='DELETE')return hDU(request,env,p.replace('admin/users/',''));
     if(p==='admin/locked-folders'&&m==='GET')return hGetAdminLockedFolders(request,env);
+    if(p==='admin/destroyed-folders'&&m==='GET')return hGetDestroyedFolders(request,env);
+    if(p.startsWith('admin/recover-folder/')&&m==='POST')return hRecoverFolder(request,env,p.replace('admin/recover-folder/',''));
+    if(p==='admin/policy'&&(m==='GET'||m==='POST'))return m==='GET'?hGetPolicy(request,env):hSetPolicy(request,env);
     if(p==='admin/change-password'&&m==='POST')return hCP(request,env);
     if(p==='admin/open-drive'&&m==='POST')return hOpenDrive(request,env);
     if(p.startsWith('drives/rename/')&&m==='POST')return hRenameDrive(request,env,p.replace('drives/rename/',''));

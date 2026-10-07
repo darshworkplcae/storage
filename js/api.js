@@ -235,3 +235,7 @@ function apiLockFolder(folderId, password) { return apiFetch('folders/lock/' + e
 function apiUnlockFolder(folderId, password) { return apiFetch('folders/unlock/' + encodeURIComponent(folderId), { method: 'POST', body: JSON.stringify({ password: password }) }); }
 function apiRemoveFolderLock(folderId, password) { return apiFetch('folders/remove-lock/' + encodeURIComponent(folderId), { method: 'POST', body: JSON.stringify({ password: password }) }); }
 function apiGetAdminLockedFolders() { return apiFetch('admin/locked-folders'); }
+function apiGetDestroyedFolders() { return apiFetch('admin/destroyed-folders'); }
+function apiRecoverFolder(folderId) { return apiFetch('admin/recover-folder/' + encodeURIComponent(folderId), { method: 'POST' }); }
+function apiGetPolicy() { return apiFetch('admin/policy'); }
+function apiSetPolicy(policy) { return apiFetch('admin/policy', { method: 'POST', body: JSON.stringify(policy) }); }

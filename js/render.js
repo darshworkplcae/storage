@@ -53,7 +53,8 @@ function isFolderCurrentlyUnlocked(folderId) {
   if (S.unlockedFolders.has(folderId)) {
     var exp = S.unlockedFolders.get(folderId);
     if (exp === 'once') {
-      return _folderId === folderId;
+      // Folder is unlocked if currently viewing folderId OR any descendant child folder of folderId!
+      return _folderId === folderId || (typeof isFolderDescendant === 'function' && isFolderDescendant(_folderId, folderId));
     }
     if (typeof exp === 'number') {
       if (Date.now() < exp) return true;
@@ -101,6 +102,7 @@ function isFileInLockedFolder(file) {
 
 function renderSidebarStorage(){
   const db=S.db; if(!db)return;
+  const isAuth = !!(S.ses && S.ses.token && S.ses.role);
   const allowed=getAllowedDriveIds();
   const drives=(db.drives||[]).filter(d=>allowed.length===0||allowed.includes(d.id));
   const files=(db.files||[]).filter(f=>!f.trashed&&(allowed.length===0||allowed.includes(f.driveId)));
@@ -124,8 +126,22 @@ function renderSidebarStorage(){
         <span class="sb-storage-val">${fmt(t.val)}</span>
       </div>`).join('');
   }
-  const fill=$('sbQuotaFill'); if(fill)fill.style.width=pct+'%';
-  const txt=$('sbQuotaTxt'); if(txt)txt.innerHTML=`<span>${fmt(totalUsed)} used</span><span>${fmt(freeBytes)} free</span>`;
+  const fill=$('sbQuotaFill');
+  const fillWrap = fill ? fill.parentElement : null;
+  if (fill) fill.style.width=pct+'%';
+  if (fillWrap) {
+    // If guest, hide total percent progress bar completely!
+    fillWrap.style.display = isAuth ? '' : 'none';
+  }
+  const txt=$('sbQuotaTxt');
+  if(txt) {
+    if(isAuth) {
+      txt.innerHTML=`<span>${fmt(totalUsed)} used</span><span>${fmt(freeBytes)} free</span>`;
+    } else {
+      // Guest visitor: Only show how much space is used, never total capacity or free space
+      txt.innerHTML=`<span><i class="fas fa-database" style="color:var(--primary);margin-right:4px"></i>${fmt(totalUsed)} used</span>`;
+    }
+  }
 }
 
 // ─── All Files / Explorer ───────────────────────────────
@@ -170,15 +186,16 @@ function renderFilesPage(driveId, folderId){
   document.querySelector('.view-size-btns')?.classList.remove('hidden');
 
   const curFolder = folderId ? (db.folders||[]).find(f => f.id === folderId) : null;
+  const lockedFolder = curFolder ? getFirstLockedFolder(folderId) : null;
   // If viewing a locked folder that is not currently unlocked, show 3D Vault Locked Screen
-  if (curFolder && isFolderOrAncestorLocked(folderId)) {
+  if (lockedFolder) {
     pc.innerHTML = `
       <div class="inner-page" style="display:flex;align-items:center;justify-content:center;min-height:480px">
         <div class="modal" style="max-width:440px;text-align:center;padding:2.2rem 1.6rem;box-shadow:0 24px 60px rgba(0,0,0,0.85);border:1px solid rgba(255,215,0,0.3)">
           <div class="vault-shield-badge gold-glow" style="margin:0 auto 1.2rem;width:68px;height:68px;font-size:1.8rem">
             <i class="fas fa-shield-halved"></i>
           </div>
-          <h2 style="font-size:1.3rem;margin-bottom:.4rem">${esc(curFolder.name)}</h2>
+          <h2 style="font-size:1.3rem;margin-bottom:.4rem">${esc(lockedFolder.name)}</h2>
           <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(255,215,0,0.14);border:1px solid rgba(255,215,0,0.35);color:#ffd700;border-radius:20px;padding:3px 12px;font-size:.76rem;font-weight:700;margin-bottom:1rem">
             <i class="fas fa-lock"></i> Protected Folder
           </div>
@@ -187,7 +204,7 @@ function renderFilesPage(driveId, folderId){
           </p>
           <div style="display:flex;gap:.75rem;justify-content:center">
             <button class="btn-ghost sm" onclick="goBackFolder()"><i class="fas fa-arrow-left"></i> Go Back</button>
-            <button class="btn-primary sm" onclick="showUnlockFolderDialog(S.db.folders.find(f=>f.id==='${esc(curFolder.id)}'), function(){ renderFilesPage('${esc(driveId)}','${esc(folderId)}'); })" style="background:linear-gradient(135deg,var(--primary),#7928ca)"><i class="fas fa-lock-open"></i> Unlock Folder</button>
+            <button class="btn-primary sm" onclick="showUnlockFolderDialog(S.db.folders.find(f=>f.id==='${esc(lockedFolder.id)}'), function(){ renderFilesPage('${esc(driveId)}','${esc(folderId)}'); })" style="background:linear-gradient(135deg,var(--primary),#7928ca)"><i class="fas fa-lock-open"></i> Unlock Folder</button>
           </div>
         </div>
       </div>
@@ -321,14 +338,21 @@ function driveCard(d){
   const free = Math.max(0, cap - used);
   const pct = cap ? Math.min(100, Math.round(used / cap * 100)) : 0;
   const isAdmin = S.ses.role === 'admin';
+  const isAuth = !!(S.ses && S.ses.token && S.ses.role);
   const canRename = isAdmin || (S.ses.role === 'user' && isDriveAllowed(d.id));
   return `<div class="fg-card drive-card-item" onclick="navTo('files','${esc(d.id)}')" title="${esc(d.email)}">
     <div class="fg-icon xl" style="color:${esc(d.color)}"><i class="fab fa-google-drive"></i></div>
     <div class="fg-name" style="font-weight:600;font-size:.95rem">${esc(d.name)}</div>
-    <div class="fg-meta">${fmt(used)} / ${cap?fmt(cap):'∞'} (${pct}%)</div>
-    <div class="dc-bar" style="margin:.45rem 0 .3rem;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden"><div class="dc-fill" style="height:100%;border-radius:3px;width:${pct}%;background:${esc(d.color)};box-shadow:0 0 8px ${esc(d.color)}66"></div></div>
-    <div class="fg-remaining" style="font-size:.76rem;color:#30d158;font-weight:600;display:flex;align-items:center;gap:4px"><i class="fas fa-circle-check" style="font-size:.7rem"></i> ${fmt(free)} free remaining</div>
-    <div class="fg-acts" style="margin-top:.4rem">
+    ${isAuth ? `
+      <div class="fg-meta">${fmt(used)} / ${cap?fmt(cap):'∞'} (${pct}%)</div>
+      <div class="dc-bar" style="margin:.45rem 0 .3rem;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden"><div class="dc-fill" style="height:100%;border-radius:3px;width:${pct}%;background:${esc(d.color)};box-shadow:0 0 8px ${esc(d.color)}66"></div></div>
+      <div class="fg-remaining" style="font-size:.76rem;color:#30d158;font-weight:600;display:flex;align-items:center;gap:4px"><i class="fas fa-circle-check" style="font-size:.7rem"></i> ${fmt(free)} free remaining</div>
+    ` : `
+      <div class="fg-meta" style="font-weight:600;color:var(--text2);margin-top:.45rem;display:flex;align-items:center;justify-content:center;gap:6px">
+        <i class="fas fa-database" style="font-size:.8rem;color:var(--primary)"></i> ${fmt(used)} stored
+      </div>
+    `}
+    <div class="fg-acts" style="margin-top:.5rem">
       ${canRename?`<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameDrive('${esc(d.id)}','${esc(d.name).replace(/'/g,"\\'")}')" title="Rename Drive"><i class="fas fa-pen"></i></button>`:''}
       ${isAdmin?`<button class="icon-btn xs danger" onclick="event.stopPropagation();disconnectDrive('${esc(d.id)}')" title="Disconnect"><i class="fas fa-unlink"></i></button>`:''}
       <button class="icon-btn xs" onclick="event.stopPropagation();navTo('files','${esc(d.id)}')" title="Open"><i class="fas fa-folder-open"></i></button>
@@ -337,9 +361,9 @@ function driveCard(d){
 }
 
 function openFolderTarget(driveId, folderId){
-  const folder = (S.db && S.db.folders || []).find(f => f.id === folderId);
-  if(folder && (folder.isLocked || isFolderOrAncestorLocked(folderId)) && !isFolderCurrentlyUnlocked(folderId)){
-    showUnlockFolderDialog(folder, function(){
+  const lockedFolder = getFirstLockedFolder(folderId);
+  if(lockedFolder){
+    showUnlockFolderDialog(lockedFolder, function(){
       navTo('files', driveId, folderId);
     });
     return;
@@ -363,6 +387,8 @@ function handleFolderCardClick(driveId, folderId, event){
 function folderCard(f){
   const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
   const isLocked = !!f.isLocked;
+  const isAdmin = S.ses && S.ses.role === 'admin';
+  const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
   return `<div class="fg-card ${isSelected ? 'is-selected' : ''} ${isLocked ? 'is-locked-folder' : ''}" data-item-id="${esc(f.id)}" ondblclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')" onclick="handleFolderCardClick('${esc(f.driveId)}','${esc(f.id)}', event)">
     <div class="card-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select folder">
       <i class="fas fa-check"></i>
@@ -388,7 +414,7 @@ function folderCard(f){
       ` : `
         <button class="icon-btn xs" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protect Folder with Password"><i class="fas fa-lock"></i></button>
       `}
-      <button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete folder"><i class="fas fa-trash-alt"></i></button>
+      ${canDelete ? `<button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete folder"><i class="fas fa-trash-alt"></i></button>` : ''}
     </div>
   </div>`;
 }
@@ -403,8 +429,11 @@ function fileCard(f){
   const driveId=f.driveId||_driveId||(S.db&&S.db.drives&&S.db.drives[0]?S.db.drives[0].id:'');
   const previewUrl=getFileDownloadUrl(f.googleFileId, driveId, true);
   const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
+  const isAdmin = S.ses && S.ses.role === 'admin';
+  const canDownload = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDownload !== false;
+  const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
 
-  const dblAction = isMedia ? `openMedia('${esc(f.id)}')` : isPdf ? `openPdfViewer('${esc(f.id)}')` : isArchive ? `openArchiveViewer('${esc(f.id)}')` : `downloadFile('${esc(f.id)}')`;
+  const dblAction = isMedia ? `openMedia('${esc(f.id)}')` : isPdf ? `openPdfViewer('${esc(f.id)}')` : isArchive ? `openArchiveViewer('${esc(f.id)}')` : (canDownload ? `downloadFile('${esc(f.id)}')` : `toast('File downloads disabled by administrator','warning')`);
 
   return `<div class="fg-card ${isImage?'is-image':isVideo?'is-video':''} ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="${dblAction}" onclick="handleCardClick('${esc(f.id)}', event)">
     <div class="card-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select file">
@@ -440,8 +469,8 @@ function fileCard(f){
       ${isMedia ? `<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
         isPdf ? `<button class="icon-btn xs" onclick="event.stopPropagation();openPdfViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
         isArchive ? `<button class="icon-btn xs" onclick="event.stopPropagation();openArchiveViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` : ''}
-      <button class="icon-btn xs" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')"><i class="fas fa-download"></i></button>
-      <button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+      ${canDownload ? `<button class="icon-btn xs" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')" title="Download"><i class="fas fa-download"></i></button>` : ''}
+      ${canDelete ? `<button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>` : ''}
     </div>
   </div>`;
 }
@@ -449,6 +478,8 @@ function fileCard(f){
 function folderRow(f){
   const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
   const isLocked = !!f.isLocked;
+  const isAdmin = S.ses && S.ses.role === 'admin';
+  const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
   return `<div class="fl-row ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')" onclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')">
     <span style="display:flex;align-items:center;gap:8px">
       <input type="checkbox" class="row-select-check" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')">
@@ -463,7 +494,7 @@ function folderRow(f){
       ` : `
         <button class="icon-btn xs" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Set Folder Password"><i class="fas fa-lock"></i></button>
       `}
-      <button class="icon-btn xs danger" onclick="confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+      ${canDelete ? `<button class="icon-btn xs danger" onclick="confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>` : ''}
     </span>
   </div>`;
 }
@@ -474,7 +505,10 @@ function fileRow(f){
   const isPdf = /\.pdf$/i.test(f.name) || f.mimeType === 'application/pdf';
   const isArchive = /\.(zip|rar|7z|tar|gz)$/i.test(f.name);
   const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
-  const dblAction = isMedia ? `openMedia('${esc(f.id)}')` : isPdf ? `openPdfViewer('${esc(f.id)}')` : isArchive ? `openArchiveViewer('${esc(f.id)}')` : `downloadFile('${esc(f.id)}')`;
+  const isAdmin = S.ses && S.ses.role === 'admin';
+  const canDownload = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDownload !== false;
+  const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
+  const dblAction = isMedia ? `openMedia('${esc(f.id)}')` : isPdf ? `openPdfViewer('${esc(f.id)}')` : isArchive ? `openArchiveViewer('${esc(f.id)}')` : (canDownload ? `downloadFile('${esc(f.id)}')` : `toast('File downloads disabled by administrator','warning')`);
 
   return `<div class="fl-row ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="${dblAction}">
     <span style="display:flex;align-items:center;gap:8px">
@@ -487,8 +521,8 @@ function fileRow(f){
       ${isMedia ? `<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
         isPdf ? `<button class="icon-btn xs" onclick="event.stopPropagation();openPdfViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
         isArchive ? `<button class="icon-btn xs" onclick="event.stopPropagation();openArchiveViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` : ''}
-      <button class="icon-btn xs" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')"><i class="fas fa-download"></i></button>
-      <button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+      ${canDownload ? `<button class="icon-btn xs" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')" title="Download"><i class="fas fa-download"></i></button>` : ''}
+      ${canDelete ? `<button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>` : ''}
     </span>
   </div>`;
 }
@@ -538,7 +572,13 @@ function updateSelectionUI() {
   const bar = $('multiSelectBar');
   const countEl = $('msCount');
   if (countEl) countEl.textContent = count;
-  if (bar) bar.classList.toggle('hidden', count === 0);
+  if (bar) {
+    bar.classList.toggle('hidden', count === 0);
+    const isAdmin = S.ses && S.ses.role === 'admin';
+    const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
+    const msDeleteBtn = bar.querySelector('.btn-danger');
+    if (msDeleteBtn) msDeleteBtn.style.display = canDelete ? '' : 'none';
+  }
 
   document.querySelectorAll('.fg-card, .fl-row').forEach(el => {
     const id = el.getAttribute('data-item-id');
@@ -553,6 +593,11 @@ function updateSelectionUI() {
 
 async function deleteSelectedFiles() {
   if (!S.selectedFiles || S.selectedFiles.size === 0) return;
+  const isAdmin = S.ses && S.ses.role === 'admin';
+  if (!isAdmin && S.db && S.db.policy && S.db.policy.allowUserDelete === false) {
+    toast('File deletions are disabled by administrator', 'warning');
+    return;
+  }
   const count = S.selectedFiles.size;
   if (!confirm(`Move ${count} selected item(s) to Recycle Bin?`)) return;
 

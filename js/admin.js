@@ -78,11 +78,39 @@ function renderSettingsPage() {
     '</div>',
     '</div>',
 
+    // User & Guest Permissions Policy (Download / Delete Controls)
+    '<div class="settings-section">',
+    '<div class="sect-hd"><i class="fas fa-user-shield" style="color:#bf5af2"></i><div><h3>User & Guest Permissions Policy</h3><p>Control what actions Guests and Private Users are allowed to perform across all drives.</p></div></div>',
+    '<div class="policy-controls-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-top:1rem">',
+      '<div class="policy-card" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:1.1rem;display:flex;align-items:center;justify-content:space-between">',
+        '<div>',
+          '<div style="font-weight:600;font-size:.9rem;color:var(--text1);display:flex;align-items:center;gap:8px"><i class="fas fa-download" style="color:var(--primary)"></i> Allow File Downloads</div>',
+          '<div style="font-size:.78rem;color:var(--text3);margin-top:3px">If disabled, non-admins cannot download files or view download buttons.</div>',
+        '</div>',
+        '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyAllowDownload" '+(db.policy&&db.policy.allowUserDownload===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
+      '</div>',
+      '<div class="policy-card" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:1.1rem;display:flex;align-items:center;justify-content:space-between">',
+        '<div>',
+          '<div style="font-weight:600;font-size:.9rem;color:var(--text1);display:flex;align-items:center;gap:8px"><i class="fas fa-trash-alt" style="color:var(--danger)"></i> Allow File & Folder Deletions</div>',
+          '<div style="font-size:.78rem;color:var(--text3);margin-top:3px">If disabled, non-admins cannot delete files or move them to Recycle Bin.</div>',
+        '</div>',
+        '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyAllowDelete" '+(db.policy&&db.policy.allowUserDelete===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
+      '</div>',
+    '</div>',
+    '</div>',
+
     // Folder Security & Password Recovery (Admin recovery for encrypted folders)
     '<div class="settings-section">',
     '<div class="sect-hd"><i class="fas fa-lock" style="color:#ffd700"></i><div><h3>Folder Security & Password Recovery</h3><p>View and manage encrypted folders created by Private Users and Guests. Passwords can be decoded and recovered here.</p></div>',
     '<button class="btn-ghost sm" onclick="loadAdminLockedFolders()"><i class="fas fa-rotate"></i> Refresh</button></div>',
     '<div id="lockedFoldersContainer" style="margin-top:1rem"><div class="empty-small"><i class="fas fa-spinner fa-spin"></i><p>Loading encrypted folders…</p></div></div>',
+    '</div>',
+
+    // Destroyed Vault Folders (Security Breach Recovery)
+    '<div class="settings-section">',
+    '<div class="sect-hd"><i class="fas fa-skull-crossbones" style="color:var(--danger)"></i><div><h3>Destroyed Vault Folders (5 Failed Password Attempts)</h3><p>Folders automatically destroyed after 5 failed password attempts. Regular users see these as permanently wiped. As Admin, you can recover them exclusively to the Admin view.</p></div>',
+    '<button class="btn-ghost sm" onclick="loadAdminDestroyedFolders()"><i class="fas fa-rotate"></i> Refresh</button></div>',
+    '<div id="destroyedFoldersContainer" style="margin-top:1rem"><div class="empty-small"><i class="fas fa-spinner fa-spin"></i><p>Loading destroyed folders…</p></div></div>',
     '</div>',
 
     // Change admin password
@@ -106,6 +134,7 @@ function renderSettingsPage() {
   ].join('');
 
   loadAdminLockedFolders();
+  loadAdminDestroyedFolders();
 }
 
 async function loadAdminLockedFolders() {
@@ -261,5 +290,72 @@ async function promptRenameDrive(driveId, currentName) {
     renderSidebarStorage();
   } else {
     toast(res ? (res.error || 'Failed to rename drive') : 'Network error', 'error');
+  }
+}
+
+async function updateAdminPolicy() {
+  var dlCh = $('policyAllowDownload');
+  var delCh = $('policyAllowDelete');
+  var policy = {
+    allowUserDownload: dlCh ? dlCh.checked : true,
+    allowUserDelete: delCh ? delCh.checked : true
+  };
+  toast('Updating permissions policy…', 'info');
+  var res = await apiSetPolicy(policy);
+  if (res && res.ok) {
+    if (!S.db) S.db = {};
+    S.db.policy = res.policy;
+    toast('Permissions policy updated successfully!', 'success');
+  } else {
+    toast(res ? (res.error || 'Failed to update policy') : 'Network error', 'error');
+  }
+}
+
+async function loadAdminDestroyedFolders() {
+  var el = $('destroyedFoldersContainer');
+  if (!el) return;
+  el.innerHTML = '<div class="empty-small"><i class="fas fa-spinner fa-spin"></i><p>Loading destroyed folders…</p></div>';
+  var res = await apiGetDestroyedFolders();
+  if (!res || !res.folders || res.folders.length === 0) {
+    el.innerHTML = '<div class="empty-small"><i class="fas fa-shield-check" style="color:var(--success)"></i><p>No destroyed folders! No security breaches recorded.</p></div>';
+    return;
+  }
+
+  el.innerHTML = '<table class="users-table" style="margin-bottom:1rem">' +
+    '<thead><tr><th>Destroyed Folder</th><th>Drive</th><th>Locked By</th><th>Destroyed Date</th><th>Plain Password</th><th>Action</th></tr></thead>' +
+    '<tbody>' + res.folders.map(function(f, idx){
+      var inputId = 'dfp_' + f.id + '_' + idx;
+      return '<tr>' +
+        '<td><strong style="display:flex;align-items:center;gap:6px;color:#ff453a"><i class="fas fa-skull"></i> ' + esc(f.name) + '</strong><span style="font-size:.72rem;color:var(--text3)">' + esc(f.destroyedReason) + '</span></td>' +
+        '<td>' + esc(f.driveName) + '</td>' +
+        '<td><span class="badge badge-guest">' + esc(f.lockedBy) + '</span></td>' +
+        '<td>' + fmtDate(f.destroyedAt) + '</td>' +
+        '<td>' +
+          '<div style="display:flex;align-items:center;gap:6px">' +
+            '<input type="password" id="' + inputId + '" value="' + esc(f.plainPassword) + '" readonly class="inp xs" style="width:110px;font-family:monospace;background:rgba(255,255,255,0.06);border-color:transparent">' +
+            '<button class="icon-btn xs" onclick="var el=document.getElementById(\'' + inputId + '\');el.type=el.type===\'password\'?\'text\':\'password\';this.innerHTML=\'<i class=\\\'fas fa-\'+(el.type===\'password\'?\'eye\':\'eye-slash\')+\'\\\'></i>\';" title="Reveal Password"><i class="fas fa-eye"></i></button>' +
+            '<button class="icon-btn xs" onclick="navigator.clipboard.writeText(\'' + esc(f.plainPassword).replace(/'/g,"\\'") + '\');toast(\'Password copied!\',\'success\');" title="Copy Password"><i class="fas fa-copy"></i></button>' +
+          '</div>' +
+        '</td>' +
+        '<td>' +
+          '<button class="btn-primary xs" style="background:linear-gradient(135deg,var(--primary),#7928ca)" onclick="adminRecoverFolder(\'' + f.id + '\',\'' + esc(f.name).replace(/'/g,"\\'") + '\')" title="Recover folder to Admin View"><i class="fas fa-rotate-left"></i> Recover Folder</button>' +
+        '</td>' +
+      '</tr>';
+    }).join('') +
+    '</tbody></table>';
+}
+
+async function adminRecoverFolder(folderId, folderName) {
+  if (!confirm('Recover folder "' + folderName + '"? It will be restored into the drive exclusively in Admin View (never visible to guests).')) return;
+  toast('Recovering folder…', 'info');
+  var res = await apiRecoverFolder(folderId);
+  if (res && res.ok) {
+    toast('Folder "' + folderName + '" recovered to Admin View!', 'success');
+    S.db = await apiFetchDB();
+    loadAdminDestroyedFolders();
+    loadAdminLockedFolders();
+    renderSidebarStorage();
+  } else {
+    toast(res ? (res.error || 'Recovery failed') : 'Network error', 'error');
   }
 }

@@ -23,8 +23,12 @@ function navTo(page, driveId, folderId) {
     try {
       Array.from(S.unlockedFolders.entries()).forEach(function(entry) {
         var fId = entry[0], exp = entry[1];
-        if (exp === 'once' && folderId !== fId) {
-          S.unlockedFolders.delete(fId);
+        if (exp === 'once') {
+          // Keep folder unlocked if navigating within the folder or ANY of its child/descendant folders!
+          var inSameHierarchy = (folderId === fId) || (folderId && typeof isFolderDescendant === 'function' && isFolderDescendant(folderId, fId));
+          if (!inSameHierarchy) {
+            S.unlockedFolders.delete(fId);
+          }
         } else if (typeof exp === 'number' && Date.now() >= exp) {
           S.unlockedFolders.delete(fId);
           try { sessionStorage.removeItem('td_unlocked_' + fId); } catch(e){}

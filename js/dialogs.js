@@ -637,6 +637,11 @@ function promptResumeUpload() {
 }
 
 async function downloadFile(fileLocalId) {
+  var isAdmin = S.ses && S.ses.role === 'admin';
+  if (!isAdmin && S.db && S.db.policy && S.db.policy.allowUserDownload === false) {
+    toast('File downloads are disabled by administrator', 'warning');
+    return;
+  }
   if (!S.ses || !S.ses.token) {
     var fGuest = (S.db && S.db.files || []).find(function (x) { return x.id === fileLocalId; });
     var dGuest = fGuest ? fGuest.driveId : _driveId;
@@ -659,17 +664,25 @@ async function downloadFile(fileLocalId) {
 async function openMedia(fileLocalId) {
   var f = (S.db && S.db.files || []).find(function (x) { return x.id === fileLocalId; });
   if (!f) return;
+  var isAdmin = S.ses && S.ses.role === 'admin';
+  var canDownload = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDownload !== false;
   var driveId = f.driveId || _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : '');
   var mediaUrl = getFileDownloadUrl(f.googleFileId, driveId, true);
   var dlUrl = getFileDownloadUrl(f.googleFileId, driveId, false);
   var cfg = ftCfg(f.name, f.mimeType);
   var ov = document.createElement('div'); ov.className = 'media-ov';
-  ov.innerHTML = '<div class="media-hd"><div class="media-title"><i class="fas ' + cfg.icon + '" style="color:' + cfg.col + '"></i> ' + esc(f.name) + '</div><div style="display:flex;gap:.5rem"><a href="' + dlUrl + '" download="' + esc(f.name) + '" class="btn-primary sm"><i class="fas fa-download"></i> Download</a><button class="icon-btn" onclick="this.closest(\'.media-ov\').remove()"><i class="fas fa-times"></i></button></div></div><div class="media-body">' + (cfg.cat === 'image' ? '<img class="media-img" src="' + mediaUrl + '" alt="' + esc(f.name) + '">' : cfg.cat === 'video' ? '<video class="media-vid" src="' + mediaUrl + '" controls autoplay playsinline></video>' : cfg.cat === 'audio' ? '<audio src="' + mediaUrl + '" controls autoplay style="width:80%;max-width:500px"></audio>' : '<div style="text-align:center;padding:2rem"><i class="fas fa-file" style="font-size:3rem;color:var(--text2)"></i><p style="margin:1rem 0">Preview not available for this file type</p><a href="' + dlUrl + '" class="btn-primary"><i class="fas fa-download"></i> Download File</a></div>') + '</div>';
+  var dlBtnHtml = canDownload ? '<a href="' + dlUrl + '" download="' + esc(f.name) + '" class="btn-primary sm"><i class="fas fa-download"></i> Download</a>' : '';
+  ov.innerHTML = '<div class="media-hd"><div class="media-title"><i class="fas ' + cfg.icon + '" style="color:' + cfg.col + '"></i> ' + esc(f.name) + '</div><div style="display:flex;gap:.5rem">' + dlBtnHtml + '<button class="icon-btn" onclick="this.closest(\'.media-ov\').remove()"><i class="fas fa-times"></i></button></div></div><div class="media-body">' + (cfg.cat === 'image' ? '<img class="media-img" src="' + mediaUrl + '" alt="' + esc(f.name) + '">' : cfg.cat === 'video' ? '<video class="media-vid" src="' + mediaUrl + '" controls autoplay playsinline></video>' : cfg.cat === 'audio' ? '<audio src="' + mediaUrl + '" controls autoplay style="width:80%;max-width:500px"></audio>' : '<div style="text-align:center;padding:2rem"><i class="fas fa-file" style="font-size:3rem;color:var(--text2)"></i><p style="margin:1rem 0">Preview not available for this file type</p>' + (canDownload ? '<a href="' + dlUrl + '" class="btn-primary"><i class="fas fa-download"></i> Download File</a>' : '') + '</div>') + '</div>';
   ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
   document.body.appendChild(ov);
 }
 
 function confirmDeleteFile(fileLocalId, name) {
+  var isAdmin = S.ses && S.ses.role === 'admin';
+  if (!isAdmin && S.db && S.db.policy && S.db.policy.allowUserDelete === false) {
+    toast('File deletions are disabled by administrator', 'warning');
+    return;
+  }
   if (!confirm('Move "' + name + '" to Recycle Bin?')) return;
   var f = (S.db && S.db.files || []).find(function (x) { return x.id === fileLocalId; });
   if (!f) return;
@@ -687,6 +700,11 @@ function confirmDeleteFile(fileLocalId, name) {
 }
 
 function confirmDeleteFolder(folderId, name) {
+  var isAdmin = S.ses && S.ses.role === 'admin';
+  if (!isAdmin && S.db && S.db.policy && S.db.policy.allowUserDelete === false) {
+    toast('Folder deletions are disabled by administrator', 'warning');
+    return;
+  }
   if (!confirm('Move folder "' + name + '" to Recycle Bin?')) return;
   apiDeleteFolder(folderId).then(async function (r) {
     if (r.ok) {
@@ -763,10 +781,12 @@ async function adminPermanentDelete(fileId, name) {
   }
 }
 
-// ─── In-App PDF Viewer ──────────────────────────────────
+// ─── In-App PDF Viewer (Mozilla PDF.js Canvas Reader) ──────────────────────────
 function openPdfViewer(fileId) {
   var f = (S.db && S.db.files || []).find(function (x) { return x.id === fileId; });
   if (!f) return;
+  var isAdmin = S.ses && S.ses.role === 'admin';
+  var canDownload = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDownload !== false;
   var driveId = f.driveId || _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : '');
   var previewUrl = getFileDownloadUrl(f.googleFileId, driveId, true);
   var downloadUrl = getFileDownloadUrl(f.googleFileId, driveId, false);
@@ -778,36 +798,242 @@ function openPdfViewer(fileId) {
     <div class="pdf-viewer-container">
       <div class="pdf-viewer-header">
         <div class="pdf-viewer-title">
-          <i class="fas fa-file-pdf" style="color:#ff453a;font-size:1.3rem"></i>
+          <i class="fas fa-file-pdf" style="color:#ff453a;font-size:1.3rem;flex-shrink:0"></i>
           <div style="min-width:0">
             <div class="pdf-title-text" title="${esc(f.name)}">${esc(f.name)}</div>
-            <div class="pdf-sub-text">${fmt(f.size || 0)} · In-App PDF Reader</div>
+            <div class="pdf-sub-text">${fmt(f.size || 0)} · Fast Mobile PDF Reader</div>
           </div>
         </div>
+        <div class="pdf-toolbar-controls">
+          <button class="icon-btn xs" id="pdfPrevPage" title="Previous Page"><i class="fas fa-chevron-left"></i></button>
+          <span class="pdf-page-indicator">Page <strong id="pdfCurrentPage">1</strong> of <strong id="pdfTotalPages">…</strong></span>
+          <button class="icon-btn xs" id="pdfNextPage" title="Next Page"><i class="fas fa-chevron-right"></i></button>
+          <span class="pdf-tb-sep"></span>
+          <button class="icon-btn xs" id="pdfZoomOut" title="Zoom Out"><i class="fas fa-minus"></i></button>
+          <span class="pdf-zoom-label" id="pdfZoomLevel">100%</span>
+          <button class="icon-btn xs" id="pdfZoomIn" title="Zoom In"><i class="fas fa-plus"></i></button>
+          <button class="btn-ghost xs" id="pdfFitWidth" title="Fit to Screen"><i class="fas fa-arrows-left-right-to-line"></i> <span class="hide-xs">Fit</span></button>
+        </div>
         <div class="pdf-viewer-actions">
-          <a href="${downloadUrl}" download="${esc(f.name)}" class="btn-ghost sm" title="Download PDF"><i class="fas fa-download"></i> Download</a>
-          <a href="${previewUrl}" target="_blank" rel="noopener" class="btn-ghost sm" title="Open in new window"><i class="fas fa-arrow-up-right-from-square"></i> Fullscreen</a>
+          ${canDownload ? `<a href="${downloadUrl}" download="${esc(f.name)}" class="btn-ghost sm hide-xs" title="Download PDF"><i class="fas fa-download"></i> Download</a>` : ''}
+          <a href="${previewUrl}" target="_blank" rel="noopener" class="btn-ghost sm" title="Open in browser tab"><i class="fas fa-arrow-up-right-from-square"></i> <span class="hide-xs">New Tab</span></a>
           <button class="icon-btn sm" onclick="closePdfViewer()" title="Close viewer"><i class="fas fa-times"></i></button>
         </div>
       </div>
       <div class="pdf-viewer-body">
-        <iframe src="${previewUrl}#toolbar=1" class="pdf-frame" title="PDF Viewer" allow="fullscreen"></iframe>
+        <div class="pdf-canvas-container" id="pdfCanvasContainer">
+          <canvas id="pdfCanvas" style="display:none"></canvas>
+          <div id="pdfLoading" class="pdf-loader-state">
+            <div class="vault-shield-badge gold-glow" style="width:58px;height:58px;font-size:1.5rem">
+              <i class="fas fa-circle-notch fa-spin"></i>
+            </div>
+            <div id="pdfLoadMsg" style="font-size:.9rem;color:var(--text2);font-weight:600">Loading document…</div>
+          </div>
+          <div id="pdfPasswordBox" class="pdf-pass-box hidden">
+            <div class="vault-shield-badge gold-glow" style="width:54px;height:54px;font-size:1.4rem;margin:0 auto 12px">
+              <i class="fas fa-key"></i>
+            </div>
+            <h3 style="margin-bottom:6px">Protected PDF Document</h3>
+            <p style="font-size:.82rem;color:var(--text3);margin-bottom:14px">This PDF is protected by an author password.</p>
+            <form onsubmit="return false;" style="display:flex;gap:8px;max-width:320px;margin:0 auto">
+              <input type="password" id="pdfDocPass" class="inp" placeholder="Enter PDF password" style="flex:1" required>
+              <button type="submit" class="btn-primary sm"><i class="fas fa-lock-open"></i> Unlock</button>
+            </form>
+          </div>
+          <div id="pdfErrorBox" class="pdf-error-box hidden">
+            <i class="fas fa-triangle-exclamation" style="font-size:2.4rem;color:var(--warning);margin-bottom:8px"></i>
+            <h3 style="margin-bottom:6px">Could Not Preview PDF</h3>
+            <p id="pdfErrDetail" style="font-size:.82rem;color:var(--text3);max-width:360px;margin-bottom:14px"></p>
+            <div style="display:flex;gap:8px;justify-content:center">
+              <a href="${previewUrl}" target="_blank" rel="noopener" class="btn-primary sm"><i class="fas fa-arrow-up-right-from-square"></i> Open in Native Browser</a>
+              ${canDownload ? `<a href="${downloadUrl}" download="${esc(f.name)}" class="btn-ghost sm"><i class="fas fa-download"></i> Download</a>` : ''}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   `;
   document.body.appendChild(ov);
 
-  var escHandler = function (e) {
-    if (e.key === 'Escape') { closePdfViewer(); }
+  var pdfDoc = null;
+  var pageNum = 1;
+  var pageRendering = false;
+  var pageNumPending = null;
+  var scale = 1.0;
+  var fitWidthMode = true;
+  var currentRenderTask = null;
+
+  function queueRenderPage(num) {
+    if (pageRendering) {
+      pageNumPending = num;
+    } else {
+      renderPage(num);
+    }
+  }
+
+  function renderPage(num) {
+    pageRendering = true;
+    pdfDoc.getPage(num).then(function (page) {
+      var container = ov.querySelector('#pdfCanvasContainer');
+      if (fitWidthMode && container) {
+        var availWidth = container.clientWidth - 48;
+        if (availWidth > 180) {
+          var unscaledVp = page.getViewport({ scale: 1.0 });
+          scale = Math.min(3.0, Math.max(0.4, availWidth / unscaledVp.width));
+        }
+      }
+      var viewport = page.getViewport({ scale: scale });
+      var canvas = ov.querySelector('#pdfCanvas');
+      var ctx = canvas.getContext('2d');
+      var dpr = window.devicePixelRatio || 1;
+
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width = Math.floor(viewport.width) + 'px';
+      canvas.style.height = Math.floor(viewport.height) + 'px';
+      canvas.style.display = 'block';
+
+      if (currentRenderTask) {
+        try { currentRenderTask.cancel(); } catch (e) { }
+      }
+
+      var transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
+      var renderContext = {
+        canvasContext: ctx,
+        transform: transform,
+        viewport: viewport
+      };
+
+      currentRenderTask = page.render(renderContext);
+      currentRenderTask.promise.then(function () {
+        pageRendering = false;
+        if (pageNumPending !== null) {
+          renderPage(pageNumPending);
+          pageNumPending = null;
+        }
+      }).catch(function (err) {
+        if (err && err.name === 'RenderingCancelledException') return;
+        console.error('Page render error:', err);
+        pageRendering = false;
+      });
+
+      var curEl = ov.querySelector('#pdfCurrentPage');
+      if (curEl) curEl.textContent = num;
+      var zoomEl = ov.querySelector('#pdfZoomLevel');
+      if (zoomEl) zoomEl.textContent = Math.round(scale * 100) + '%';
+      var prevBtn = ov.querySelector('#pdfPrevPage');
+      if (prevBtn) prevBtn.disabled = (num <= 1);
+      var nextBtn = ov.querySelector('#pdfNextPage');
+      if (nextBtn) nextBtn.disabled = (num >= pdfDoc.numPages);
+    });
+  }
+
+  // Wire toolbar buttons
+  ov.querySelector('#pdfPrevPage').onclick = function () {
+    if (pageNum <= 1) return;
+    pageNum--;
+    queueRenderPage(pageNum);
   };
-  window.addEventListener('keydown', escHandler);
-  ov._escHandler = escHandler;
+  ov.querySelector('#pdfNextPage').onclick = function () {
+    if (!pdfDoc || pageNum >= pdfDoc.numPages) return;
+    pageNum++;
+    queueRenderPage(pageNum);
+  };
+  ov.querySelector('#pdfZoomIn').onclick = function () {
+    fitWidthMode = false;
+    scale = Math.min(3.0, scale + 0.2);
+    queueRenderPage(pageNum);
+  };
+  ov.querySelector('#pdfZoomOut').onclick = function () {
+    fitWidthMode = false;
+    scale = Math.max(0.4, scale - 0.2);
+    queueRenderPage(pageNum);
+  };
+  ov.querySelector('#pdfFitWidth').onclick = function () {
+    fitWidthMode = true;
+    queueRenderPage(pageNum);
+  };
+
+  // Keyboard navigation
+  var keyHandler = function (e) {
+    if (e.key === 'Escape') closePdfViewer();
+    if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+      if (pdfDoc && pageNum < pdfDoc.numPages) { pageNum++; queueRenderPage(pageNum); }
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      if (pageNum > 1) { pageNum--; queueRenderPage(pageNum); }
+    }
+  };
+  window.addEventListener('keydown', keyHandler);
+  ov._keyHandler = keyHandler;
+
+  // Initialize PDF.js loading
+  if (typeof pdfjsLib === 'undefined') {
+    // If CDN fails, fallback to iframe
+    ov.querySelector('.pdf-viewer-body').innerHTML = '<iframe src="' + previewUrl + '#toolbar=1" class="pdf-frame" title="PDF Viewer" allow="fullscreen"></iframe>';
+    return;
+  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  var loadingTask = pdfjsLib.getDocument({
+    url: previewUrl,
+    withCredentials: false
+  });
+
+  loadingTask.onProgress = function (p) {
+    if (p.total > 0) {
+      var pct = Math.min(99, Math.round((p.loaded / p.total) * 100));
+      var msg = ov.querySelector('#pdfLoadMsg');
+      if (msg) msg.textContent = 'Loading document… ' + pct + '%';
+    }
+  };
+
+  loadingTask.onPassword = function (callback, reason) {
+    var loadSpin = ov.querySelector('#pdfLoading');
+    if (loadSpin) loadSpin.style.display = 'none';
+    var passBox = ov.querySelector('#pdfPasswordBox');
+    if (passBox) {
+      passBox.classList.remove('hidden');
+      var inp = passBox.querySelector('#pdfDocPass');
+      if (inp) {
+        inp.value = '';
+        inp.focus();
+        passBox.querySelector('form').onsubmit = function (e) {
+          e.preventDefault();
+          var pwd = inp.value;
+          if (!pwd) return;
+          passBox.classList.add('hidden');
+          if (loadSpin) loadSpin.style.display = 'flex';
+          callback(pwd);
+        };
+      }
+    }
+  };
+
+  loadingTask.promise.then(function (doc) {
+    pdfDoc = doc;
+    var loadSpin = ov.querySelector('#pdfLoading');
+    if (loadSpin) loadSpin.style.display = 'none';
+    var totEl = ov.querySelector('#pdfTotalPages');
+    if (totEl) totEl.textContent = doc.numPages;
+    renderPage(pageNum);
+  }).catch(function (err) {
+    console.error('PDF.js loading error:', err);
+    var loadSpin = ov.querySelector('#pdfLoading');
+    if (loadSpin) loadSpin.style.display = 'none';
+    var errBox = ov.querySelector('#pdfErrorBox');
+    if (errBox) {
+      errBox.classList.remove('hidden');
+      var errDetail = errBox.querySelector('#pdfErrDetail');
+      if (errDetail) errDetail.textContent = err.message || 'The PDF stream could not be decoded.';
+    }
+  });
 }
 
 function closePdfViewer() {
   var ov = document.getElementById('pdfViewerModal');
   if (ov) {
-    if (ov._escHandler) window.removeEventListener('keydown', ov._escHandler);
+    if (ov._keyHandler) window.removeEventListener('keydown', ov._keyHandler);
     ov.remove();
   }
 }
