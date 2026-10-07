@@ -140,7 +140,8 @@
       </div>
       <div class="topbar-search">
         <i class="fas fa-magnifying-glass"></i>
-        <input type="text" id="globalSearch" placeholder="Search Documents… (Ctrl+K)">
+        <input type="text" id="globalSearch" placeholder="Search…">
+        <kbd class="search-kbd" id="searchKbd">Ctrl+K</kbd>
       </div>
       <div class="topbar-right">
         <button class="btn-ghost sm guest-only" id="guestSignInBtn" onclick="showSignInModal()"><i class="fas fa-arrow-right-to-bracket"></i> Sign In</button>
@@ -161,13 +162,19 @@
             <span class="tm-badge" id="tmBadge"></span>
             <span class="tm-live-speed" id="tmLiveSpeed"></span>
           </button>
+          <div class="tm-backdrop hidden" id="tmBackdrop" onclick="toggleTMPanel(false)"></div>
           <div class="tm-panel hidden" id="tmPanel">
+            <div class="tm-sheet-handle"></div>
             <div class="tm-hd">
               <div class="tm-title-wrap">
+                <i class="fas fa-arrow-right-arrow-left" style="color:var(--primary);margin-right:4px"></i>
                 <span>Transfers</span>
                 <span class="tm-hd-speed" id="tmHdSpeed"></span>
               </div>
-              <button class="btn-ghost xs" id="tmClear" onclick="tmClear()">Clear</button>
+              <div style="display:flex;gap:6px;align-items:center">
+                <button class="btn-ghost xs" id="tmClear" onclick="tmClear()" title="Clear finished">Clear</button>
+                <button class="icon-btn xs" onclick="toggleTMPanel(false)" title="Close transfers"><i class="fas fa-times"></i></button>
+              </div>
             </div>
             <div id="tmList" class="tm-list"></div>
           </div>

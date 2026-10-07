@@ -180,6 +180,13 @@ a{color:var(--primary);text-decoration:none;}
 .topbar-search i{color:var(--text3);font-size:.8rem;}
 .topbar-search input{flex:1;background:none;border:none;outline:none;color:var(--text1);font-size:.83rem;}
 .topbar-search input::placeholder{color:var(--text3);}
+.search-kbd{
+  display:inline-flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);
+  border-radius:4px;padding:1px 5px;font-size:0.65rem;font-weight:600;
+  color:var(--text3);font-family:inherit;pointer-events:none;user-select:none;
+  margin-left:auto;flex-shrink:0;
+}
 .topbar-right{display:flex;align-items:center;gap:.4rem;flex-shrink:0;}
 .view-size-btns{display:flex;gap:1px;background:var(--bg4);border-radius:7px;padding:2px;}
 .vsz{padding:.28rem .5rem;border-radius:5px;background:none;color:var(--text3);font-size:.72rem;font-weight:600;transition:.12s;}
@@ -1224,6 +1231,53 @@ body {
   border-radius: 4px;
 }
 
+/* Folder Security Card Action Badge */
+.card-security-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+.card-security-btn.locked {
+  background: rgba(255, 215, 0, 0.16);
+  color: #ffd700;
+  border: 1px solid rgba(255, 215, 0, 0.4);
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.2);
+}
+.card-security-btn.locked:hover {
+  background: rgba(255, 215, 0, 0.28);
+  border-color: #ffd700;
+  transform: translateY(-1px) scale(1.04);
+  box-shadow: 0 0 16px rgba(255, 215, 0, 0.35);
+}
+.card-security-btn.unlocked {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  opacity: 0.75;
+}
+.fg-card:hover .card-security-btn.unlocked {
+  opacity: 1;
+  color: var(--text2);
+}
+.card-security-btn.unlocked:hover {
+  background: rgba(78, 134, 245, 0.18);
+  color: var(--primary);
+  border-color: rgba(78, 134, 245, 0.45);
+  transform: translateY(-1px) scale(1.04);
+}
+
+
 /* Floating Multi-Select Toolbar */
 .multi-select-bar {
   position: fixed;
@@ -1459,35 +1513,6 @@ body {
     display: none !important;
   }
 
-  /* Mobile Bottom Sheet Transfer Panel */
-  .tm-panel {
-    position: fixed;
-    top: auto;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    width: 100vw;
-    max-width: 100vw;
-    max-height: 80vh;
-    border-radius: 20px 20px 0 0;
-    border-bottom: none;
-    background: rgba(14, 16, 26, 0.98);
-    backdrop-filter: blur(28px);
-    -webkit-backdrop-filter: blur(28px);
-    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.08);
-    z-index: 1200;
-    animation: slideUpSheet 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  @keyframes slideUpSheet {
-    from { transform: translateY(100%); }
-    to { transform: translateY(0); }
-  }
-  .tm-list {
-    max-height: calc(80vh - 55px);
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
   /* Explorer toolbar mobile horizontal scroll */
   .ex-toolbar {
     overflow-x: auto;
@@ -1531,15 +1556,211 @@ body {
   }
 }
 
+/* ═══════════════ MODALS & 3D DIALOGS ═══════════════ */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  animation: modalFadeIn 0.2s ease-out;
+}
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal {
+  background: rgba(18, 20, 32, 0.94);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  border-radius: 18px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 440px;
+  position: relative;
+  animation: modalPopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes modalPopIn {
+  from { opacity: 0; transform: scale(0.92) translateY(12px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.vault-shield-badge {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(255, 159, 10, 0.15);
+  color: #ff9f0a;
+  border: 1px solid rgba(255, 159, 10, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  margin: 0 auto 0.75rem auto;
+  box-shadow: 0 0 24px rgba(255, 159, 10, 0.22);
+}
+.vault-shield-badge.gold-glow {
+  background: rgba(255, 215, 0, 0.18);
+  color: #ffd700;
+  border-color: rgba(255, 215, 0, 0.4);
+  box-shadow: 0 0 24px rgba(255, 215, 0, 0.3);
+}
+
+/* Transfers Resume Box & Sheet */
+.tm-resume-box {
+  background: linear-gradient(135deg, rgba(255, 159, 10, 0.12), rgba(255, 69, 58, 0.08));
+  border: 1px solid rgba(255, 159, 10, 0.3);
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+  margin: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.tm-resume-info {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.tm-resume-icon {
+  font-size: 1.3rem;
+  color: #ff9f0a;
+  flex-shrink: 0;
+}
+.tm-resume-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #fff;
+}
+.tm-resume-desc {
+  font-size: 0.72rem;
+  color: var(--text3);
+}
+.tm-resume-actions {
+  display: flex;
+  gap: 0.45rem;
+  justify-content: flex-end;
+}
+.tm-sheet-handle {
+  display: none;
+  width: 40px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 2px;
+  margin: 8px auto 2px auto;
+}
+.tm-backdrop {
+  display: none;
+}
+
 @media (max-width: 960px) {
-  .upload-group {
+  .topbar .upload-group,
+  .topbar #newFolderBtn,
+  .topbar #syncBtn,
+  .topbar .layout-toggle-btns,
+  .topbar .tb-divider {
     display: none !important;
   }
-  #newFolderBtn {
+  .search-kbd {
     display: none !important;
   }
-  .layout-toggle-btns {
+  .tm-sheet-handle {
+    display: block !important;
+  }
+  .tm-backdrop {
+    display: block !important;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    z-index: 1150;
+    animation: fadeInBackdrop 0.2s ease;
+  }
+  .tm-backdrop.hidden {
     display: none !important;
+  }
+  .tm-panel {
+    position: fixed !important;
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    max-height: 84vh !important;
+    border-radius: 20px 20px 0 0 !important;
+    border-bottom: none !important;
+    border-left: none !important;
+    border-right: none !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.15) !important;
+    background: rgba(14, 16, 26, 0.98) !important;
+    backdrop-filter: blur(28px) !important;
+    -webkit-backdrop-filter: blur(28px) !important;
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+    z-index: 1200 !important;
+    animation: slideUpSheet 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+  .tm-panel.hidden {
+    display: none !important;
+  }
+  .tm-list {
+    max-height: calc(84vh - 60px) !important;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@keyframes fadeInBackdrop {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUpSheet {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    padding: 0.35rem 0.5rem !important;
+    gap: 0.35rem !important;
+  }
+  .topbar-left {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+  .topbar-search {
+    flex: 1 1 0 !important;
+    min-width: 50px !important;
+    max-width: none !important;
+    padding: 0.28rem 0.5rem !important;
+  }
+  .topbar-search input {
+    font-size: 0.78rem !important;
+    min-width: 0;
+  }
+  .topbar-right {
+    margin-left: auto;
+    gap: 3px;
+    flex: 0 0 auto;
+  }
+  .card-security-btn {
+    top: 6px;
+    right: 6px;
+    padding: 2px 6px;
+    font-size: 0.64rem;
+  }
+  .card-security-btn .sec-label {
+    display: inline;
   }
 }
 

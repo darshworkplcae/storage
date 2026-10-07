@@ -261,20 +261,22 @@ function folderCard(f){
     <div class="card-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select folder">
       <i class="fas fa-check"></i>
     </div>
-    <div class="fg-icon xl" style="position:relative">
+    ${isLocked ? `
+      <div class="card-security-btn locked" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected Folder (Click to manage password)">
+        <i class="fas fa-shield-halved"></i> <span class="sec-label">Protected</span>
+      </div>
+    ` : `
+      <div class="card-security-btn unlocked" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Set Folder Password Protection">
+        <i class="fas fa-lock"></i> <span class="sec-label">Protect</span>
+      </div>
+    `}
+    <div class="fg-icon xl" style="position:relative;margin-top:0.35rem">
       <i class="fas ${isLocked ? 'fa-folder-closed' : 'fa-folder'}" style="color:${isLocked ? '#ffd700' : '#ff9f0a'}"></i>
-      ${isLocked ? `<span class="folder-lock-badge" title="Protected folder"><i class="fas fa-lock"></i></span>` : ''}
     </div>
     <div class="fg-name" style="display:flex;align-items:center;justify-content:center;gap:4px">
-      ${isLocked ? `<i class="fas fa-lock" style="color:#ffd700;font-size:.78rem"></i>` : ''}
       <span class="truncate">${esc(f.name)}</span>
     </div>
     <div class="fg-acts">
-      ${isLocked ? `
-        <button class="icon-btn xs" style="color:#ffd700" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected folder - Click to remove password"><i class="fas fa-lock"></i></button>
-      ` : `
-        <button class="icon-btn xs" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Set Folder Password"><i class="fas fa-lock-open"></i></button>
-      `}
       <button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete folder"><i class="fas fa-trash-alt"></i></button>
     </div>
   </div>`;
@@ -322,16 +324,15 @@ function folderRow(f){
     <span style="display:flex;align-items:center;gap:8px">
       <input type="checkbox" class="row-select-check" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')">
       <i class="fas ${isLocked ? 'fa-folder-closed' : 'fa-folder'}" style="color:${isLocked ? '#ffd700' : '#ff9f0a'};margin-right:.4rem"></i>
-      ${isLocked ? `<i class="fas fa-lock" style="color:#ffd700;font-size:.75rem;margin-right:4px"></i>` : ''}
       ${esc(f.name)}
-      ${isLocked ? `<span class="badge-locked sm" style="margin-left:6px;font-size:.7rem;padding:2px 6px;border-radius:4px;background:rgba(255,215,0,0.15);color:#ffd700;border:1px solid rgba(255,215,0,0.3)">Protected</span>` : ''}
+      ${isLocked ? `<span class="badge-locked sm" style="margin-left:6px"><i class="fas fa-shield-halved"></i> Protected</span>` : ''}
     </span>
     <span>—</span><span>${fmtDate(f.date)}</span>
-    <span style="display:flex;gap:.2rem">
+    <span style="display:flex;gap:.3rem;align-items:center">
       ${isLocked ? `
-        <button class="icon-btn xs" style="color:#ffd700" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected folder - Click to remove password"><i class="fas fa-lock"></i></button>
+        <button class="icon-btn xs" style="color:#ffd700" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected folder - Click to manage password"><i class="fas fa-shield-halved"></i></button>
       ` : `
-        <button class="icon-btn xs" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Set Folder Password"><i class="fas fa-lock-open"></i></button>
+        <button class="icon-btn xs" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Set Folder Password"><i class="fas fa-lock"></i></button>
       `}
       <button class="icon-btn xs danger" onclick="confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
     </span>
@@ -522,6 +523,21 @@ function renderPage(title,icon,color,msg){
 }
 
 // ─── TM Panel ─────────────────────────────────────────
+function toggleTMPanel(open) {
+  const p = $('tmPanel');
+  const b = $('tmBackdrop');
+  if (!p) return;
+  const willOpen = (typeof open === 'boolean') ? open : p.classList.contains('hidden');
+  if (willOpen) {
+    p.classList.remove('hidden');
+    if (b) b.classList.remove('hidden');
+    renderTM();
+  } else {
+    p.classList.add('hidden');
+    if (b) b.classList.add('hidden');
+  }
+}
+
 function renderTM(){
   const badge=$('tmBadge'), list=$('tmList'), speedEl=$('tmLiveSpeed'), hdSpeed=$('tmHdSpeed');
   const transfers=tmLoad();
@@ -563,7 +579,25 @@ function renderTM(){
     return;
   }
 
-  list.innerHTML=transfers.map(t=>{
+  const interrupted = transfers.filter(t => t.status === 'interrupted');
+  let resumeBanner = '';
+  if (interrupted.length > 0) {
+    resumeBanner = `<div class="tm-resume-box">
+      <div class="tm-resume-info">
+        <i class="fas fa-triangle-exclamation tm-resume-icon"></i>
+        <div style="min-width:0;flex:1">
+          <div class="tm-resume-title">${interrupted.length} file${interrupted.length > 1 ? 's' : ''} interrupted</div>
+          <div class="tm-resume-desc">Upload stopped when browser was closed</div>
+        </div>
+      </div>
+      <div class="tm-resume-actions">
+        <button class="btn-primary xs" onclick="promptResumeUpload()" title="Resume remaining files with Smart Deduplication"><i class="fas fa-play"></i> Resume</button>
+        <button class="btn-ghost xs" onclick="tmClearInterrupted()" title="Dismiss interrupted items">Dismiss</button>
+      </div>
+    </div>`;
+  }
+
+  list.innerHTML = resumeBanner + transfers.map(t=>{
     const isPaused = t.status === 'uploading' && (typeof _cancelSignal !== 'undefined' && _cancelSignal && _cancelSignal.paused);
     const isInterrupted = t.status === 'interrupted';
     const isQueued = t.status === 'queued';

@@ -234,16 +234,16 @@ function wireEvents() {
     toast('Synced','success');
   };
   // Transfer panel
-  var tmBtn=$('tmBtn'),tmPanel=$('tmPanel');
-  if(tmBtn&&tmPanel){
+  var tmBtn=$('tmBtn');
+  if(tmBtn){
     tmBtn.onclick=function(e){
       e.stopPropagation();
-      tmPanel.classList.toggle('hidden');
-      renderTM();
+      toggleTMPanel();
     };
     document.addEventListener('click',function(e){
+      var tmPanel=$('tmPanel');
       if(tmPanel && !tmPanel.classList.contains('hidden') && !tmPanel.contains(e.target) && !tmBtn.contains(e.target)) {
-        tmPanel.classList.add('hidden');
+        toggleTMPanel(false);
       }
     });
   }

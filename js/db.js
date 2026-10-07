@@ -76,5 +76,12 @@ function tmClear() {
   renderTM();
 }
 
+function tmClearInterrupted() {
+  var l = tmLoad();
+  var remaining = l.filter(function(x){ return x.status !== 'interrupted'; });
+  tmSave(remaining);
+  renderTM();
+}
+
 // Sanitize stale transfers immediately on script evaluation
 tmSanitizeOnStartup();

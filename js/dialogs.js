@@ -1,9 +1,38 @@
 var _cancelSignal = { cancelled: false, paused: false, resumeResolve: null };
 window._isUploading = false;
 
+// Screen Wake Lock API - keeps phone screen & CPU active during uploads so OS doesn't sleep/freeze
+var _wakeLock = null;
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator && !_wakeLock) {
+      _wakeLock = await navigator.wakeLock.request('screen');
+      _wakeLock.addEventListener('release', function() {
+        _wakeLock = null;
+      });
+    }
+  } catch(e) {
+    console.warn('Wake Lock notice:', e);
+  }
+}
+
+function releaseWakeLock() {
+  if (_wakeLock) {
+    try { _wakeLock.release(); } catch(e){}
+    _wakeLock = null;
+  }
+}
+
+// Re-acquire wake lock if mobile user minimizes and restores browser while uploading
+document.addEventListener('visibilitychange', async function() {
+  if (document.visibilityState === 'visible' && window._isUploading && !_wakeLock) {
+    await requestWakeLock();
+  }
+});
+
 window.addEventListener('beforeunload', function(e) {
   if (window._isUploading) {
-    var msg = 'Upload in progress! Leaving or refreshing will stop your upload.';
+    var msg = 'Upload in progress! Closing the browser will pause active transfers.';
     e.preventDefault();
     e.returnValue = msg;
     return msg;
@@ -78,6 +107,7 @@ async function uploadFiles(fileList, targetFolderId) {
   renderTM();
 
   window._isUploading = true;
+  await requestWakeLock();
   try {
     for(var i=0; i<fileItems.length; i++) {
       if(_cancelSignal.cancelled) break;
@@ -85,6 +115,7 @@ async function uploadFiles(fileList, targetFolderId) {
     }
   } finally {
     window._isUploading = false;
+    releaseWakeLock();
   }
 }
 
@@ -134,18 +165,16 @@ async function uploadFolder() {
     } catch(e){}
 
     window._isUploading = true;
+    await requestWakeLock();
     toast('Preparing folder "' + rootFolder + '" (' + files.length + ' files)…', 'info');
 
-    // Pre-queue all folder files upfront so user sees the complete 75-item queue in Transfers!
+    // Pre-queue all folder files upfront so user sees the complete queue in Transfers!
     var fileItems = files.map(function(f) {
       var tId = uid();
       tmAddQueued(tId, f.name, f.size);
       return { file: f, tId: tId };
     });
     renderTM();
-
-    window._isUploading = true;
-    toast('Preparing folder "' + rootFolder + '" (' + files.length + ' files)…', 'info');
 
     // Build directory tree in Google Drive
     var folderMap = {}; // relative path -> folderId
@@ -214,6 +243,7 @@ async function uploadFolder() {
       }
     } finally {
       window._isUploading = false;
+      releaseWakeLock();
       try { localStorage.removeItem('td_active_batch'); } catch(e){}
       S.db = await apiFetchDB();
       renderSidebarStorage();
@@ -295,51 +325,72 @@ function showLockFolderDialog(folderId, folderName) {
   var ov = document.createElement('div');
   ov.className = 'modal-backdrop';
   ov.innerHTML = `
-    <div class="modal" style="max-width:420px;text-align:center">
+    <div class="modal" style="max-width:440px;text-align:center">
       <div class="modal-hd" style="justify-content:center;position:relative">
-        <div style="width:48px;height:48px;border-radius:50%;background:rgba(255,159,10,0.15);color:#ff9f0a;display:flex;align-items:center;justify-content:center;font-size:1.4rem;margin:0 auto .5rem">
-          <i class="fas fa-lock"></i>
+        <div class="vault-shield-badge gold-glow">
+          <i class="fas fa-shield-halved"></i>
         </div>
         <button class="icon-btn xs" style="position:absolute;right:1rem;top:1rem" onclick="this.closest('.modal-backdrop').remove()"><i class="fas fa-times"></i></button>
       </div>
-      <h3 style="margin-bottom:.3rem">Lock Folder</h3>
-      <p style="font-size:.84rem;color:var(--text3);margin-bottom:1.2rem">Set a password for <strong>${esc(folderName)}</strong>. The folder will be encrypted and inaccessible without this password.</p>
+      <h3 style="margin-bottom:.3rem">Protect Folder</h3>
+      <p style="font-size:.84rem;color:var(--text3);margin-bottom:1.2rem">
+        Set a password for <strong style="color:var(--text1)">${esc(folderName)}</strong>.<br>
+        Only users with this password can view or upload files inside.
+      </p>
       <form id="lockFolderForm" onsubmit="return false;" style="text-align:left">
-        <div style="margin-bottom:1rem">
-          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem">Folder Password</label>
+        <div style="margin-bottom:.85rem">
+          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem;color:var(--text2)">New Password</label>
           <div style="position:relative">
-            <input type="password" id="lockFolderPass" class="inp" placeholder="Enter password (e.g. secret123)" required style="width:100%;padding-right:40px">
+            <input type="password" id="lockFolderPass" class="inp" placeholder="Enter secure password" required style="width:100%;padding-right:40px">
             <button type="button" class="icon-btn xs" style="position:absolute;right:8px;top:50%;transform:translateY(-50%)" onclick="var p=document.getElementById('lockFolderPass');p.type=p.type==='password'?'text':'password';this.innerHTML='<i class=\\'fas fa-'+(p.type==='password'?'eye':'eye-slash')+'\\'></i>';"><i class="fas fa-eye"></i></button>
           </div>
         </div>
-        <div style="display:flex;gap:.6rem;justify-content:flex-end;margin-top:1.4rem">
+        <div style="margin-bottom:1rem">
+          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem;color:var(--text2)">Confirm Password</label>
+          <div style="position:relative">
+            <input type="password" id="lockFolderPassConfirm" class="inp" placeholder="Re-type password" required style="width:100%;padding-right:40px">
+            <button type="button" class="icon-btn xs" style="position:absolute;right:8px;top:50%;transform:translateY(-50%)" onclick="var p=document.getElementById('lockFolderPassConfirm');p.type=p.type==='password'?'text':'password';this.innerHTML='<i class=\\'fas fa-'+(p.type==='password'?'eye':'eye-slash')+'\\'></i>';"><i class="fas fa-eye"></i></button>
+          </div>
+        </div>
+        <div style="background:rgba(255,159,10,0.08);border:1px solid rgba(255,159,10,0.22);border-radius:8px;padding:.65rem .8rem;font-size:.76rem;color:#ff9f0a;margin-bottom:1.2rem;line-height:1.4">
+          <i class="fas fa-shield-alt" style="margin-right:4px"></i>
+          Encrypted with SHA-256. Admin can manage or recover folder passwords from Admin Settings.
+        </div>
+        <div style="display:flex;gap:.6rem;justify-content:flex-end">
           <button type="button" class="btn-ghost sm" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
-          <button type="submit" class="btn-primary sm" id="submitLockBtn" style="background:linear-gradient(135deg,#ff9f0a,#ff453a)"><i class="fas fa-lock"></i> Lock Folder</button>
+          <button type="submit" class="btn-primary sm" id="submitLockBtn" style="background:linear-gradient(135deg,#ff9f0a,#ff453a)"><i class="fas fa-lock"></i> Protect Folder</button>
         </div>
       </form>
     </div>
   `;
   document.body.appendChild(ov);
   var passInp = ov.querySelector('#lockFolderPass');
+  var passConf = ov.querySelector('#lockFolderPassConfirm');
   if (passInp) passInp.focus();
 
   ov.querySelector('#lockFolderForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     var val = passInp.value.trim();
-    if (!val) return;
+    var conf = passConf.value.trim();
+    if (!val) { toast('Password cannot be empty', 'warning'); return; }
+    if (val !== conf) {
+      toast('Passwords do not match! Please verify.', 'error');
+      passConf.focus();
+      return;
+    }
     var btn = ov.querySelector('#submitLockBtn');
     btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Locking…';
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Protecting…';
     var res = await apiLockFolder(folderId, val);
     if (res && res.ok) {
-      toast('Folder locked! Protected with password.', 'success');
+      toast('Folder protected with password!', 'success');
       ov.remove();
       S.db = await apiFetchDB();
       renderFilesPage(_driveId, _folderId);
     } else {
-      toast(res ? (res.error || 'Failed to lock folder') : 'Network error', 'error');
+      toast(res ? (res.error || 'Failed to protect folder') : 'Network error', 'error');
       btn.disabled = false;
-      btn.innerHTML = '<i class="fas fa-lock"></i> Lock Folder';
+      btn.innerHTML = '<i class="fas fa-lock"></i> Protect Folder';
     }
   });
 }
@@ -350,22 +401,24 @@ function showUnlockFolderDialog(folder, onUnlocked) {
   ov.innerHTML = `
     <div class="modal" style="max-width:400px;text-align:center">
       <div class="modal-hd" style="justify-content:center;position:relative">
-        <div style="width:52px;height:52px;border-radius:50%;background:rgba(255,215,0,0.18);color:#ffd700;display:flex;align-items:center;justify-content:center;font-size:1.5rem;margin:0 auto .5rem;box-shadow:0 0 20px rgba(255,215,0,0.25)">
+        <div class="vault-shield-badge gold-glow">
           <i class="fas fa-lock"></i>
         </div>
         <button class="icon-btn xs" style="position:absolute;right:1rem;top:1rem" onclick="this.closest('.modal-backdrop').remove()"><i class="fas fa-times"></i></button>
       </div>
       <h3 style="margin-bottom:.3rem">Protected Folder</h3>
-      <p style="font-size:.84rem;color:var(--text3);margin-bottom:1.2rem"><strong>${esc(folder.name)}</strong> is encrypted. Enter the password to view and upload files inside.</p>
+      <p style="font-size:.84rem;color:var(--text3);margin-bottom:1.2rem">
+        <strong style="color:var(--text1)">${esc(folder.name)}</strong> is encrypted.<br>Enter the password to access files inside.
+      </p>
       <form id="unlockFolderForm" onsubmit="return false;" style="text-align:left">
-        <div style="margin-bottom:1rem">
-          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem">Enter Folder Password</label>
+        <div style="margin-bottom:1.2rem">
+          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem;color:var(--text2)">Folder Password</label>
           <div style="position:relative">
-            <input type="password" id="unlockFolderPass" class="inp" placeholder="Password" required style="width:100%;padding-right:40px">
+            <input type="password" id="unlockFolderPass" class="inp" placeholder="Enter password" required style="width:100%;padding-right:40px">
             <button type="button" class="icon-btn xs" style="position:absolute;right:8px;top:50%;transform:translateY(-50%)" onclick="var p=document.getElementById('unlockFolderPass');p.type=p.type==='password'?'text':'password';this.innerHTML='<i class=\\'fas fa-'+(p.type==='password'?'eye':'eye-slash')+'\\'></i>';"><i class="fas fa-eye"></i></button>
           </div>
         </div>
-        <div style="display:flex;gap:.6rem;justify-content:flex-end;margin-top:1.4rem">
+        <div style="display:flex;gap:.6rem;justify-content:flex-end">
           <button type="button" class="btn-ghost sm" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
           <button type="submit" class="btn-primary sm" id="submitUnlockBtn" style="background:linear-gradient(135deg,var(--primary),#7928ca)"><i class="fas fa-lock-open"></i> Unlock & Open</button>
         </div>
@@ -418,19 +471,101 @@ function showRemoveFolderLockDialog(folderId, folderName) {
     return;
   }
 
-  var pass = prompt('Enter folder password to remove protection from "' + folderName + '":');
-  if (!pass) return;
-  toast('Removing lock…', 'info');
-  apiRemoveFolderLock(folderId, pass).then(async function(r) {
-    if (r && r.ok) {
+  var ov = document.createElement('div');
+  ov.className = 'modal-backdrop';
+  ov.innerHTML = `
+    <div class="modal" style="max-width:400px;text-align:center">
+      <div class="modal-hd" style="justify-content:center;position:relative">
+        <div class="vault-shield-badge gold-glow">
+          <i class="fas fa-unlock-keyhole"></i>
+        </div>
+        <button class="icon-btn xs" style="position:absolute;right:1rem;top:1rem" onclick="this.closest('.modal-backdrop').remove()"><i class="fas fa-times"></i></button>
+      </div>
+      <h3 style="margin-bottom:.3rem">Remove Protection</h3>
+      <p style="font-size:.84rem;color:var(--text3);margin-bottom:1.2rem">
+        Remove password protection from <strong style="color:var(--text1)">${esc(folderName)}</strong>.<br>Enter the current password to confirm:
+      </p>
+      <form id="removeLockForm" onsubmit="return false;" style="text-align:left">
+        <div style="margin-bottom:1.2rem">
+          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem;color:var(--text2)">Current Password</label>
+          <div style="position:relative">
+            <input type="password" id="removeLockPass" class="inp" placeholder="Current folder password" required style="width:100%;padding-right:40px">
+            <button type="button" class="icon-btn xs" style="position:absolute;right:8px;top:50%;transform:translateY(-50%)" onclick="var p=document.getElementById('removeLockPass');p.type=p.type==='password'?'text':'password';this.innerHTML='<i class=\\'fas fa-'+(p.type==='password'?'eye':'eye-slash')+'\\'></i>';"><i class="fas fa-eye"></i></button>
+          </div>
+        </div>
+        <div style="display:flex;gap:.6rem;justify-content:flex-end">
+          <button type="button" class="btn-ghost sm" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
+          <button type="submit" class="btn-primary sm" id="submitRemoveBtn" style="background:var(--danger)"><i class="fas fa-unlock"></i> Remove Password</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(ov);
+  var passInp = ov.querySelector('#removeLockPass');
+  if (passInp) passInp.focus();
+
+  ov.querySelector('#removeLockForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    var val = passInp.value;
+    if (!val) return;
+    var btn = ov.querySelector('#submitRemoveBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Removing…';
+    var res = await apiRemoveFolderLock(folderId, val);
+    if (res && res.ok) {
       toast('Folder protection removed!', 'success');
       S.unlockedFolders.delete(folderId);
+      ov.remove();
       S.db = await apiFetchDB();
       renderFilesPage(_driveId, _folderId);
     } else {
-      toast(r ? (r.error || 'Incorrect password') : 'Error', 'error');
+      toast(res ? (res.error || 'Incorrect password') : 'Network error', 'error');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-unlock"></i> Remove Password';
+      passInp.value = '';
+      passInp.focus();
     }
   });
+}
+
+function promptResumeUpload() {
+  var lastBatch = null;
+  try {
+    var raw = localStorage.getItem('td_active_batch');
+    if (raw) lastBatch = JSON.parse(raw);
+  } catch(e) {}
+
+  var batchName = lastBatch && lastBatch.folderName ? lastBatch.folderName : 'the folder / files';
+  var ov = document.createElement('div');
+  ov.className = 'modal-backdrop';
+  ov.innerHTML = `
+    <div class="modal" style="max-width:440px;text-align:center">
+      <div class="modal-hd" style="justify-content:center;position:relative">
+        <div class="vault-shield-badge" style="background:rgba(78,134,245,0.18);color:#4e86f5;box-shadow:0 0 20px rgba(78,134,245,0.25)">
+          <i class="fas fa-rotate-right"></i>
+        </div>
+        <button class="icon-btn xs" style="position:absolute;right:1rem;top:1rem" onclick="this.closest('.modal-backdrop').remove()"><i class="fas fa-times"></i></button>
+      </div>
+      <h3 style="margin-bottom:.35rem">Resume Upload</h3>
+      <p style="font-size:.84rem;color:var(--text3);margin-bottom:1.1rem">
+        When your browser closed, the mobile OS stopped the upload.<br>
+        Re-select <strong>${esc(batchName)}</strong> to resume.
+      </p>
+      <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:.85rem;text-align:left;font-size:.8rem;line-height:1.45;margin-bottom:1.2rem">
+        <div style="color:var(--success);font-weight:600;margin-bottom:.3rem;display:flex;align-items:center;gap:6px">
+          <i class="fas fa-bolt"></i> Smart Deduplication Active
+        </div>
+        <div style="color:var(--text2)">
+          All previously uploaded files will be <strong>skipped in 0 seconds</strong> with zero extra data used. Upload will seamlessly resume only unfinished items!
+        </div>
+      </div>
+      <div style="display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap">
+        <button class="btn-primary sm" onclick="this.closest('.modal-backdrop').remove();uploadFolder();"><i class="fas fa-folder-arrow-up"></i> Resume Folder</button>
+        <button class="btn-ghost sm" onclick="this.closest('.modal-backdrop').remove();document.getElementById('fileInput').click();"><i class="fas fa-file-arrow-up"></i> Resume Files</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(ov);
 }
 
 async function downloadFile(fileLocalId) {
