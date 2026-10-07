@@ -159,27 +159,11 @@
         <button class="btn-ghost sm hidden" id="syncBtn"><i class="fas fa-rotate"></i></button>
         <div class="tb-divider"></div>
         <div class="tm-btn-wrap">
-          <button class="icon-btn tm-network-btn" id="tmBtn" title="Transfers & Live Network Speed">
+          <button class="icon-btn tm-network-btn" id="tmBtn" onclick="toggleTMPanel()" title="Transfers & Live Network Speed">
             <i class="fas fa-arrow-right-arrow-left" id="tmIcon"></i>
             <span class="tm-badge" id="tmBadge"></span>
             <span class="tm-live-speed" id="tmLiveSpeed"></span>
           </button>
-          <div class="tm-backdrop hidden" id="tmBackdrop" onclick="toggleTMPanel(false)"></div>
-          <div class="tm-panel hidden" id="tmPanel">
-            <div class="tm-sheet-handle"></div>
-            <div class="tm-hd">
-              <div class="tm-title-wrap">
-                <i class="fas fa-arrow-right-arrow-left" style="color:var(--primary);margin-right:4px"></i>
-                <span>Transfers</span>
-                <span class="tm-hd-speed" id="tmHdSpeed"></span>
-              </div>
-              <div style="display:flex;gap:6px;align-items:center">
-                <button class="btn-ghost xs" id="tmClear" onclick="tmClear()" title="Clear finished">Clear</button>
-                <button class="icon-btn xs" onclick="toggleTMPanel(false)" title="Close transfers"><i class="fas fa-times"></i></button>
-              </div>
-            </div>
-            <div id="tmList" class="tm-list"></div>
-          </div>
         </div>
         <button class="icon-btn hidden" id="adminQuickBtn" onclick="navTo('settings')" title="Admin Panel">
           <i class="fas fa-shield-halved" style="color:var(--primary)"></i>
@@ -213,6 +197,24 @@
       <button class="mobile-fab-btn" id="mobileFabBtn" onclick="toggleMobileFab()" title="Upload & New">
         <i class="fas fa-plus"></i>
       </button>
+    </div>
+
+    <!-- Transfer Manager Backdrop & Panel (Full viewport scope, never cut off) -->
+    <div class="tm-backdrop hidden" id="tmBackdrop" onclick="toggleTMPanel(false)"></div>
+    <div class="tm-panel hidden" id="tmPanel">
+      <div class="tm-sheet-handle"></div>
+      <div class="tm-hd">
+        <div class="tm-title-wrap">
+          <i class="fas fa-arrow-right-arrow-left" style="color:var(--primary);margin-right:6px"></i>
+          <span>Transfers & Network</span>
+          <span class="tm-hd-speed" id="tmHdSpeed"></span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="btn-ghost xs" id="tmClear" onclick="tmClear()" title="Clear finished">Clear</button>
+          <button class="icon-btn xs tm-close-btn" onclick="toggleTMPanel(false)" title="Close transfers"><i class="fas fa-times"></i></button>
+        </div>
+      </div>
+      <div id="tmList" class="tm-list"></div>
     </div>
 
     <div class="up-bar hidden" id="upBar">

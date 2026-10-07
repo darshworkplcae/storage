@@ -1207,7 +1207,198 @@ function closePdfViewer() {
   }
 }
 
-// ─── In-App ZIP / RAR Archive Inspector ─────────────────
+// ─── In-App ZIP / RAR Archive Inspector (High-Speed HTTP Range Parser) ───
+async function fastReadZipHeaders(downloadUrl, fileSize, onStatus) {
+  if (onStatus) onStatus('Probing archive header…');
+
+  // If fileSize is missing or 0, probe via Range 0-0 or Content-Range
+  if (!fileSize || fileSize <= 0) {
+    try {
+      var probeResp = await fetch(downloadUrl, { headers: { 'Range': 'bytes=0-0' } });
+      var cr = probeResp.headers.get('Content-Range');
+      if (cr) {
+        var m = cr.match(/\/(\d+)$/);
+        if (m) fileSize = parseInt(m[1], 10);
+      }
+      if (!fileSize) {
+        var cl = probeResp.headers.get('Content-Length');
+        if (cl) fileSize = parseInt(cl, 10);
+      }
+    } catch(e) {}
+  }
+
+  if (!fileSize || fileSize <= 0) {
+    throw new Error('Cannot determine archive file size for streaming inspection');
+  }
+
+  // Step 1: Read the tail chunk (256 KB) of the archive
+  var tailChunk = Math.min(fileSize, 262144);
+  var tailStart = fileSize - tailChunk;
+  if (onStatus) onStatus('Locating Central Directory index…');
+
+  var tailResp = await fetch(downloadUrl, {
+    headers: { 'Range': 'bytes=' + tailStart + '-' + (fileSize - 1) }
+  });
+
+  if (!tailResp.ok && tailResp.status !== 206) {
+    throw new Error('Range request returned status ' + tailResp.status);
+  }
+
+  var tailBuf = await tailResp.arrayBuffer();
+  var tailBytes = new Uint8Array(tailBuf);
+  var tailDv = new DataView(tailBuf);
+
+  // Step 2: Locate End of Central Directory (EOCD signature: 0x06054b50 -> 0x50, 0x4b, 0x05, 0x06)
+  var eocdOffsetInTail = -1;
+  for (var i = tailBytes.length - 22; i >= 0; i--) {
+    if (tailBytes[i] === 0x50 && tailBytes[i + 1] === 0x4b && tailBytes[i + 2] === 0x05 && tailBytes[i + 3] === 0x06) {
+      eocdOffsetInTail = i;
+      break;
+    }
+  }
+
+  if (eocdOffsetInTail === -1) {
+    throw new Error('Could not locate ZIP End-of-Central-Directory record');
+  }
+
+  var totalEntries = tailDv.getUint16(eocdOffsetInTail + 10, true);
+  var cdSize = tailDv.getUint32(eocdOffsetInTail + 12, true);
+  var cdOffset = tailDv.getUint32(eocdOffsetInTail + 16, true);
+
+  // Step 3: Check for ZIP64 (standard in archives > 4GB or > 65535 files, like Google Takeout)
+  var isZip64 = false;
+  var zip64LocInTail = -1;
+  for (var j = Math.max(0, eocdOffsetInTail - 40); j < eocdOffsetInTail; j++) {
+    if (tailBytes[j] === 0x50 && tailBytes[j + 1] === 0x4b && tailBytes[j + 2] === 0x06 && tailBytes[j + 3] === 0x07) {
+      zip64LocInTail = j;
+      break;
+    }
+  }
+
+  if (zip64LocInTail !== -1 || cdOffset === 0xFFFFFFFF || cdSize === 0xFFFFFFFF || totalEntries === 0xFFFF) {
+    isZip64 = true;
+    var zip64EocdOffset = 0;
+    if (zip64LocInTail !== -1) {
+      zip64EocdOffset = Number(tailDv.getBigUint64(zip64LocInTail + 8, true));
+    }
+
+    var z64Buf = null;
+    var z64Pos = 0;
+    var z64OffsetInTail = zip64EocdOffset - tailStart;
+
+    if (z64OffsetInTail >= 0 && z64OffsetInTail + 56 <= tailBytes.length) {
+      z64Buf = tailBuf;
+      z64Pos = z64OffsetInTail;
+    } else {
+      var z64Resp = await fetch(downloadUrl, {
+        headers: { 'Range': 'bytes=' + zip64EocdOffset + '-' + (zip64EocdOffset + 127) }
+      });
+      z64Buf = await z64Resp.arrayBuffer();
+      z64Pos = 0;
+    }
+
+    var z64Dv = new DataView(z64Buf);
+    if (z64Dv.getUint32(z64Pos, true) === 0x06064b50) {
+      totalEntries = Number(z64Dv.getBigUint64(z64Pos + 32, true));
+      cdSize = Number(z64Dv.getBigUint64(z64Pos + 40, true));
+      cdOffset = Number(z64Dv.getBigUint64(z64Pos + 48, true));
+    }
+  }
+
+  // Step 4: Obtain the Central Directory bytes
+  var cdBytes = null;
+  var cdDv = null;
+  var cdStartInTail = cdOffset - tailStart;
+
+  if (cdStartInTail >= 0 && (cdStartInTail + cdSize) <= tailBytes.length) {
+    // Central directory was already loaded in our tail chunk! 0 extra network calls!
+    cdBytes = tailBytes.subarray(cdStartInTail, cdStartInTail + cdSize);
+    cdDv = new DataView(tailBuf, cdStartInTail, cdSize);
+  } else {
+    // Fetch only the Central Directory range (fast 1-request load)
+    if (onStatus) onStatus('Reading file directory index (' + fmt(cdSize) + ')…');
+    var cdResp = await fetch(downloadUrl, {
+      headers: { 'Range': 'bytes=' + cdOffset + '-' + (cdOffset + cdSize - 1) }
+    });
+    if (!cdResp.ok && cdResp.status !== 206) {
+      throw new Error('Failed to fetch Central Directory range (Status ' + cdResp.status + ')');
+    }
+    var fullCdBuf = await cdResp.arrayBuffer();
+    cdBytes = new Uint8Array(fullCdBuf);
+    cdDv = new DataView(fullCdBuf);
+  }
+
+  // Step 5: Parse Central Directory Headers
+  if (onStatus) onStatus('Parsing entries…');
+  var entries = [];
+  var p = 0;
+  var maxP = cdBytes.length;
+  var textDecoder = new TextDecoder('utf-8');
+
+  while (p + 46 <= maxP) {
+    var sig = cdDv.getUint32(p, true);
+    if (sig !== 0x02014b50) break;
+
+    var flags = cdDv.getUint16(p + 8, true);
+    var modTime = cdDv.getUint16(p + 12, true);
+    var modDate = cdDv.getUint16(p + 14, true);
+    var compSize = cdDv.getUint32(p + 20, true);
+    var uncompSize = cdDv.getUint32(p + 24, true);
+    var fnLen = cdDv.getUint16(p + 28, true);
+    var extraLen = cdDv.getUint16(p + 30, true);
+    var commLen = cdDv.getUint16(p + 32, true);
+    var extAttr = cdDv.getUint32(p + 38, true);
+
+    var isEncrypted = (flags & 1) !== 0;
+    var filename = textDecoder.decode(cdBytes.subarray(p + 46, p + 46 + fnLen));
+
+    // Handle ZIP64 extra field for large files (> 4GB)
+    if (uncompSize === 0xFFFFFFFF || compSize === 0xFFFFFFFF) {
+      var ep = p + 46 + fnLen;
+      var epEnd = ep + extraLen;
+      while (ep + 4 <= epEnd) {
+        var hId = cdDv.getUint16(ep, true);
+        var dSize = cdDv.getUint16(ep + 2, true);
+        if (hId === 0x0001) {
+          var o = ep + 4;
+          if (uncompSize === 0xFFFFFFFF && o + 8 <= epEnd) {
+            uncompSize = Number(cdDv.getBigUint64(o, true));
+            o += 8;
+          }
+          if (compSize === 0xFFFFFFFF && o + 8 <= epEnd) {
+            compSize = Number(cdDv.getBigUint64(o, true));
+            o += 8;
+          }
+          break;
+        }
+        ep += 4 + dSize;
+      }
+    }
+
+    var year = ((modDate >> 9) & 0x7F) + 1980;
+    var month = (modDate >> 5) & 0x0F;
+    var day = modDate & 0x1F;
+    var hour = (modTime >> 11) & 0x1F;
+    var min = (modTime >> 5) & 0x3F;
+    var dateFormatted = year + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0') + ' ' + String(hour).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+
+    var isDir = filename.endsWith('/') || (extAttr & 0x10) !== 0;
+
+    entries.push({
+      path: filename,
+      dir: isDir,
+      size: uncompSize,
+      compressedSize: compSize,
+      date: dateFormatted,
+      encrypted: isEncrypted
+    });
+
+    p += 46 + fnLen + extraLen + commLen;
+  }
+
+  return entries;
+}
+
 async function openArchiveViewer(fileId) {
   var f = (S.db && S.db.files || []).find(function (x) { return x.id === fileId; });
   if (!f) return;
@@ -1220,24 +1411,42 @@ async function openArchiveViewer(fileId) {
   ov.className = 'modal-backdrop';
   ov.id = 'archiveViewerModal';
   ov.innerHTML = `
-    <div class="modal" style="max-width:580px;max-height:85vh;display:flex;flex-direction:column;padding:1.25rem">
-      <div class="modal-hd" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
-        <div style="display:flex;align-items:center;gap:10px;min-width:0">
-          <i class="fas fa-file-zipper" style="color:#ff9f0a;font-size:1.4rem;flex-shrink:0"></i>
-          <div style="min-width:0">
-            <h3 style="font-size:1rem;margin:0;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</h3>
-            <span style="font-size:.74rem;color:var(--text3)">${fmt(f.size || 0)} · Archive Inspector</span>
+    <div class="modal" style="width:95vw;max-width:680px;max-height:88vh;display:flex;flex-direction:column;padding:1.2rem;background:rgba(14,16,28,0.98);border:1px solid rgba(255,255,255,0.14);border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,0.9),0 0 0 1px rgba(0,229,255,0.15)">
+      <div class="modal-hd" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;padding-bottom:.65rem;border-bottom:1px solid rgba(255,255,255,0.08)">
+        <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
+          <div style="width:40px;height:40px;border-radius:12px;background:rgba(255,159,10,0.15);border:1px solid rgba(255,159,10,0.3);display:flex;align-items:center;justify-content:center;color:#ff9f0a;font-size:1.3rem;flex-shrink:0">
+            <i class="fas fa-file-zipper"></i>
+          </div>
+          <div style="min-width:0;flex:1">
+            <h3 style="font-size:1rem;margin:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</h3>
+            <div style="font-size:.74rem;color:var(--text3);display:flex;align-items:center;gap:8px;margin-top:2px">
+              <span>${fmt(f.size || 0)}</span>
+              <span>·</span>
+              <span style="color:#00e5ff;font-weight:600"><i class="fas fa-bolt" style="font-size:.7rem"></i> Instant Inspector</span>
+            </div>
           </div>
         </div>
-        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-          <a href="${downloadUrl}" download="${esc(f.name)}" class="btn-ghost xs"><i class="fas fa-download"></i> Download</a>
-          <button class="icon-btn xs" onclick="this.closest('.modal-backdrop').remove()"><i class="fas fa-times"></i></button>
+        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;margin-left:12px">
+          <a href="${downloadUrl}" download="${esc(f.name)}" class="btn-primary xs" style="background:linear-gradient(135deg,var(--primary),#00e5ff)"><i class="fas fa-download"></i> Download</a>
+          <button class="icon-btn xs tm-close-btn" onclick="this.closest('.modal-backdrop').remove()" title="Close inspector"><i class="fas fa-times"></i></button>
         </div>
       </div>
-      <div id="archiveContentArea" style="flex:1;overflow-y:auto;min-height:220px;border-radius:10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.06);padding:0.75rem">
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:180px;gap:10px;color:var(--text3)">
-          <i class="fas fa-spinner fa-spin" style="font-size:1.6rem;color:var(--primary)"></i>
-          <span>Reading archive contents…</span>
+
+      <div id="archiveToolbar" style="display:none;margin-bottom:.75rem">
+        <div style="display:flex;gap:10px;align-items:center">
+          <div style="position:relative;flex:1">
+            <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text3);font-size:.8rem"></i>
+            <input type="text" id="archiveSearchInput" class="inp xs" placeholder="Search files inside archive…" style="width:100%;padding-left:32px;background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.1);border-radius:8px">
+          </div>
+          <span id="archiveItemsCount" style="font-size:.74rem;color:var(--text3);white-space:nowrap;flex-shrink:0"></span>
+        </div>
+      </div>
+
+      <div id="archiveContentArea" style="flex:1;overflow-y:auto;min-height:260px;border-radius:12px;background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.06);padding:0.75rem">
+        <div id="archiveLoadingState" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:220px;gap:12px;color:var(--text3)">
+          <div style="width:48px;height:48px;border-radius:50%;border:3px solid rgba(0,229,255,0.2);border-top-color:#00e5ff;animation:spin 0.8s linear infinite"></div>
+          <span id="archiveLoadingMsg" style="font-size:.85rem;color:var(--text2);font-weight:600">Reading archive contents…</span>
+          <span style="font-size:.72rem;color:var(--text3)">Using high-speed Range streaming (zero whole-file download)</span>
         </div>
       </div>
     </div>
@@ -1245,14 +1454,18 @@ async function openArchiveViewer(fileId) {
   document.body.appendChild(ov);
 
   var area = ov.querySelector('#archiveContentArea');
+  var loadingMsg = ov.querySelector('#archiveLoadingMsg');
+  var toolbar = ov.querySelector('#archiveToolbar');
+  var countEl = ov.querySelector('#archiveItemsCount');
+  var searchInp = ov.querySelector('#archiveSearchInput');
 
   if (isRar) {
     area.innerHTML = `
-      <div style="text-align:center;padding:2rem 1rem">
-        <div style="font-size:2.2rem;color:#ff9f0a;margin-bottom:.5rem"><i class="fas fa-box-archive"></i></div>
+      <div style="text-align:center;padding:2.5rem 1rem">
+        <div style="font-size:2.4rem;color:#ff9f0a;margin-bottom:.5rem"><i class="fas fa-box-archive"></i></div>
         <h4 style="margin-bottom:.4rem">RAR Archive Container</h4>
         <p style="font-size:.82rem;color:var(--text3);max-width:380px;margin:0 auto 1.2rem;line-height:1.45">
-          This is a compressed RAR archive (${fmt(f.size)}). RAR archives require proprietary unrar algorithms to decompress.
+          This is a compressed RAR archive (${fmt(f.size)}). RAR archives require proprietary unrar decompression algorithms.
         </p>
         <a href="${downloadUrl}" download="${esc(f.name)}" class="btn-primary sm"><i class="fas fa-download"></i> Download & Extract</a>
       </div>
@@ -1260,72 +1473,122 @@ async function openArchiveViewer(fileId) {
     return;
   }
 
-  if (typeof JSZip === 'undefined') {
-    try {
-      await loadScript('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js');
-    } catch (e) {
-      area.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--danger)">Failed to load ZIP inspector. <br><a href="${downloadUrl}" class="btn-ghost sm" style="margin-top:10px">Download Archive</a></div>`;
+  var allEntries = [];
+
+  function renderList(filter) {
+    var query = (filter || '').toLowerCase().trim();
+    var filtered = query ? allEntries.filter(function (e) { return e.path.toLowerCase().includes(query); }) : allEntries;
+
+    if (countEl) {
+      countEl.innerHTML = `<strong>${filtered.length}</strong> / ${allEntries.length} items`;
+    }
+
+    if (!filtered.length) {
+      area.innerHTML = `<div style="text-align:center;padding:2.5rem 1rem;color:var(--text3);font-size:.84rem"><i class="fas fa-folder-open" style="font-size:2rem;opacity:.3;margin-bottom:.5rem;display:block"></i>No matching files found inside archive</div>`;
       return;
     }
+
+    var hasEncrypted = filtered.some(function (e) { return e.encrypted; });
+
+    area.innerHTML = `
+      ${hasEncrypted ? `<div style="background:rgba(255,215,0,0.12);border:1px solid rgba(255,215,0,0.35);border-radius:10px;padding:.55rem .85rem;margin-bottom:.75rem;font-size:.78rem;color:#ffd700;display:flex;align-items:center;gap:8px"><i class="fas fa-shield-halved"></i> <span>This archive contains password-protected / encrypted items.</span></div>` : ''}
+      <div style="display:flex;flex-direction:column;gap:4px">
+        ${filtered.map(function (item) {
+          var isImage = /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(item.path);
+          var isPdf = /\.pdf$/i.test(item.path);
+          var isVid = /\.(mp4|mkv|mov|avi|webm)$/i.test(item.path);
+          var isAud = /\.(mp3|wav|ogg|flac|m4a)$/i.test(item.path);
+          var icon = item.dir ? 'fa-folder' : isPdf ? 'fa-file-pdf' : isImage ? 'fa-file-image' : isVid ? 'fa-file-video' : isAud ? 'fa-file-audio' : 'fa-file';
+          var col = item.dir ? '#ff9f0a' : isPdf ? '#ff453a' : isImage ? '#30d158' : isVid ? '#bf5af2' : isAud ? '#00e5ff' : 'var(--text2)';
+          return `<div style="display:flex;align-items:center;justify-content:space-between;padding:.45rem .65rem;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.04);font-size:.78rem;transition:background 0.15s">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1">
+              <i class="fas ${icon}" style="color:${col};font-size:.9rem;flex-shrink:0"></i>
+              <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text1)" title="${esc(item.path)}">${esc(item.path)}</span>
+              ${item.encrypted ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:.62rem;padding:1px 5px;border-radius:4px;background:rgba(255,215,0,0.18);color:#ffd700;border:1px solid rgba(255,215,0,0.35);font-weight:700;flex-shrink:0"><i class="fas fa-lock"></i> Encrypted</span>` : ''}
+            </div>
+            <div style="color:var(--text3);font-size:.72rem;margin-left:14px;flex-shrink:0;text-align:right">
+              ${item.dir ? '<span style="color:var(--text3);font-style:italic">Directory</span>' : fmt(item.size)}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    `;
   }
 
+  // Fast HTTP Range Reader execution:
   try {
-    var resp = await fetch(downloadUrl);
-    if (!resp.ok) throw new Error('Could not fetch file content');
-    var blob = await resp.blob();
-    var zip = await JSZip.loadAsync(blob);
-
-    var entries = [];
-    zip.forEach(function (relativePath, zipEntry) {
-      entries.push({
-        path: relativePath,
-        dir: zipEntry.dir,
-        date: zipEntry.date,
-        size: zipEntry._data ? (zipEntry._data.uncompressedSize || 0) : 0,
-        encrypted: !!(zipEntry._data && zipEntry._data.encrypted)
-      });
+    allEntries = await fastReadZipHeaders(downloadUrl, f.size, function (status) {
+      if (loadingMsg) loadingMsg.textContent = status;
     });
 
-    if (!entries.length) {
-      area.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--text3)">Empty archive (0 files)</div>`;
+    if (!allEntries || !allEntries.length) {
+      area.innerHTML = `<div style="text-align:center;padding:2.5rem;color:var(--text3)">Archive is empty (0 files).</div>`;
       return;
     }
 
-    entries.sort(function (a, b) {
+    allEntries.sort(function (a, b) {
       if (a.dir && !b.dir) return -1;
       if (!a.dir && b.dir) return 1;
       return a.path.localeCompare(b.path);
     });
 
-    var hasEncrypted = entries.some(function (e) { return e.encrypted; });
+    if (toolbar) toolbar.style.display = 'block';
+    renderList('');
+
+    if (searchInp) {
+      searchInp.addEventListener('input', function () {
+        renderList(this.value);
+      });
+      searchInp.focus();
+    }
+  } catch (err) {
+    console.warn('Fast Range ZIP reader failed, attempting fallback…', err);
+
+    // Fallback: If file is smaller than 35 MB, fallback to JSZip
+    if ((f.size || 0) < 36700160) {
+      try {
+        if (loadingMsg) loadingMsg.textContent = 'Loading fallback ZIP parser…';
+        if (typeof JSZip === 'undefined') {
+          await loadScript('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js');
+        }
+        var resp = await fetch(downloadUrl);
+        if (!resp.ok) throw new Error('Could not fetch file content');
+        var blob = await resp.blob();
+        var zip = await JSZip.loadAsync(blob);
+
+        allEntries = [];
+        zip.forEach(function (relativePath, zipEntry) {
+          allEntries.push({
+            path: relativePath,
+            dir: zipEntry.dir,
+            date: zipEntry.date ? zipEntry.date.toISOString().replace('T', ' ').slice(0, 16) : '—',
+            size: zipEntry._data ? (zipEntry._data.uncompressedSize || 0) : 0,
+            encrypted: !!(zipEntry._data && zipEntry._data.encrypted)
+          });
+        });
+
+        allEntries.sort(function (a, b) {
+          if (a.dir && !b.dir) return -1;
+          if (!a.dir && b.dir) return 1;
+          return a.path.localeCompare(b.path);
+        });
+
+        if (toolbar) toolbar.style.display = 'block';
+        renderList('');
+        return;
+      } catch (fallbackErr) {
+        console.error('Fallback also failed:', fallbackErr);
+      }
+    }
 
     area.innerHTML = `
-      ${hasEncrypted ? `<div style="background:rgba(255,159,10,0.12);border:1px solid rgba(255,159,10,0.3);border-radius:8px;padding:.5rem .75rem;margin-bottom:.75rem;font-size:.78rem;color:#ff9f0a;display:flex;align-items:center;gap:8px"><i class="fas fa-lock"></i> <span>This archive contains password-protected / encrypted files.</span></div>` : ''}
-      <div style="font-size:.76rem;color:var(--text3);margin-bottom:.5rem;padding:0 .25rem">${entries.length} items inside:</div>
-      <div style="display:flex;flex-direction:column;gap:3px">
-        ${entries.map(function (item) {
-      var icon = item.dir ? 'fa-folder' : (item.path.endsWith('.pdf') ? 'fa-file-pdf' : /\.(jpg|png|gif|webp)$/i.test(item.path) ? 'fa-file-image' : 'fa-file');
-      var col = item.dir ? '#ff9f0a' : item.path.endsWith('.pdf') ? '#ff453a' : 'var(--text2)';
-      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:.4rem .6rem;border-radius:6px;background:rgba(255,255,255,0.03);font-size:.78rem">
-            <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">
-              <i class="fas ${icon}" style="color:${col};flex-shrink:0"></i>
-              <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(item.path)}">${esc(item.path)}</span>
-              ${item.encrypted ? `<i class="fas fa-lock" style="color:#ffd700;font-size:.7rem" title="Encrypted file"></i>` : ''}
-            </div>
-            <div style="color:var(--text3);font-size:.72rem;margin-left:12px;flex-shrink:0">
-              ${item.dir ? 'Directory' : fmt(item.size)}
-            </div>
-          </div>`;
-    }).join('')}
-      </div>
-    `;
-  } catch (err) {
-    area.innerHTML = `
-      <div style="text-align:center;padding:2rem 1rem">
-        <i class="fas fa-triangle-exclamation" style="color:var(--warning);font-size:2rem;margin-bottom:.6rem"></i>
-        <h4>Password Protected or Unsupported Archive</h4>
-        <p style="font-size:.82rem;color:var(--text3);margin-bottom:1rem">${esc(err.message || 'Cannot read archive contents without password.')}</p>
-        <a href="${downloadUrl}" download="${esc(f.name)}" class="btn-primary sm"><i class="fas fa-download"></i> Download Archive</a>
+      <div style="text-align:center;padding:2.5rem 1rem">
+        <i class="fas fa-triangle-exclamation" style="color:var(--warning);font-size:2.2rem;margin-bottom:.8rem"></i>
+        <h4 style="margin-bottom:.4rem">Cannot Inspect Archive Online</h4>
+        <p style="font-size:.82rem;color:var(--text3);max-width:380px;margin:0 auto 1.2rem;line-height:1.45">
+          ${esc(err.message || 'Direct byte-range streaming is not supported or file format is corrupted.')}
+        </p>
+        <a href="${downloadUrl}" download="${esc(f.name)}" class="btn-primary sm"><i class="fas fa-download"></i> Download Archive (${fmt(f.size)})</a>
       </div>
     `;
   }

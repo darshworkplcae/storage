@@ -7,7 +7,7 @@ function gUT(e){return e.UPSTASH_TOKEN||UPS_TOK;}
 function gEK(e){return e.ENCRYPTION_KEY||DEF_ENC;}
 function gGC(e){return e.GOOGLE_CLIENT_ID||'';}
 function gGS(e){return e.GOOGLE_CLIENT_SECRET||'';}
-const COR={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST,DELETE,PUT,OPTIONS','Access-Control-Allow-Headers':'Content-Type,Authorization'};
+const COR={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST,DELETE,PUT,OPTIONS','Access-Control-Allow-Headers':'Content-Type,Authorization,Range','Access-Control-Expose-Headers':'Content-Range,Content-Length,Accept-Ranges'};
 function J(d,s){return new Response(JSON.stringify(d),{status:s||200,headers:{...COR,'Content-Type':'application/json'}});}
 async function uGet(env,key){const r=await fetch(`${gUU(env)}/get/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${gUT(env)}`}});const d=await r.json();if(d.result===null||d.result===undefined)return null;if(typeof d.result!=='string')return d.result;try{return JSON.parse(d.result);}catch(e){return d.result;}}
 async function uSet(env,key,val){await fetch(`${gUU(env)}/set/${encodeURIComponent(key)}`,{method:'POST',headers:{Authorization:`Bearer ${gUT(env)}`,'Content-Type':'application/json'},body:JSON.stringify(val)});}
@@ -243,6 +243,8 @@ async function hDL(req,env,gId){
   const fileName=encodeURIComponent(fileObj?fileObj.name:'download');
   const respHeaders=new Headers();
   respHeaders.set('Access-Control-Allow-Origin','*');
+  respHeaders.set('Access-Control-Allow-Headers','Content-Type,Authorization,Range');
+  respHeaders.set('Access-Control-Expose-Headers','Content-Range,Content-Length,Accept-Ranges');
   respHeaders.set('Content-Type',gResp.headers.get('Content-Type')||'application/octet-stream');
   if(gResp.headers.get('Content-Length')) respHeaders.set('Content-Length',gResp.headers.get('Content-Length'));
   if(gResp.headers.get('Content-Range')) respHeaders.set('Content-Range',gResp.headers.get('Content-Range'));
