@@ -64,6 +64,18 @@ function toggleUploadPause() {
   }
 }
 
+function findExistingDriveFile(name, size, driveId, folderId) {
+  if (!S.db || !Array.isArray(S.db.files)) return null;
+  var targetFolder = folderId || null;
+  return S.db.files.find(function (f) {
+    return f.driveId === driveId &&
+           (f.folderId || null) === targetFolder &&
+           f.name === name &&
+           f.size === size &&
+           !f.trashed;
+  });
+}
+
 async function uploadFiles(fileList, targetFolderId) {
   var files = Array.from(fileList);
   var isOpenTarget = (_driveId && S.db && S.db.openDriveId && _driveId === S.db.openDriveId);
@@ -83,6 +95,12 @@ async function uploadFiles(fileList, targetFolderId) {
     }
   }
 
+  // Refresh DB to get absolute ground truth on what is currently in Google Drive
+  try {
+    S.db = await apiFetchDB();
+    if (S.db && S.db.files) tmSyncWithServer(S.db.files);
+  } catch(e) {}
+
   // If guest uploading to open drive, only allow photos and videos:
   if (!isAuth && isOpenTarget) {
     var validFiles = files.filter(function (file) {
@@ -98,8 +116,55 @@ async function uploadFiles(fileList, targetFolderId) {
 
   if (files.length === 0) return;
 
-  // Pre-queue all files in Transfers Manager upfront in batch
-  var fileItems = files.map(function (f) {
+  var targetDrive = _driveId;
+  var destFolder = targetFolderId || _folderId || null;
+
+  try {
+    localStorage.setItem('td_active_batch', JSON.stringify({
+      driveId: targetDrive,
+      folderId: destFolder,
+      folderName: files.length === 1 ? files[0].name : files.length + ' files',
+      total: files.length,
+      time: Date.now()
+    }));
+  } catch (e) { }
+
+  // Smart Deduplication Check:
+  var toUpload = [];
+  var skippedCount = 0;
+
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    var existing = findExistingDriveFile(f.name, f.size, targetDrive, destFolder);
+    if (existing) {
+      skippedCount++;
+      // Mark or add in Transfer Manager as done (100%)
+      var matchTm = tmLoad().find(function(x){ return x.name === f.name && x.size === f.size; });
+      if (matchTm) {
+        tmDone(matchTm.id, true);
+      } else {
+        var dummyId = uid();
+        tmAdd(dummyId, f.name, f.size);
+        tmDone(dummyId, true);
+      }
+    } else {
+      toUpload.push(f);
+    }
+  }
+
+  if (skippedCount > 0) {
+    toast('Smart Deduplication: ' + skippedCount + ' already uploaded (skipped). ' + toUpload.length + ' remaining.', 'info', 6000);
+  }
+
+  if (toUpload.length === 0) {
+    toast('All ' + files.length + ' files are already uploaded in this folder!', 'success');
+    try { localStorage.removeItem('td_active_batch'); } catch(e){}
+    renderTM();
+    return;
+  }
+
+  // Pre-queue only the files that genuinely need uploading
+  var fileItems = toUpload.map(function (f) {
     return { file: f, tId: uid(), name: f.name, size: f.size };
   });
   tmAddBatchQueued(fileItems.map(function (x) { return { id: x.tId, name: x.name, size: x.size }; }));
@@ -107,14 +172,26 @@ async function uploadFiles(fileList, targetFolderId) {
 
   window._isUploading = true;
   await requestWakeLock();
+  var uploadedCount = 0;
+
   try {
-    for (var i = 0; i < fileItems.length; i++) {
+    for (var j = 0; j < fileItems.length; j++) {
       if (_cancelSignal.cancelled) break;
-      await uploadOne(fileItems[i].file, targetFolderId || _folderId, fileItems[i].tId);
+      await uploadOne(fileItems[j].file, destFolder, fileItems[j].tId);
+      uploadedCount++;
+    }
+    if (uploadedCount === fileItems.length) {
+      try { localStorage.removeItem('td_active_batch'); } catch (e) { }
     }
   } finally {
     window._isUploading = false;
     releaseWakeLock();
+    try {
+      S.db = await apiFetchDB();
+      if (S.db && S.db.files) tmSyncWithServer(S.db.files);
+    } catch(e) {}
+    renderSidebarStorage();
+    renderFilesPage(_driveId, _folderId);
   }
 }
 
@@ -171,6 +248,12 @@ async function processFolderFiles(files) {
 
   if (!files.length) return;
 
+  // Refresh DB to get absolute ground truth from Google Drive
+  try {
+    S.db = await apiFetchDB();
+    if (S.db && S.db.files) tmSyncWithServer(S.db.files);
+  } catch(e) {}
+
   if (!isAuth && isOpenTarget) {
     files = files.filter(function (file) {
       return (file.type && (file.type.startsWith('image/') || file.type.startsWith('video/'))) ||
@@ -184,14 +267,20 @@ async function processFolderFiles(files) {
 
   var rootFolder = files[0].webkitRelativePath ? files[0].webkitRelativePath.split('/')[0] : 'Folder';
   try {
-    localStorage.setItem('td_active_batch', JSON.stringify({ folderName: rootFolder, total: files.length, time: Date.now() }));
+    localStorage.setItem('td_active_batch', JSON.stringify({
+      driveId: _driveId,
+      folderId: _folderId || null,
+      folderName: rootFolder,
+      total: files.length,
+      time: Date.now()
+    }));
   } catch (e) { }
 
   window._isUploading = true;
   await requestWakeLock();
   toast('Preparing folder "' + rootFolder + '" (' + files.length + ' files)…', 'info');
 
-  // Pre-queue all folder files upfront in batch so user sees ALL items in Transfers!
+  // Pre-queue all folder files upfront in batch
   var fileItems = files.map(function (f) {
     return { file: f, tId: uid(), name: f.name, size: f.size };
   });
@@ -220,18 +309,19 @@ async function processFolderFiles(files) {
           pathAcc += (pathAcc ? '/' : '') + folderName;
           if (!folderMap[pathAcc]) {
             // Find existing or create new folder
-            var existing = (S.db && S.db.folders || []).find(function (f) {
+            var existingFolder = (S.db && S.db.folders || []).find(function (f) {
               return f.driveId === _driveId && f.parentId === parentId && f.name.toLowerCase() === folderName.toLowerCase() && !f.trashed;
             });
-            if (existing) {
-              folderMap[pathAcc] = existing.id;
-              parentId = existing.id;
+            if (existingFolder) {
+              folderMap[pathAcc] = existingFolder.id;
+              parentId = existingFolder.id;
             } else {
               var created = await apiCreateFolder({ driveId: _driveId, parentFolderId: parentId, name: folderName });
               if (created && created.folderId) {
                 folderMap[pathAcc] = created.folderId;
                 parentId = created.folderId;
                 S.db = await apiFetchDB();
+                if (S.db && S.db.files) tmSyncWithServer(S.db.files);
               }
             }
           } else {
@@ -241,9 +331,7 @@ async function processFolderFiles(files) {
       }
 
       // Smart Resume & Deduplication:
-      var alreadyUploaded = (S.db && S.db.files || []).find(function (f) {
-        return f.driveId === _driveId && f.folderId === (parentId || null) && f.name === file.name && f.size === file.size && !f.trashed;
-      });
+      var alreadyUploaded = findExistingDriveFile(file.name, file.size, _driveId, parentId);
 
       if (alreadyUploaded) {
         skippedCount++;
@@ -266,7 +354,10 @@ async function processFolderFiles(files) {
     window._isUploading = false;
     releaseWakeLock();
     try { localStorage.removeItem('td_active_batch'); } catch (e) { }
-    S.db = await apiFetchDB();
+    try {
+      S.db = await apiFetchDB();
+      if (S.db && S.db.files) tmSyncWithServer(S.db.files);
+    } catch(e) {}
     renderSidebarStorage();
     renderFilesPage(_driveId, _folderId);
   }
@@ -323,8 +414,11 @@ async function uploadOne(file, targetFolderId, existingTid) {
     tmDone(tId, true);
     toast(file.name + ' uploaded!', 'success');
 
-    // Refresh
-    S.db = await apiFetchDB();
+    // Refresh DB
+    try {
+      S.db = await apiFetchDB();
+      if (S.db && S.db.files) tmSyncWithServer(S.db.files);
+    } catch(e) {}
     renderSidebarStorage();
     renderFilesPage(_driveId, _folderId);
 
@@ -771,7 +865,15 @@ function promptResumeUpload() {
     if (raw) lastBatch = JSON.parse(raw);
   } catch (e) { }
 
-  var batchName = lastBatch && lastBatch.folderName ? lastBatch.folderName : 'the folder / files';
+  if (lastBatch && lastBatch.driveId) {
+    _driveId = lastBatch.driveId;
+    if (lastBatch.folderId) _folderId = lastBatch.folderId;
+  }
+
+  var interrupted = tmLoad().filter(function(x){ return x.status === 'interrupted'; });
+  var interruptedCount = interrupted.length;
+  var batchName = lastBatch && lastBatch.folderName ? lastBatch.folderName : 'folder / files';
+
   var ov = document.createElement('div');
   ov.className = 'modal-backdrop';
   ov.innerHTML = `
@@ -784,20 +886,20 @@ function promptResumeUpload() {
       </div>
       <h3 style="margin-bottom:.35rem">Resume Upload</h3>
       <p style="font-size:.84rem;color:var(--text3);margin-bottom:1.1rem">
-        When your browser closed, the mobile OS stopped the upload.<br>
-        Re-select <strong>${esc(batchName)}</strong> to resume.
+        Upload stopped when the browser was closed.<br>
+        Re-select <strong>${esc(batchName)}</strong> to continue (${interruptedCount > 0 ? interruptedCount + ' remaining' : 'Smart Resume'}).
       </p>
       <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:.85rem;text-align:left;font-size:.8rem;line-height:1.45;margin-bottom:1.2rem">
         <div style="color:var(--success);font-weight:600;margin-bottom:.3rem;display:flex;align-items:center;gap:6px">
           <i class="fas fa-bolt"></i> Smart Deduplication Active
         </div>
         <div style="color:var(--text2)">
-          All previously uploaded files will be <strong>skipped in 0 seconds</strong> with zero extra data used. Upload will seamlessly resume only unfinished items!
+          All completed files will be <strong>skipped in 0 seconds</strong> with zero extra data used. Only unfinished items will resume!
         </div>
       </div>
       <div style="display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap">
         <button class="btn-primary sm" onclick="this.closest('.modal-backdrop').remove();uploadFolder();"><i class="fas fa-folder-arrow-up"></i> Resume Folder</button>
-        <button class="btn-ghost sm" onclick="this.closest('.modal-backdrop').remove();document.getElementById('fileInput').click();"><i class="fas fa-file-arrow-up"></i> Resume Files</button>
+        <button class="btn-ghost sm" onclick="this.closest('.modal-backdrop').remove();var fi=document.getElementById('fileInput');if(fi)fi.click();"><i class="fas fa-file-arrow-up"></i> Resume Files</button>
       </div>
     </div>
   `;

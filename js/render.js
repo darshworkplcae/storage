@@ -343,7 +343,7 @@ function driveCard(d){
   const canRename = isAdmin || (S.ses.role === 'user' && isDriveAllowed(d.id));
   return `<div class="fg-card drive-card-item" onclick="navTo('files','${esc(d.id)}')" title="${esc(d.email)}">
     <div class="fg-icon xl" style="display:flex;align-items:center;justify-content:center;margin-top:2px">
-      <img src="favicon.svg" alt="TeleDrive" style="width:48px;height:48px;display:block;filter:drop-shadow(0 0 12px ${esc(d.color||'#00e5ff')}66)">
+      <img src="favicon.svg?v=obito" alt="TeleDrive" style="width:52px;height:52px;display:block;filter:drop-shadow(0 0 14px ${esc(d.color||'#ff6a00')}66)">
     </div>
     <div class="fg-name" style="font-weight:600;font-size:.95rem">${esc(d.name)}</div>
     ${isAuth ? `
@@ -743,7 +743,25 @@ function toggleTMPanel(open) {
 
 function renderTM(){
   const badge=$('tmBadge'), list=$('tmList'), speedEl=$('tmLiveSpeed'), hdSpeed=$('tmHdSpeed');
-  const transfers=tmLoad();
+  const rawTransfers=tmLoad();
+
+  // Deduplicate transfer items by name + size (keep latest or done item)
+  const transfers = [];
+  const seenMap = new Map();
+  rawTransfers.forEach(t => {
+    const key = (t.name || '') + '::' + (t.size || 0);
+    if (!seenMap.has(key)) {
+      seenMap.set(key, transfers.length);
+      transfers.push(t);
+    } else {
+      const idx = seenMap.get(key);
+      const existing = transfers[idx];
+      if (t.status === 'done' || (t.status === 'uploading' && existing.status !== 'done')) {
+        transfers[idx] = t;
+      }
+    }
+  });
+
   const active=transfers.filter(t=>t.status==='uploading'||t.status==='queued');
   const uploading=transfers.filter(t=>t.status==='uploading');
   const totalSpeed=uploading.reduce((sum, t) => sum + (t.speed || 0), 0);

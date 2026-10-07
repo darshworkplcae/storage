@@ -99,6 +99,7 @@ function syncLiveQuota() {
 
 async function onLoginSuccess() {
   S.db = await apiFetchDB();
+  if(S.db && S.db.files) tmSyncWithServer(S.db.files);
   updateSidebarProfile();
   updateNavVisibility();
   renderSidebarStorage();
@@ -294,6 +295,7 @@ async function init() {
     var db = await apiFetchDB().catch(function(){return null;});
     if(db) {
       S.db = db;
+      if (S.db && S.db.files) tmSyncWithServer(S.db.files);
       updateSidebarProfile();
       updateNavVisibility();
       renderSidebarStorage();
@@ -311,6 +313,7 @@ async function init() {
 
   // Not logged in: show Open Drive view (friends photo/video drive) with Sign In button on top!
   S.db = await apiFetchDB().catch(function(){return null;});
+  if(S.db && S.db.files) tmSyncWithServer(S.db.files);
   showAppShell();
   updateSidebarProfile();
   updateNavVisibility();
@@ -323,13 +326,13 @@ async function init() {
   // Check if an upload was interrupted before reload
   try {
     var interruptedBatch = localStorage.getItem('td_active_batch');
-    if (interruptedBatch) {
-      var batchInfo = JSON.parse(interruptedBatch);
-      if (batchInfo && batchInfo.folderName) {
-        setTimeout(function() {
-          toast('Previous upload of folder "' + batchInfo.folderName + '" was interrupted. Selecting it again will automatically resume and skip already uploaded files!', 'info', 8000);
-        }, 1500);
-      }
+    var interruptedItems = tmLoad().filter(function(x){ return x.status === 'interrupted'; });
+    if (interruptedItems.length > 0) {
+      var batchInfo = interruptedBatch ? JSON.parse(interruptedBatch) : null;
+      var batchName = (batchInfo && batchInfo.folderName) ? batchInfo.folderName : 'upload';
+      setTimeout(function() {
+        toast('Previous ' + batchName + ' had ' + interruptedItems.length + ' interrupted item(s). Click "Resume" in Transfers to continue!', 'warning', 7000);
+      }, 1500);
     }
   } catch(e){}
 }
