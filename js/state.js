@@ -10,7 +10,7 @@ var S = {
   _xhr: null,
   selectedFiles: new Set(),
   selectedTrash: new Set(),
-  unlockedFolders: new Set(),
+  unlockedFolders: new Map(),
   mobileSidebarOpen: false,
   trashFilter: 'all'
 };

@@ -19,7 +19,7 @@ function navTo(page, driveId, folderId) {
   }
 
   // Auto-relock any 'once' unlocked folders if user navigated away from them
-  if (S.unlockedFolders) {
+  if (S.unlockedFolders && (S.unlockedFolders instanceof Map)) {
     try {
       Array.from(S.unlockedFolders.entries()).forEach(function(entry) {
         var fId = entry[0], exp = entry[1];

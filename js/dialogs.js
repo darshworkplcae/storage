@@ -102,7 +102,7 @@ async function uploadFiles(fileList, targetFolderId) {
   var fileItems = files.map(function (f) {
     return { file: f, tId: uid(), name: f.name, size: f.size };
   });
-  tmAddBatchQueued(fileItems.map(function(x){ return { id: x.tId, name: x.name, size: x.size }; }));
+  tmAddBatchQueued(fileItems.map(function (x) { return { id: x.tId, name: x.name, size: x.size }; }));
   renderTM();
 
   window._isUploading = true;
@@ -139,7 +139,7 @@ async function uploadFolder() {
 
   var folInp = $('folderInput');
   if (folInp) {
-    folInp.onchange = function() {
+    folInp.onchange = function () {
       if (folInp.files.length) {
         processFolderFiles(Array.from(folInp.files));
         folInp.value = '';
@@ -195,7 +195,7 @@ async function processFolderFiles(files) {
   var fileItems = files.map(function (f) {
     return { file: f, tId: uid(), name: f.name, size: f.size };
   });
-  tmAddBatchQueued(fileItems.map(function(x){ return { id: x.tId, name: x.name, size: x.size }; }));
+  tmAddBatchQueued(fileItems.map(function (x) { return { id: x.tId, name: x.name, size: x.size }; }));
   renderTM();
 
   // Build directory tree in Google Drive
@@ -435,7 +435,7 @@ function showUnlockFolderDialog(folder, onUnlocked) {
           <i class="fas fa-shield-halved"></i> Security Rule: Max 5 Attempts
         </div>
         <div style="color:var(--text2);margin-top:2px">
-          If 5 failed attempts are reached, this folder will be <strong>permanently destroyed</strong>.
+          If 5 failed attempts are reached, this folder will be <strong>permanently destroyed Cant Even Tobi Can Help So Remember Pass cant Also Reset</strong>.
         </div>
         <div id="unlockAttemptsCount" style="margin-top:4px;font-weight:700;color:#ff9f0a">
           Attempts remaining: ${remainingStarts} of 5
@@ -476,40 +476,47 @@ function showUnlockFolderDialog(folder, onUnlocked) {
     var btn = ov.querySelector('#submitUnlockBtn');
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking…';
-    var res = await apiUnlockFolder(folder.id, val);
-    if (res && res.ok) {
-      toast('Folder unlocked successfully!', 'success');
-      var keep5 = ov.querySelector('#keepUnlocked5Min') && ov.querySelector('#keepUnlocked5Min').checked;
-      if (!S.unlockedFolders) S.unlockedFolders = new Map();
-      if (keep5) {
-        var exp = Date.now() + 5 * 60 * 1000;
-        S.unlockedFolders.set(folder.id, exp);
-        try { sessionStorage.setItem('td_unlocked_' + folder.id, exp); } catch(e){}
-        toast('Folder unlocked for 5 minutes', 'info');
-      } else {
-        S.unlockedFolders.set(folder.id, 'once');
-        try { sessionStorage.removeItem('td_unlocked_' + folder.id); } catch(e){}
-      }
-      folder.failedAttempts = 0;
-      ov.remove();
-      if (typeof onUnlocked === 'function') onUnlocked();
-      else navTo('files', _driveId, folder.id);
-    } else {
-      if (res && res.destroyed) {
-        toast('SECURITY BREACH: Folder was destroyed after 5 failed attempts!', 'error');
+    try {
+      var res = await apiUnlockFolder(folder.id, val);
+      if (res && res.ok) {
+        toast('Folder unlocked successfully!', 'success');
+        var keep5 = ov.querySelector('#keepUnlocked5Min') && ov.querySelector('#keepUnlocked5Min').checked;
+        if (!S.unlockedFolders || !(S.unlockedFolders instanceof Map)) S.unlockedFolders = new Map();
+        if (keep5) {
+          var exp = Date.now() + 5 * 60 * 1000;
+          S.unlockedFolders.set(folder.id, exp);
+          try { sessionStorage.setItem('td_unlocked_' + folder.id, exp); } catch (e) { }
+          toast('Folder unlocked for 5 minutes', 'info');
+        } else {
+          S.unlockedFolders.set(folder.id, 'once');
+          try { sessionStorage.removeItem('td_unlocked_' + folder.id); } catch (e) { }
+        }
+        folder.failedAttempts = 0;
         ov.remove();
-        S.db = await apiFetchDB();
-        navTo('files', _driveId, null);
-        return;
+        if (typeof onUnlocked === 'function') onUnlocked();
+        else navTo('files', _driveId, folder.id);
+      } else {
+        if (res && res.destroyed) {
+          toast('SECURITY BREACH: Folder was destroyed after 5 failed attempts!', 'error');
+          ov.remove();
+          S.db = await apiFetchDB();
+          navTo('files', _driveId, null);
+          return;
+        }
+        var rem = (res && typeof res.remainingAttempts === 'number') ? res.remainingAttempts : (5 - (folder.failedAttempts || 0) - 1);
+        var cntEl = ov.querySelector('#unlockAttemptsCount');
+        if (cntEl) cntEl.textContent = 'Attempts remaining: ' + Math.max(0, rem) + ' of 5';
+        toast(res ? (res.error || 'Incorrect password') : 'Network error', 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-lock-open"></i> Unlock & Open';
+        passInp.value = '';
+        passInp.focus();
       }
-      var rem = (res && typeof res.remainingAttempts === 'number') ? res.remainingAttempts : (5 - (folder.failedAttempts || 0) - 1);
-      var cntEl = ov.querySelector('#unlockAttemptsCount');
-      if (cntEl) cntEl.textContent = 'Attempts remaining: ' + Math.max(0, rem) + ' of 5';
-      toast(res ? (res.error || 'Incorrect password') : 'Network error', 'error');
+    } catch(err) {
+      console.error('Unlock error:', err);
+      toast('Failed to unlock: ' + (err.message || err), 'error');
       btn.disabled = false;
       btn.innerHTML = '<i class="fas fa-lock-open"></i> Unlock & Open';
-      passInp.value = '';
-      passInp.focus();
     }
   });
 }
@@ -758,7 +765,7 @@ async function adminPermanentDelete(fileId, name) {
 
 // ─── In-App PDF Viewer ──────────────────────────────────
 function openPdfViewer(fileId) {
-  var f = (S.db && S.db.files || []).find(function(x){ return x.id === fileId; });
+  var f = (S.db && S.db.files || []).find(function (x) { return x.id === fileId; });
   if (!f) return;
   var driveId = f.driveId || _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : '');
   var previewUrl = getFileDownloadUrl(f.googleFileId, driveId, true);
@@ -790,7 +797,7 @@ function openPdfViewer(fileId) {
   `;
   document.body.appendChild(ov);
 
-  var escHandler = function(e) {
+  var escHandler = function (e) {
     if (e.key === 'Escape') { closePdfViewer(); }
   };
   window.addEventListener('keydown', escHandler);
@@ -807,7 +814,7 @@ function closePdfViewer() {
 
 // ─── In-App ZIP / RAR Archive Inspector ─────────────────
 async function openArchiveViewer(fileId) {
-  var f = (S.db && S.db.files || []).find(function(x){ return x.id === fileId; });
+  var f = (S.db && S.db.files || []).find(function (x) { return x.id === fileId; });
   if (!f) return;
   var driveId = f.driveId || _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : '');
   var downloadUrl = getFileDownloadUrl(f.googleFileId, driveId, false);
@@ -861,7 +868,7 @@ async function openArchiveViewer(fileId) {
   if (typeof JSZip === 'undefined') {
     try {
       await loadScript('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js');
-    } catch(e) {
+    } catch (e) {
       area.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--danger)">Failed to load ZIP inspector. <br><a href="${downloadUrl}" class="btn-ghost sm" style="margin-top:10px">Download Archive</a></div>`;
       return;
     }
@@ -874,7 +881,7 @@ async function openArchiveViewer(fileId) {
     var zip = await JSZip.loadAsync(blob);
 
     var entries = [];
-    zip.forEach(function(relativePath, zipEntry) {
+    zip.forEach(function (relativePath, zipEntry) {
       entries.push({
         path: relativePath,
         dir: zipEntry.dir,
@@ -889,22 +896,22 @@ async function openArchiveViewer(fileId) {
       return;
     }
 
-    entries.sort(function(a, b) {
+    entries.sort(function (a, b) {
       if (a.dir && !b.dir) return -1;
       if (!a.dir && b.dir) return 1;
       return a.path.localeCompare(b.path);
     });
 
-    var hasEncrypted = entries.some(function(e){ return e.encrypted; });
+    var hasEncrypted = entries.some(function (e) { return e.encrypted; });
 
     area.innerHTML = `
       ${hasEncrypted ? `<div style="background:rgba(255,159,10,0.12);border:1px solid rgba(255,159,10,0.3);border-radius:8px;padding:.5rem .75rem;margin-bottom:.75rem;font-size:.78rem;color:#ff9f0a;display:flex;align-items:center;gap:8px"><i class="fas fa-lock"></i> <span>This archive contains password-protected / encrypted files.</span></div>` : ''}
       <div style="font-size:.76rem;color:var(--text3);margin-bottom:.5rem;padding:0 .25rem">${entries.length} items inside:</div>
       <div style="display:flex;flex-direction:column;gap:3px">
-        ${entries.map(function(item) {
-          var icon = item.dir ? 'fa-folder' : (item.path.endsWith('.pdf') ? 'fa-file-pdf' : /\.(jpg|png|gif|webp)$/i.test(item.path) ? 'fa-file-image' : 'fa-file');
-          var col = item.dir ? '#ff9f0a' : item.path.endsWith('.pdf') ? '#ff453a' : 'var(--text2)';
-          return `<div style="display:flex;align-items:center;justify-content:space-between;padding:.4rem .6rem;border-radius:6px;background:rgba(255,255,255,0.03);font-size:.78rem">
+        ${entries.map(function (item) {
+      var icon = item.dir ? 'fa-folder' : (item.path.endsWith('.pdf') ? 'fa-file-pdf' : /\.(jpg|png|gif|webp)$/i.test(item.path) ? 'fa-file-image' : 'fa-file');
+      var col = item.dir ? '#ff9f0a' : item.path.endsWith('.pdf') ? '#ff453a' : 'var(--text2)';
+      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:.4rem .6rem;border-radius:6px;background:rgba(255,255,255,0.03);font-size:.78rem">
             <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">
               <i class="fas ${icon}" style="color:${col};flex-shrink:0"></i>
               <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(item.path)}">${esc(item.path)}</span>
@@ -914,10 +921,10 @@ async function openArchiveViewer(fileId) {
               ${item.dir ? 'Directory' : fmt(item.size)}
             </div>
           </div>`;
-        }).join('')}
+    }).join('')}
       </div>
     `;
-  } catch(err) {
+  } catch (err) {
     area.innerHTML = `
       <div style="text-align:center;padding:2rem 1rem">
         <i class="fas fa-triangle-exclamation" style="color:var(--warning);font-size:2rem;margin-bottom:.6rem"></i>
@@ -930,7 +937,7 @@ async function openArchiveViewer(fileId) {
 }
 
 function loadScript(src) {
-  return new Promise(function(resolve, reject) {
+  return new Promise(function (resolve, reject) {
     if (document.querySelector('script[src="' + src + '"]')) return resolve();
     var s = document.createElement('script');
     s.src = src;

@@ -48,7 +48,7 @@ function getDriveUsedBytes(driveId){
 // ─── Folder Security / Unlock Session Helpers ─────────────
 function isFolderCurrentlyUnlocked(folderId) {
   if (!folderId) return true;
-  if (!S.unlockedFolders) S.unlockedFolders = new Map();
+  if (!S.unlockedFolders || !(S.unlockedFolders instanceof Map)) S.unlockedFolders = new Map();
   // Check memory map
   if (S.unlockedFolders.has(folderId)) {
     var exp = S.unlockedFolders.get(folderId);
