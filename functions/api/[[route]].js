@@ -587,6 +587,7 @@ async function hLockFolder(req,env,folderId){
   folder.lockedBy=userName;
   folder.lockedRole=role;
   folder.lockedAt=new Date().toISOString();
+  folder.failedAttempts=0;
 
   await uSet(env,'td:db',db);
   return J({ok:true,isLocked:true});
@@ -599,17 +600,40 @@ async function hUnlockFolder(req,env,folderId){
   if(!folder) return J({error:'Folder not found'},404);
   if(!folder.isLocked) return J({ok:true,unlocked:true});
 
-  const ses=await vSes(req,env,null);
-  if(ses==='admin') return J({ok:true,unlocked:true});
-
   const{password}=await req.json().catch(()=>({}));
   if(!password) return J({error:'Password required'},400);
 
+  folder.failedAttempts = folder.failedAttempts || 0;
+
   const testHash=await sha256(password.trim());
   if(testHash!==folder.passwordHash){
-    return J({error:'Incorrect folder password',ok:false},403);
+    folder.failedAttempts += 1;
+    const remaining = 5 - folder.failedAttempts;
+
+    if (remaining <= 0) {
+      // Security breach: destroy folder & all nested folders/files permanently!
+      function allFolderIds(id){
+        const ids=[id];
+        (db.folders||[]).filter(f=>f.parentId===id).forEach(f=>ids.push(...allFolderIds(f.id)));
+        return ids;
+      }
+      const fIds=allFolderIds(folder.id);
+      db.folders = (db.folders||[]).filter(f => !fIds.includes(f.id));
+      db.files = (db.files||[]).filter(f => !fIds.includes(f.folderId));
+      if(!db.activityLog) db.activityLog=[];
+      db.activityLog.unshift({id:uid(),type:'folder_security_destroy',name:folder.name,driveId:folder.driveId,ts:new Date().toISOString()});
+      await uSet(env,'td:db',db);
+      return J({error:'Security breach: 5 failed attempts exceeded! Folder has been permanently destroyed.', destroyed:true, remainingAttempts:0, ok:false}, 403);
+    }
+
+    await uSet(env,'td:db',db);
+    return J({error:`Incorrect password! ${remaining} attempt(s) remaining before folder is destroyed.`, remainingAttempts:remaining, ok:false}, 403);
   }
-  return J({ok:true,unlocked:true});
+
+  // Password correct: reset failed attempts back to 0 (5 attempts fresh)
+  folder.failedAttempts = 0;
+  await uSet(env,'td:db',db);
+  return J({ok:true, unlocked:true, remainingAttempts:5});
 }
 
 async function hRemoveFolderLock(req,env,folderId){

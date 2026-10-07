@@ -45,6 +45,60 @@ function getDriveUsedBytes(driveId){
   return activeFiles.reduce((sum, f) => sum + (f.size || 0), 0);
 }
 
+// ─── Folder Security / Unlock Session Helpers ─────────────
+function isFolderCurrentlyUnlocked(folderId) {
+  if (!folderId) return true;
+  if (!S.unlockedFolders) S.unlockedFolders = new Map();
+  // Check memory map
+  if (S.unlockedFolders.has(folderId)) {
+    var exp = S.unlockedFolders.get(folderId);
+    if (exp === 'once') {
+      return _folderId === folderId;
+    }
+    if (typeof exp === 'number') {
+      if (Date.now() < exp) return true;
+      S.unlockedFolders.delete(folderId);
+      try { sessionStorage.removeItem('td_unlocked_' + folderId); } catch(e){}
+    }
+  }
+  // Check sessionStorage
+  try {
+    var stored = sessionStorage.getItem('td_unlocked_' + folderId);
+    if (stored) {
+      var expNum = parseInt(stored, 10);
+      if (expNum && Date.now() < expNum) {
+        S.unlockedFolders.set(folderId, expNum);
+        return true;
+      } else {
+        sessionStorage.removeItem('td_unlocked_' + folderId);
+      }
+    }
+  } catch(e){}
+  return false;
+}
+
+function isFolderOrAncestorLocked(folderId) {
+  if (!folderId) return false;
+  var db = S.db || {};
+  var folders = db.folders || [];
+  var curr = folders.find(function(f){ return f.id === folderId; });
+  var visited = new Set();
+  while (curr && !visited.has(curr.id)) {
+    visited.add(curr.id);
+    if (curr.isLocked && !isFolderCurrentlyUnlocked(curr.id)) {
+      return true;
+    }
+    curr = curr.parentId ? folders.find(function(f){ return f.id === curr.parentId; }) : null;
+  }
+  return false;
+}
+
+function isFileInLockedFolder(file) {
+  if (!file || !file.folderId) return false;
+  return isFolderOrAncestorLocked(file.folderId);
+}
+
+
 function renderSidebarStorage(){
   const db=S.db; if(!db)return;
   const allowed=getAllowedDriveIds();
@@ -111,20 +165,51 @@ function renderFilesPage(driveId, folderId){
 
   // Inside a drive
   $('uploadBtn')?.classList.remove('hidden');
+  $('folderUpBtn')?.classList.remove('hidden');
   $('newFolderBtn')?.classList.remove('hidden');
   document.querySelector('.view-size-btns')?.classList.remove('hidden');
+
+  const curFolder = folderId ? (db.folders||[]).find(f => f.id === folderId) : null;
+  // If viewing a locked folder that is not currently unlocked, show 3D Vault Locked Screen
+  if (curFolder && isFolderOrAncestorLocked(folderId)) {
+    pc.innerHTML = `
+      <div class="inner-page" style="display:flex;align-items:center;justify-content:center;min-height:480px">
+        <div class="modal" style="max-width:440px;text-align:center;padding:2.2rem 1.6rem;box-shadow:0 24px 60px rgba(0,0,0,0.85);border:1px solid rgba(255,215,0,0.3)">
+          <div class="vault-shield-badge gold-glow" style="margin:0 auto 1.2rem;width:68px;height:68px;font-size:1.8rem">
+            <i class="fas fa-shield-halved"></i>
+          </div>
+          <h2 style="font-size:1.3rem;margin-bottom:.4rem">${esc(curFolder.name)}</h2>
+          <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(255,215,0,0.14);border:1px solid rgba(255,215,0,0.35);color:#ffd700;border-radius:20px;padding:3px 12px;font-size:.76rem;font-weight:700;margin-bottom:1rem">
+            <i class="fas fa-lock"></i> Protected Folder
+          </div>
+          <p style="font-size:.84rem;color:var(--text3);margin-bottom:1.5rem;line-height:1.5">
+            This folder is encrypted and protected by password. Enter password to view files inside.
+          </p>
+          <div style="display:flex;gap:.75rem;justify-content:center">
+            <button class="btn-ghost sm" onclick="goBackFolder()"><i class="fas fa-arrow-left"></i> Go Back</button>
+            <button class="btn-primary sm" onclick="showUnlockFolderDialog(S.db.folders.find(f=>f.id==='${esc(curFolder.id)}'), function(){ renderFilesPage('${esc(driveId)}','${esc(folderId)}'); })" style="background:linear-gradient(135deg,var(--primary),#7928ca)"><i class="fas fa-lock-open"></i> Unlock Folder</button>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
 
   const drive=drives.find(d=>d.id===driveId);
   const search=($('globalSearch')?.value||'').toLowerCase();
   let folders=(db.folders||[]).filter(f=>f.driveId===driveId&&f.parentId===(folderId||null)&&!f.trashed);
   let files=(db.files||[]).filter(f=>f.driveId===driveId&&f.folderId===(folderId||null)&&!f.trashed);
-if(S.filter && S.filter!=='all'){
-  folders = [];
-  files = files.filter(function(f){
-    return ftCfg(f.name, f.mimeType).cat === S.filter;
-  });
-}
-  if(search){folders=folders.filter(f=>f.name.toLowerCase().includes(search));files=files.filter(f=>f.name.toLowerCase().includes(search));}
+  if(S.filter && S.filter!=='all'){
+    folders = [];
+    files = files.filter(function(f){
+      return ftCfg(f.name, f.mimeType).cat === S.filter;
+    });
+  }
+  if(search){
+    // Exclude locked folders and files inside locked folders from global search unless unlocked!
+    folders=folders.filter(f=>f.name.toLowerCase().includes(search) && !isFolderOrAncestorLocked(f.id));
+    files=files.filter(f=>f.name.toLowerCase().includes(search) && !isFileInLockedFolder(f));
+  }
 
   const sortKey=S.sort||'name';
   const sortFn=(a,b)=>sortKey==='size'?(b.size||0)-(a.size||0):sortKey==='date'?new Date(b.date)-new Date(a.date):(a.name||'').localeCompare(b.name||'');
@@ -163,8 +248,13 @@ if(S.filter && S.filter!=='all'){
 
 function toolbarHtml(driveId,folderId){
   return `<div class="nav-btns">
-    <button class="icon-btn" onclick="history.back()" title="Back"><i class="fas fa-chevron-left"></i></button>
+    <button class="icon-btn" onclick="goBackFolder()" title="Back"><i class="fas fa-chevron-left"></i></button>
     <button class="icon-btn" onclick="goUp()" title="Up"><i class="fas fa-arrow-up"></i></button>
+  </div>
+  <div class="toolbar-upload-btns" style="display:flex;gap:.35rem;align-items:center">
+    <button class="btn-primary sm" onclick="triggerFileUpload()" title="Upload Files to this folder"><i class="fas fa-cloud-arrow-up"></i> <span class="hide-xs">Upload</span></button>
+    <button class="btn-ghost sm" onclick="triggerFolderUpload()" title="Upload entire folder from device"><i class="fas fa-folder-arrow-up"></i> <span class="hide-xs">Upload Folder</span></button>
+    <button class="btn-ghost sm" onclick="showNewFolderDialog()" title="Create New Folder"><i class="fas fa-folder-plus"></i> <span class="hide-xs">New Folder</span></button>
   </div>
   <div class="filter-tabs">
     <button class="ftab ${(!S.filter||S.filter==='all')?'active':''}" data-filter="all">All</button>
@@ -201,11 +291,28 @@ function setupDragDrop(){
   ec.addEventListener('drop',e=>{e.preventDefault();ec.classList.remove('drag-over');if(e.dataTransfer.files.length)uploadFiles(e.dataTransfer.files);});
 }
 
-function goUp(){
+function goBackFolder(){
   if(_folderId){
     const parent=S.db?.folders?.find(f=>f.id===_folderId)?.parentId||null;
     navTo('files',_driveId,parent);
-  }else if(_driveId){navTo('files');}
+  }else if(_driveId){
+    navTo('files');
+  }else{
+    navTo('files');
+  }
+}
+
+function goUp(){
+  goBackFolder();
+}
+
+function triggerFileUpload(){
+  var fi=$('fileInput');
+  if(fi) fi.click();
+}
+
+function triggerFolderUpload(){
+  uploadFolder();
 }
 
 function driveCard(d){
@@ -231,8 +338,7 @@ function driveCard(d){
 
 function openFolderTarget(driveId, folderId){
   const folder = (S.db && S.db.folders || []).find(f => f.id === folderId);
-  const isAdmin = (S.ses && S.ses.role === 'admin');
-  if(folder && folder.isLocked && !isAdmin && !S.unlockedFolders.has(folderId)){
+  if(folder && (folder.isLocked || isFolderOrAncestorLocked(folderId)) && !isFolderCurrentlyUnlocked(folderId)){
     showUnlockFolderDialog(folder, function(){
       navTo('files', driveId, folderId);
     });
@@ -277,32 +383,52 @@ function folderCard(f){
       <span class="truncate">${esc(f.name)}</span>
     </div>
     <div class="fg-acts">
+      ${isLocked ? `
+        <button class="icon-btn xs" style="color:#ffd700" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected Folder - Click to manage password"><i class="fas fa-shield-halved"></i></button>
+      ` : `
+        <button class="icon-btn xs" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protect Folder with Password"><i class="fas fa-lock"></i></button>
+      `}
       <button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete folder"><i class="fas fa-trash-alt"></i></button>
     </div>
   </div>`;
 }
+
 function fileCard(f){
   const cfg=ftCfg(f.name,f.mimeType);
   const isMedia=['image','video','audio'].includes(cfg.cat);
   const isImage=cfg.cat==='image';
   const isVideo=cfg.cat==='video';
+  const isPdf = /\.pdf$/i.test(f.name) || f.mimeType === 'application/pdf';
+  const isArchive = /\.(zip|rar|7z|tar|gz)$/i.test(f.name);
   const driveId=f.driveId||_driveId||(S.db&&S.db.drives&&S.db.drives[0]?S.db.drives[0].id:'');
   const previewUrl=getFileDownloadUrl(f.googleFileId, driveId, true);
   const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
 
-  return `<div class="fg-card ${isImage?'is-image':isVideo?'is-video':''} ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="${isMedia?`openMedia('${esc(f.id)}')`:`downloadFile('${esc(f.id)}')`}" onclick="handleCardClick('${esc(f.id)}', event)">
+  const dblAction = isMedia ? `openMedia('${esc(f.id)}')` : isPdf ? `openPdfViewer('${esc(f.id)}')` : isArchive ? `openArchiveViewer('${esc(f.id)}')` : `downloadFile('${esc(f.id)}')`;
+
+  return `<div class="fg-card ${isImage?'is-image':isVideo?'is-video':''} ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="${dblAction}" onclick="handleCardClick('${esc(f.id)}', event)">
     <div class="card-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select file">
       <i class="fas fa-check"></i>
     </div>
     ${isImage ? `
       <div class="fg-thumb-wrap">
-        <img class="fg-thumb" src="${previewUrl}" alt="${esc(f.name)}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\'fg-icon\' style=\'color:${cfg.col}\'><i class=\'fas ${cfg.icon}\'></i></div>'">
+        <img class="fg-thumb" src="${previewUrl}" alt="${esc(f.name)}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\'fg-icon\\' style=\\'color:${cfg.col}\\'><i class=\\'fas ${cfg.icon}\\'></i></div>'">
         <div class="thumb-hover-overlay"><i class="fas fa-eye"></i></div>
       </div>
     ` : isVideo ? `
       <div class="fg-thumb-wrap video-thumb-wrap">
         <video class="fg-thumb-vid" src="${previewUrl}#t=0.5" preload="metadata" muted playsinline></video>
         <div class="video-play-badge"><i class="fas fa-play"></i></div>
+      </div>
+    ` : isPdf ? `
+      <div class="fg-icon" style="color:#ff453a;position:relative">
+        <i class="fas fa-file-pdf"></i>
+        <span class="file-type-pill" style="position:absolute;bottom:-4px;font-size:.58rem;background:rgba(255,69,58,0.2);color:#ff453a;padding:1px 5px;border-radius:4px;font-weight:700">PDF</span>
+      </div>
+    ` : isArchive ? `
+      <div class="fg-icon" style="color:#ff9f0a;position:relative">
+        <i class="fas fa-file-zipper"></i>
+        <span class="file-type-pill" style="position:absolute;bottom:-4px;font-size:.58rem;background:rgba(255,159,10,0.2);color:#ff9f0a;padding:1px 5px;border-radius:4px;font-weight:700">ZIP</span>
       </div>
     ` : `
       <div class="fg-icon" style="color:${cfg.col}"><i class="fas ${cfg.icon}"></i></div>
@@ -311,12 +437,15 @@ function fileCard(f){
     <div class="fg-meta">${fmt(f.size||0)}</div>
     <div class="fg-acts">
       <button class="icon-btn xs star-btn ${f.starred?'starred':''}" data-star-id="${esc(f.id)}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ffcc00':''}"></i></button>
-      ${isMedia?`<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>`:''}
+      ${isMedia ? `<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
+        isPdf ? `<button class="icon-btn xs" onclick="event.stopPropagation();openPdfViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
+        isArchive ? `<button class="icon-btn xs" onclick="event.stopPropagation();openArchiveViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` : ''}
       <button class="icon-btn xs" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')"><i class="fas fa-download"></i></button>
       <button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
     </div>
   </div>`;
 }
+
 function folderRow(f){
   const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
   const isLocked = !!f.isLocked;
@@ -338,11 +467,16 @@ function folderRow(f){
     </span>
   </div>`;
 }
+
 function fileRow(f){
   const cfg = ftCfg(f.name, f.mimeType);
   const isMedia = ['image','video','audio'].includes(cfg.cat);
+  const isPdf = /\.pdf$/i.test(f.name) || f.mimeType === 'application/pdf';
+  const isArchive = /\.(zip|rar|7z|tar|gz)$/i.test(f.name);
   const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
-  return `<div class="fl-row ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="${isMedia?`openMedia('${esc(f.id)}')`:`downloadFile('${esc(f.id)}')`}">
+  const dblAction = isMedia ? `openMedia('${esc(f.id)}')` : isPdf ? `openPdfViewer('${esc(f.id)}')` : isArchive ? `openArchiveViewer('${esc(f.id)}')` : `downloadFile('${esc(f.id)}')`;
+
+  return `<div class="fl-row ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="${dblAction}">
     <span style="display:flex;align-items:center;gap:8px">
       <input type="checkbox" class="row-select-check" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')">
       <i class="fas ${cfg.icon}" style="color:${cfg.col};margin-right:.4rem"></i>${esc(f.name)}
@@ -350,7 +484,9 @@ function fileRow(f){
     <span>${fmt(f.size||0)}</span><span>${fmtDate(f.date)}</span>
     <span style="display:flex;gap:.2rem">
       <button class="icon-btn xs star-btn ${f.starred?'starred':''}" data-star-id="${esc(f.id)}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ffcc00':''}"></i></button>
-      ${isMedia?`<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>`:''}
+      ${isMedia ? `<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
+        isPdf ? `<button class="icon-btn xs" onclick="event.stopPropagation();openPdfViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
+        isArchive ? `<button class="icon-btn xs" onclick="event.stopPropagation();openArchiveViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` : ''}
       <button class="icon-btn xs" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')"><i class="fas fa-download"></i></button>
       <button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
     </span>
@@ -481,7 +617,7 @@ function renderRecentPage(){
   const pc=$('pageContent');if(!pc)return;
   const allowed=getAllowedDriveIds();
   const files=[...(S.db?.files||[])]
-    .filter(f=>!f.trashed&&(allowed.length===0||allowed.includes(f.driveId)))
+    .filter(f=>!f.trashed && (allowed.length===0||allowed.includes(f.driveId)) && !isFileInLockedFolder(f))
     .sort((a,b)=>new Date(b.date)-new Date(a.date))
     .slice(0,50);
   pc.innerHTML=`<div class="inner-page">
@@ -634,7 +770,7 @@ function renderTM(){
 function renderStarredPage() {
   const pc = $('pageContent'); if(!pc) return;
   const allowed = getAllowedDriveIds();
-  const starred = (S.db&&S.db.files||[]).filter(f => !f.trashed && !!f.starred && (allowed.length === 0 || allowed.includes(f.driveId)));
+  const starred = (S.db&&S.db.files||[]).filter(f => !f.trashed && !!f.starred && (allowed.length === 0 || allowed.includes(f.driveId)) && !isFileInLockedFolder(f));
   pc.innerHTML = `<div class="inner-page">
     <div class="page-hd"><h2><i class="fas fa-star" style="color:#ffcc00"></i> Starred Files</h2><p>Quick access to your favorite files</p></div>
     ${starred.length ? `<div class="file-grid md">${starred.map(f => fileCard(f)).join('')}</div>` : `<div class="empty-state"><div class="empty-icon"><i class="fas fa-star" style="color:#ffcc00"></i></div><h3>No starred files</h3><p>Click the star icon on any file to bookmark it here.</p></div>`}

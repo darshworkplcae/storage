@@ -10,17 +10,34 @@ function navTo(page, driveId, folderId) {
   driveId = driveId || null; folderId = folderId || null;
   _curPage = page; _driveId = driveId; _folderId = folderId;
 
-  // Update URL hash
+  // Update URL hash (create browser history record so back button navigates folders!)
   var hash = '#/' + page;
   if (driveId) hash += '/' + driveId;
   if (folderId) hash += '/' + folderId;
-  if (window.location.hash !== hash) history.replaceState(null, '', hash);
+  if (window.location.hash !== hash) {
+    window.location.hash = hash;
+  }
+
+  // Auto-relock any 'once' unlocked folders if user navigated away from them
+  if (S.unlockedFolders) {
+    try {
+      Array.from(S.unlockedFolders.entries()).forEach(function(entry) {
+        var fId = entry[0], exp = entry[1];
+        if (exp === 'once' && folderId !== fId) {
+          S.unlockedFolders.delete(fId);
+        } else if (typeof exp === 'number' && Date.now() >= exp) {
+          S.unlockedFolders.delete(fId);
+          try { sessionStorage.removeItem('td_unlocked_' + fId); } catch(e){}
+        }
+      });
+    } catch(e){}
+  }
 
   document.querySelectorAll('.sb-nav-item').forEach(function(el) {
     el.classList.toggle('active', el.dataset.page === page);
   });
   var explorer = (page === 'files' && driveId);
-  ['uploadBtn','newFolderBtn','syncBtn'].forEach(function(id) {
+  ['uploadBtn','folderUpBtn','newFolderBtn','syncBtn'].forEach(function(id) {
     var el = $(id); if(el) el.classList.toggle('hidden', !explorer);
   });
   var fab = $('mobileFabWrap');

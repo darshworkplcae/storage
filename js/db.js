@@ -18,7 +18,7 @@ function clearSes() {
 }
 
 function tmLoad() { try { return JSON.parse(localStorage.getItem(TM_KEY)||'[]'); } catch(e) { return []; } }
-function tmSave(l) { try { localStorage.setItem(TM_KEY, JSON.stringify(l.slice(0,100))); } catch(e) {} }
+function tmSave(l) { try { localStorage.setItem(TM_KEY, JSON.stringify(l.slice(0,1500))); } catch(e) {} }
 
 function tmSanitizeOnStartup() {
   try {
@@ -54,6 +54,27 @@ function tmAddQueued(id, name, size) {
     l.push({id:id,name:name,size:size,status:'queued',pct:0,speed:0,uploaded:0,ts:new Date().toISOString()});
     tmSave(l);
   }
+}
+
+function tmAddBatchQueued(items) {
+  var l = tmLoad();
+  var existingIds = new Set(l.map(function(x){ return x.id; }));
+  items.forEach(function(item) {
+    if (!existingIds.has(item.id)) {
+      l.push({
+        id: item.id,
+        name: item.name,
+        size: item.size,
+        status: 'queued',
+        pct: 0,
+        speed: 0,
+        uploaded: 0,
+        ts: new Date().toISOString()
+      });
+      existingIds.add(item.id);
+    }
+  });
+  tmSave(l);
 }
 
 function tmUpdate(id, pct, speed, uploaded) {
