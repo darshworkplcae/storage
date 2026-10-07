@@ -239,3 +239,9 @@ function apiGetDestroyedFolders() { return apiFetch('admin/destroyed-folders'); 
 function apiRecoverFolder(folderId) { return apiFetch('admin/recover-folder/' + encodeURIComponent(folderId), { method: 'POST' }); }
 function apiGetPolicy() { return apiFetch('admin/policy'); }
 function apiSetPolicy(policy) { return apiFetch('admin/policy', { method: 'POST', body: JSON.stringify(policy) }); }
+function apiSetFolderVisibility(folderId, adminOnly, allowedUsers) {
+  return apiFetch('folders/visibility', {
+    method: 'POST',
+    body: JSON.stringify({ folderId: folderId, adminOnly: !!adminOnly, allowedUsers: allowedUsers || [] })
+  });
+}

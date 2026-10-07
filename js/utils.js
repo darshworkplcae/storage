@@ -11,6 +11,18 @@ function fmt(bytes) {
 function fmtSpeed(bps) {
   return fmt(bps)+'/s';
 }
+function fmtEta(remainingBytes, speedBps) {
+  if (!speedBps || speedBps <= 0 || !remainingBytes || remainingBytes <= 0) return '';
+  var sec = Math.round(remainingBytes / speedBps);
+  if (sec <= 0) return '0s left';
+  if (sec < 60) return sec + 's left';
+  var min = Math.floor(sec / 60);
+  sec = sec % 60;
+  if (min < 60) return min + 'm ' + (sec > 0 ? sec + 's ' : '') + 'left';
+  var hrs = Math.floor(min / 60);
+  min = min % 60;
+  return hrs + 'h ' + (min > 0 ? min + 'm ' : '') + 'left';
+}
 function fmtDate(iso) {
   if (!iso) return '—';
   try { return new Date(iso).toLocaleDateString(); } catch(e) { return iso; }

@@ -67,9 +67,9 @@ async function hDB(req,env){
     const allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
     const userDrives = (db.drives||[]).filter(d => !allowedList || allowedList.includes(d.id)).map(d=>({...d,encToken:undefined}));
     const userDriveIds = userDrives.map(d => d.id);
-    const userFolders = (db.folders||[]).filter(f => userDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly).map(sFold);
+    const userFolders = (db.folders||[]).filter(f => userDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly && (!f.allowedUsers || !f.allowedUsers.length || f.allowedUsers.includes(r))).map(sFold);
     const visibleFolderIds = new Set(userFolders.map(f => f.id));
-    const userFiles = (db.files||[]).filter(f => userDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly && (!f.folderId || visibleFolderIds.has(f.folderId)));
+    const userFiles = (db.files||[]).filter(f => userDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly && (!f.allowedUsers || !f.allowedUsers.length || f.allowedUsers.includes(r)) && (!f.folderId || visibleFolderIds.has(f.folderId)));
     const userLogs = (db.activityLog||[]).filter(l => !l.driveId || userDriveIds.includes(l.driveId));
     return J({
       v: db.v,
@@ -86,9 +86,9 @@ async function hDB(req,env){
   const openId = db.openDriveId;
   const guestDrives = openId ? (db.drives||[]).filter(d => d.id === openId).map(d=>({...d,encToken:undefined})) : [];
   const guestDriveIds = guestDrives.map(d => d.id);
-  const guestFolders = (db.folders||[]).filter(f => guestDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly).map(sFold);
+  const guestFolders = (db.folders||[]).filter(f => guestDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly && (!f.allowedUsers || !f.allowedUsers.length)).map(sFold);
   const visibleFolderIds = new Set(guestFolders.map(f => f.id));
-  const guestFiles = (db.files||[]).filter(f => guestDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly && (!f.folderId || visibleFolderIds.has(f.folderId)));
+  const guestFiles = (db.files||[]).filter(f => guestDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly && (!f.allowedUsers || !f.allowedUsers.length) && (!f.folderId || visibleFolderIds.has(f.folderId)));
   return J({
     v: db.v,
     openDriveId: db.openDriveId,
@@ -178,7 +178,23 @@ async function hUC(req,env){
   if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
   if(!db) return J({error:'DB error'},500);
   if(!db.files) db.files=[];
-  db.files.push({id:fileLocalId,googleFileId,driveId,folderId:folderId||null,name,size,mimeType:mimeType||'application/octet-stream',uploadedBy:ses||'guest',date:new Date().toISOString()});
+  const parentFolder = folderId ? (db.folders||[]).find(x=>x.id===folderId) : null;
+  const isAdmOnly = parentFolder ? !!parentFolder.adminOnly : false;
+  const fAllowedUsers = (parentFolder && Array.isArray(parentFolder.allowedUsers) && parentFolder.allowedUsers.length) ? [...parentFolder.allowedUsers] : undefined;
+  const newFile = {
+    id:fileLocalId,
+    googleFileId,
+    driveId,
+    folderId:folderId||null,
+    name,
+    size,
+    mimeType:mimeType||'application/octet-stream',
+    uploadedBy:ses||'guest',
+    date:new Date().toISOString(),
+    adminOnly: isAdmOnly
+  };
+  if(fAllowedUsers) newFile.allowedUsers = fAllowedUsers;
+  db.files.push(newFile);
   const drv=(db.drives||[]).find(d=>d.id===driveId);
   if(drv && typeof size === 'number') drv.usedBytes = (drv.usedBytes || 0) + size;
   if(!db.activityLog) db.activityLog=[];
@@ -197,6 +213,13 @@ async function hDL(req,env,gId){
   }
   if(!ses) ses=await vSes(req,env,null);
   const db=await uGet(env,'td:db');
+  const fileObj=(db&&db.files||[]).find(f=>f.googleFileId===gId);
+  if(fileObj && fileObj.adminOnly && ses !== 'admin'){
+    return J({error:'Access denied'}, 403);
+  }
+  if(fileObj && Array.isArray(fileObj.allowedUsers) && fileObj.allowedUsers.length && ses !== 'admin' && (!ses || !fileObj.allowedUsers.includes(ses))){
+    return J({error:'Access denied'}, 403);
+  }
   const isInline=url.searchParams.get('inline')==='1';
   if(!isInline && db && db.policy && db.policy.allowUserDownload === false && ses !== 'admin'){
     return J({error:'File downloads are disabled by administrator'}, 403);
@@ -217,7 +240,6 @@ async function hDL(req,env,gId){
       ...(range?{Range:range}:{})
     }
   });
-  const fileObj=(db&&db.files||[]).find(f=>f.googleFileId===gId);
   const fileName=encodeURIComponent(fileObj?fileObj.name:'download');
   const respHeaders=new Headers();
   respHeaders.set('Access-Control-Allow-Origin','*');
@@ -541,14 +563,29 @@ async function hMF(req,env){
   if(!drv) return J({error:'Drive not found'},404);
   const at=await gAT(env,drv.encToken);
   let gPid=drv.rootFolderId;
+  let parentAdminOnly = false;
+  let parentAllowedUsers = null;
   if(parentFolderId){
     const pf=(db.folders||[]).find(f=>f.id===parentFolderId);
     if(pf&&pf.googleFolderId) gPid=pf.googleFolderId;
+    if(pf&&pf.adminOnly) parentAdminOnly = true;
+    if(pf&&Array.isArray(pf.allowedUsers)&&pf.allowedUsers.length) parentAllowedUsers = [...pf.allowedUsers];
   }
   const gFid=await mkDir(at,name.trim(),gPid);
   const fId=uid();
   if(!db.folders) db.folders=[];
-  db.folders.push({id:fId,driveId,parentId:parentFolderId||null,name:name.trim(),googleFolderId:gFid,date:new Date().toISOString(),createdBy:ses||'guest'});
+  const newFolder = {
+    id:fId,
+    driveId,
+    parentId:parentFolderId||null,
+    name:name.trim(),
+    googleFolderId:gFid,
+    date:new Date().toISOString(),
+    createdBy:ses||'guest',
+    adminOnly: parentAdminOnly
+  };
+  if(parentAllowedUsers) newFolder.allowedUsers = parentAllowedUsers;
+  db.folders.push(newFolder);
   await uSet(env,'td:db',db);
   return J({ok:true,folderId:fId});
 }
@@ -795,6 +832,61 @@ async function hRecoverFolder(req,env,folderId){
   return J({ok:true,recovered:true,name:folder.name});
 }
 
+async function hSetFolderVisibility(req,env){
+  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized'},401);
+  const{folderId,adminOnly,allowedUsers}=await req.json().catch(()=>({}));
+  if(!folderId) return J({error:'folderId required'},400);
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const folder=(db.folders||[]).find(f=>f.id===folderId);
+  if(!folder) return J({error:'Folder not found'},404);
+
+  function allFolderIds(id){
+    const ids=[id];
+    (db.folders||[]).filter(f=>f.parentId===id).forEach(f=>ids.push(...allFolderIds(f.id)));
+    return ids;
+  }
+  const fIds=allFolderIds(folder.id);
+  const isAdmOnly = !!adminOnly;
+  const usersList = Array.isArray(allowedUsers) ? allowedUsers : [];
+
+  (db.folders||[]).forEach(f => {
+    if(fIds.includes(f.id)){
+      f.adminOnly = isAdmOnly;
+      if(usersList.length > 0){
+        f.allowedUsers = usersList;
+      } else {
+        delete f.allowedUsers;
+      }
+    }
+  });
+
+  (db.files||[]).forEach(f => {
+    if(fIds.includes(f.folderId)){
+      f.adminOnly = isAdmOnly;
+      if(usersList.length > 0){
+        f.allowedUsers = usersList;
+      } else {
+        delete f.allowedUsers;
+      }
+    }
+  });
+
+  if(!db.activityLog) db.activityLog=[];
+  db.activityLog.unshift({
+    id:uid(),
+    type:'folder_visibility',
+    folderName:folder.name,
+    adminOnly:isAdmOnly,
+    allowedUsersCount:usersList.length,
+    ts:new Date().toISOString()
+  });
+  if(db.activityLog.length>500) db.activityLog=db.activityLog.slice(0,500);
+
+  await uSet(env,'td:db',db);
+  return J({ok:true,folderId,adminOnly:isAdmOnly,allowedUsers:usersList});
+}
+
 async function hGetPolicy(req,env){
   const db=await uGet(env,'td:db');
   const policy=(db&&db.policy)||{allowUserDownload:true,allowUserDelete:true};
@@ -879,6 +971,7 @@ export async function onRequest({request,env}){
     if(p.startsWith('files/trash/permanent-delete/')&&m==='DELETE')return hPermanentDelete(request,env,p.replace('files/trash/permanent-delete/',''));
     if(p.startsWith('files/star/')&&m==='POST')return hStar(request,env,p.replace('files/star/',''));
     if(p.startsWith('files/')&&m==='DELETE')return hDF(request,env,p.replace('files/',''));
+    if(p==='folders/visibility'&&m==='POST')return hSetFolderVisibility(request,env);
     if(p==='folders'&&m==='POST')return hMF(request,env);
     if(p.startsWith('folders/lock/')&&m==='POST')return hLockFolder(request,env,p.replace('folders/lock/',''));
     if(p.startsWith('folders/unlock/')&&m==='POST')return hUnlockFolder(request,env,p.replace('folders/unlock/',''));

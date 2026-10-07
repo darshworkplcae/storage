@@ -99,6 +99,13 @@ function renderSettingsPage() {
     '</div>',
     '</div>',
 
+    // Folder Privacy & Visibility Manager
+    '<div class="settings-section">',
+    '<div class="sect-hd"><i class="fas fa-eye-slash" style="color:#00e5ff"></i><div><h3>Folder Privacy & Visibility Control</h3><p>Manage which folders are hidden from guests and regular users, set Admin-Only exclusivity, or delegate folder access to specific user accounts.</p></div>',
+    '<button class="btn-ghost sm" onclick="loadAdminFolderVisibility()"><i class="fas fa-rotate"></i> Refresh</button></div>',
+    '<div id="folderVisibilityContainer" style="margin-top:1rem"><div class="empty-small"><i class="fas fa-spinner fa-spin"></i><p>Loading folder visibility settings…</p></div></div>',
+    '</div>',
+
     // Folder Security & Password Recovery (Admin recovery for encrypted folders)
     '<div class="settings-section">',
     '<div class="sect-hd"><i class="fas fa-lock" style="color:#ffd700"></i><div><h3>Folder Security & Password Recovery</h3><p>View and manage encrypted folders created by Private Users and Guests. Passwords can be decoded and recovered here.</p></div>',
@@ -133,8 +140,50 @@ function renderSettingsPage() {
     '</div>'
   ].join('');
 
+  loadAdminFolderVisibility();
   loadAdminLockedFolders();
   loadAdminDestroyedFolders();
+}
+
+async function loadAdminFolderVisibility() {
+  var el = $('folderVisibilityContainer');
+  if (!el) return;
+  var db = S.db || {};
+  var folders = (db.folders || []).filter(function(f){ return !f.destroyed && !f.trashed; });
+  if (!folders.length) {
+    el.innerHTML = '<div class="empty-small"><i class="fas fa-folder-open" style="color:var(--text3)"></i><p>No active folders found.</p></div>';
+    return;
+  }
+
+  el.innerHTML = '<table class="users-table" style="margin-bottom:1rem">' +
+    '<thead><tr><th>Folder</th><th>Drive</th><th>Visibility Status</th><th>Target Audience</th><th>Actions</th></tr></thead>' +
+    '<tbody>' + folders.map(function(f){
+      var drv = (db.drives || []).find(function(d){ return d.id === f.driveId; });
+      var isAdm = !!f.adminOnly;
+      var hasSpecific = Array.isArray(f.allowedUsers) && f.allowedUsers.length > 0;
+      var statusBadge = isAdm
+        ? '<span class="badge" style="background:rgba(255,69,58,0.18);color:#ff453a;border:1px solid rgba(255,69,58,0.3)"><i class="fas fa-user-secret"></i> Admin Only</span>'
+        : hasSpecific
+        ? '<span class="badge" style="background:rgba(191,90,242,0.18);color:#bf5af2;border:1px solid rgba(191,90,242,0.3)"><i class="fas fa-user-lock"></i> Restricted</span>'
+        : '<span class="badge" style="background:rgba(48,209,88,0.18);color:#30d158;border:1px solid rgba(48,209,88,0.3)"><i class="fas fa-globe"></i> Public</span>';
+
+      var audienceTxt = isAdm
+        ? '<span style="color:#ff453a;font-size:.78rem;font-weight:600">Hidden from all users & guests</span>'
+        : hasSpecific
+        ? '<span style="color:#bf5af2;font-size:.78rem;font-weight:600">' + f.allowedUsers.length + ' specific user(s)</span>'
+        : '<span style="color:var(--text3);font-size:.78rem">All drive visitors</span>';
+
+      return '<tr>' +
+        '<td><strong style="display:flex;align-items:center;gap:6px"><i class="fas fa-folder" style="color:#ff9f0a"></i> ' + esc(f.name) + '</strong></td>' +
+        '<td>' + esc(drv ? drv.name : 'Unknown Drive') + '</td>' +
+        '<td>' + statusBadge + '</td>' +
+        '<td>' + audienceTxt + '</td>' +
+        '<td>' +
+          '<button class="btn-ghost xs" onclick="showFolderVisibilityDialog(\'' + f.id + '\')" title="Edit Visibility"><i class="fas fa-sliders"></i> Change</button>' +
+        '</td>' +
+      '</tr>';
+    }).join('') +
+    '</tbody></table>';
 }
 
 async function loadAdminLockedFolders() {

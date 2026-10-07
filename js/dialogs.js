@@ -302,7 +302,8 @@ async function uploadOne(file, targetFolderId, existingTid) {
       var pct = total > 0 ? Math.round(loaded / total * 100) : 0;
       if (upFill) upFill.style.width = pct + '%';
       if (upPct) upPct.textContent = pct + '%';
-      if (upStatus && !_cancelSignal.paused) upStatus.textContent = fmt(loaded) + ' / ' + fmt(total) + (speed > 0 ? ' · ' + fmtSpeed(speed) : '');
+      var eta = (speed > 0 && total > loaded) ? fmtEta(total - loaded, speed) : '';
+      if (upStatus && !_cancelSignal.paused) upStatus.textContent = fmt(loaded) + ' / ' + fmt(total) + (speed > 0 ? ' · ' + fmtSpeed(speed) : '') + (eta ? ' · ' + eta : '');
       tmUpdate(tId, pct, speed, loaded);
     }, _cancelSignal);
 
@@ -596,6 +597,173 @@ function showRemoveFolderLockDialog(folderId, folderName) {
   });
 }
 
+function showFolderVisibilityDialog(folderId) {
+  var folder = (S.db && S.db.folders || []).find(function(f){ return f.id === folderId; });
+  if (!folder) {
+    toast('Folder not found', 'error');
+    return;
+  }
+  var users = (S.db && S.db.users || []);
+  var isAdmOnly = !!folder.adminOnly;
+  var allowedUsers = Array.isArray(folder.allowedUsers) ? folder.allowedUsers : [];
+  var isSpecific = !isAdmOnly && allowedUsers.length > 0;
+  var isPublic = !isAdmOnly && !isSpecific;
+
+  var currentMode = isAdmOnly ? 'admin' : (isSpecific ? 'specific' : 'public');
+
+  var ov = document.createElement('div');
+  ov.className = 'modal-backdrop';
+  ov.innerHTML = `
+    <div class="modal" style="max-width:480px;text-align:left">
+      <div class="modal-hd" style="display:flex;align-items:center;justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:rgba(78,134,245,0.15);display:flex;align-items:center;justify-content:center;color:var(--primary);font-size:1.1rem">
+            <i class="fas fa-eye-slash"></i>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:1.05rem">Folder Privacy & Visibility</h3>
+            <span style="font-size:0.75rem;color:var(--text3)">Configure who can see and access this folder</span>
+          </div>
+        </div>
+        <button class="icon-btn xs" onclick="this.closest('.modal-backdrop').remove()"><i class="fas fa-times"></i></button>
+      </div>
+
+      <div style="margin:1rem 0;padding:.75rem 1rem;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:10px">
+        <i class="fas fa-folder" style="color:#ff9f0a;font-size:1.4rem"></i>
+        <div style="min-width:0;flex:1">
+          <div style="font-weight:600;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(folder.name)}</div>
+          <div style="font-size:.72rem;color:var(--text3)">Current status: <strong style="color:${isAdmOnly ? 'var(--danger)' : isSpecific ? '#bf5af2' : 'var(--success)'}">${isAdmOnly ? 'Admin Only (Hidden)' : isSpecific ? 'Restricted to Specific Users' : 'Public (All Drive Users)'}</strong></div>
+        </div>
+      </div>
+
+      <form id="folderVisForm" onsubmit="return false;">
+        <div style="display:flex;flex-direction:column;gap:.75rem;margin-bottom:1.2rem">
+          <label class="vis-option-card ${currentMode === 'public' ? 'active' : ''}" style="cursor:pointer;display:flex;align-items:flex-start;gap:12px;padding:.8rem 1rem;border-radius:10px;border:1px solid ${currentMode === 'public' ? 'var(--primary)' : 'var(--border)'};background:${currentMode === 'public' ? 'rgba(78,134,245,0.08)' : 'rgba(255,255,255,0.02)'};transition:.15s">
+            <input type="radio" name="visMode" value="public" ${currentMode === 'public' ? 'checked' : ''} style="margin-top:3px;accent-color:var(--primary)">
+            <div style="flex:1">
+              <div style="font-weight:600;font-size:.86rem;display:flex;align-items:center;gap:6px">
+                <i class="fas fa-globe" style="color:var(--success)"></i> Public (All Users & Guests)
+              </div>
+              <div style="font-size:.75rem;color:var(--text3);margin-top:2px">
+                Everyone with access to this drive can view, open, and browse this folder.
+              </div>
+            </div>
+          </label>
+
+          <label class="vis-option-card ${currentMode === 'admin' ? 'active' : ''}" style="cursor:pointer;display:flex;align-items:flex-start;gap:12px;padding:.8rem 1rem;border-radius:10px;border:1px solid ${currentMode === 'admin' ? 'var(--danger)' : 'var(--border)'};background:${currentMode === 'admin' ? 'rgba(255,69,58,0.08)' : 'rgba(255,255,255,0.02)'};transition:.15s">
+            <input type="radio" name="visMode" value="admin" ${currentMode === 'admin' ? 'checked' : ''} style="margin-top:3px;accent-color:var(--danger)">
+            <div style="flex:1">
+              <div style="font-weight:600;font-size:.86rem;display:flex;align-items:center;gap:6px">
+                <i class="fas fa-user-secret" style="color:var(--danger)"></i> Admin Only (Completely Hidden)
+              </div>
+              <div style="font-size:.75rem;color:var(--text3);margin-top:2px">
+                Strictly hidden from all guest visitors and regular users. Only you (Admin) can view it.
+              </div>
+            </div>
+          </label>
+
+          <label class="vis-option-card ${currentMode === 'specific' ? 'active' : ''}" style="cursor:pointer;display:flex;align-items:flex-start;gap:12px;padding:.8rem 1rem;border-radius:10px;border:1px solid ${currentMode === 'specific' ? '#bf5af2' : 'var(--border)'};background:${currentMode === 'specific' ? 'rgba(191,90,242,0.08)' : 'rgba(255,255,255,0.02)'};transition:.15s">
+            <input type="radio" name="visMode" value="specific" ${currentMode === 'specific' ? 'checked' : ''} style="margin-top:3px;accent-color:#bf5af2">
+            <div style="flex:1">
+              <div style="font-weight:600;font-size:.86rem;display:flex;align-items:center;gap:6px">
+                <i class="fas fa-users" style="color:#bf5af2"></i> Specific Users Only
+              </div>
+              <div style="font-size:.75rem;color:var(--text3);margin-top:2px">
+                Hidden from guests and unauthorized accounts. Only selected user accounts can see it.
+              </div>
+            </div>
+          </label>
+        </div>
+
+        <div id="visUsersListWrap" style="display:${currentMode === 'specific' ? 'block' : 'none'};margin-bottom:1.2rem;padding:.8rem 1rem;background:rgba(0,0,0,0.25);border:1px solid var(--border);border-radius:10px">
+          <div style="font-size:.78rem;font-weight:600;margin-bottom:.5rem;color:var(--text2)">
+            Select Authorized Users:
+          </div>
+          ${users.length === 0 ? `
+            <div style="font-size:.76rem;color:var(--text3);font-style:italic">
+              No registered user accounts found. Create users in Admin Panel > Users first.
+            </div>
+          ` : `
+            <div style="display:flex;flex-direction:column;gap:.45rem;max-height:160px;overflow-y:auto">
+              ${users.map(function(u) {
+                var checked = allowedUsers.includes(u.id);
+                return `<label style="display:flex;align-items:center;gap:8px;font-size:.82rem;cursor:pointer;user-select:none">
+                  <input type="checkbox" class="vis-user-chk" value="${esc(u.id)}" ${checked ? 'checked' : ''} style="accent-color:#bf5af2">
+                  <span><i class="fas fa-user" style="color:var(--text3);margin-right:4px"></i>${esc(u.username)}</span>
+                </label>`;
+              }).join('')}
+            </div>
+          `}
+        </div>
+
+        <div style="display:flex;gap:.6rem;justify-content:flex-end">
+          <button type="button" class="btn-ghost sm" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
+          <button type="submit" class="btn-primary sm" id="saveVisBtn"><i class="fas fa-check"></i> Save Visibility</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  document.body.appendChild(ov);
+
+  var radios = ov.querySelectorAll('input[name="visMode"]');
+  var usersWrap = ov.querySelector('#visUsersListWrap');
+  radios.forEach(function(r) {
+    r.addEventListener('change', function() {
+      var selected = ov.querySelector('input[name="visMode"]:checked').value;
+      if (usersWrap) usersWrap.style.display = selected === 'specific' ? 'block' : 'none';
+      ov.querySelectorAll('.vis-option-card').forEach(function(card) {
+        var inp = card.querySelector('input');
+        if (inp && inp.checked) {
+          card.classList.add('active');
+          card.style.background = inp.value === 'public' ? 'rgba(78,134,245,0.08)' : inp.value === 'admin' ? 'rgba(255,69,58,0.08)' : 'rgba(191,90,242,0.08)';
+          card.style.borderColor = inp.value === 'public' ? 'var(--primary)' : inp.value === 'admin' ? 'var(--danger)' : '#bf5af2';
+        } else {
+          card.classList.remove('active');
+          card.style.background = 'rgba(255,255,255,0.02)';
+          card.style.borderColor = 'var(--border)';
+        }
+      });
+    });
+  });
+
+  ov.querySelector('#folderVisForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    var selectedMode = ov.querySelector('input[name="visMode"]:checked').value;
+    var btn = ov.querySelector('#saveVisBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+
+    var adminOnly = (selectedMode === 'admin');
+    var selectedUserIds = [];
+    if (selectedMode === 'specific') {
+      ov.querySelectorAll('.vis-user-chk:checked').forEach(function(chk) {
+        selectedUserIds.push(chk.value);
+      });
+    }
+
+    try {
+      var res = await apiSetFolderVisibility(folderId, adminOnly, selectedUserIds);
+      if (res && res.ok) {
+        toast('Folder visibility updated successfully', 'success');
+        ov.remove();
+        S.db = await apiFetchDB();
+        renderSidebarStorage();
+        if (typeof renderFilesPage === 'function') renderFilesPage(_driveId, _folderId);
+        if (typeof renderAdminPage === 'function' && S.view === 'admin') renderAdminPage();
+      } else {
+        toast(res ? (res.error || 'Failed to update visibility') : 'Network error', 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check"></i> Save Visibility';
+      }
+    } catch(err) {
+      toast('Error: ' + (err.message || err), 'error');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-check"></i> Save Visibility';
+    }
+  });
+}
+
 function promptResumeUpload() {
   var lastBatch = null;
   try {
@@ -671,8 +839,9 @@ async function openMedia(fileLocalId) {
   var dlUrl = getFileDownloadUrl(f.googleFileId, driveId, false);
   var cfg = ftCfg(f.name, f.mimeType);
   var ov = document.createElement('div'); ov.className = 'media-ov';
-  var dlBtnHtml = canDownload ? '<a href="' + dlUrl + '" download="' + esc(f.name) + '" class="btn-primary sm"><i class="fas fa-download"></i> Download</a>' : '';
-  ov.innerHTML = '<div class="media-hd"><div class="media-title"><i class="fas ' + cfg.icon + '" style="color:' + cfg.col + '"></i> ' + esc(f.name) + '</div><div style="display:flex;gap:.5rem">' + dlBtnHtml + '<button class="icon-btn" onclick="this.closest(\'.media-ov\').remove()"><i class="fas fa-times"></i></button></div></div><div class="media-body">' + (cfg.cat === 'image' ? '<img class="media-img" src="' + mediaUrl + '" alt="' + esc(f.name) + '">' : cfg.cat === 'video' ? '<video class="media-vid" src="' + mediaUrl + '" controls autoplay playsinline></video>' : cfg.cat === 'audio' ? '<audio src="' + mediaUrl + '" controls autoplay style="width:80%;max-width:500px"></audio>' : '<div style="text-align:center;padding:2rem"><i class="fas fa-file" style="font-size:3rem;color:var(--text2)"></i><p style="margin:1rem 0">Preview not available for this file type</p>' + (canDownload ? '<a href="' + dlUrl + '" class="btn-primary"><i class="fas fa-download"></i> Download File</a>' : '') + '</div>') + '</div>';
+  var dlBtnHtml = canDownload ? '<a href="' + dlUrl + '" class="icon-btn" title="Download" download><i class="fas fa-download"></i></a>' : '';
+  var noDlAttrs = !canDownload ? ' controlsList="nodownload noplaybackrate" disablePictureInPicture oncontextmenu="return false;" ' : ' controlsList="nodownload" ';
+  ov.innerHTML = '<div class="media-hd"><div class="media-title"><i class="fas ' + cfg.icon + '" style="color:' + cfg.col + '"></i> ' + esc(f.name) + '</div><div style="display:flex;gap:.5rem">' + dlBtnHtml + '<button class="icon-btn" onclick="this.closest(\'.media-ov\').remove()"><i class="fas fa-times"></i></button></div></div><div class="media-body">' + (cfg.cat === 'image' ? '<img class="media-img" src="' + mediaUrl + '" alt="' + esc(f.name) + '" oncontextmenu="' + (!canDownload ? 'return false;' : '') + '">' : cfg.cat === 'video' ? '<video class="media-vid" src="' + mediaUrl + '" controls' + noDlAttrs + 'autoplay playsinline></video>' : cfg.cat === 'audio' ? '<audio src="' + mediaUrl + '" controls' + noDlAttrs + 'autoplay style="width:80%;max-width:500px"></audio>' : '<div style="text-align:center;padding:2rem"><i class="fas fa-file" style="font-size:3rem;color:var(--text2)"></i><p style="margin:1rem 0">Preview not available for this file type</p>' + (canDownload ? '<a href="' + dlUrl + '" class="btn-primary"><i class="fas fa-download"></i> Download File</a>' : '') + '</div>') + '</div>';
   ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
   document.body.appendChild(ov);
 }

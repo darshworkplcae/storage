@@ -128,18 +128,19 @@ function renderSidebarStorage(){
   }
   const fill=$('sbQuotaFill');
   const fillWrap = fill ? fill.parentElement : null;
-  if (fill) fill.style.width=pct+'%';
+  if (fill) {
+    fill.style.width = isAuth ? (pct + '%') : '100%';
+    fill.style.background = isAuth ? 'var(--primary)' : 'linear-gradient(90deg,var(--primary),#00e5ff)';
+  }
   if (fillWrap) {
-    // If guest, hide total percent progress bar completely!
-    fillWrap.style.display = isAuth ? '' : 'none';
+    fillWrap.style.display = '';
   }
   const txt=$('sbQuotaTxt');
   if(txt) {
     if(isAuth) {
       txt.innerHTML=`<span>${fmt(totalUsed)} used</span><span>${fmt(freeBytes)} free</span>`;
     } else {
-      // Guest visitor: Only show how much space is used, never total capacity or free space
-      txt.innerHTML=`<span><i class="fas fa-database" style="color:var(--primary);margin-right:4px"></i>${fmt(totalUsed)} used</span>`;
+      txt.innerHTML=`<span><i class="fas fa-cloud" style="color:var(--primary);margin-right:4px"></i>${fmt(totalUsed)} / <strong style="color:#00e5ff">∞</strong></span><span style="color:#00e5ff;font-weight:600">Unlimited</span>`;
     }
   }
 }
@@ -341,16 +342,20 @@ function driveCard(d){
   const isAuth = !!(S.ses && S.ses.token && S.ses.role);
   const canRename = isAdmin || (S.ses.role === 'user' && isDriveAllowed(d.id));
   return `<div class="fg-card drive-card-item" onclick="navTo('files','${esc(d.id)}')" title="${esc(d.email)}">
-    <div class="fg-icon xl" style="color:${esc(d.color)}"><i class="fab fa-google-drive"></i></div>
+    <div class="fg-icon xl" style="display:flex;align-items:center;justify-content:center;margin-top:2px">
+      <img src="favicon.svg" alt="TeleDrive" style="width:48px;height:48px;display:block;filter:drop-shadow(0 0 12px ${esc(d.color||'#00e5ff')}66)">
+    </div>
     <div class="fg-name" style="font-weight:600;font-size:.95rem">${esc(d.name)}</div>
     ${isAuth ? `
       <div class="fg-meta">${fmt(used)} / ${cap?fmt(cap):'∞'} (${pct}%)</div>
       <div class="dc-bar" style="margin:.45rem 0 .3rem;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden"><div class="dc-fill" style="height:100%;border-radius:3px;width:${pct}%;background:${esc(d.color)};box-shadow:0 0 8px ${esc(d.color)}66"></div></div>
       <div class="fg-remaining" style="font-size:.76rem;color:#30d158;font-weight:600;display:flex;align-items:center;gap:4px"><i class="fas fa-circle-check" style="font-size:.7rem"></i> ${fmt(free)} free remaining</div>
     ` : `
-      <div class="fg-meta" style="font-weight:600;color:var(--text2);margin-top:.45rem;display:flex;align-items:center;justify-content:center;gap:6px">
-        <i class="fas fa-database" style="font-size:.8rem;color:var(--primary)"></i> ${fmt(used)} stored
+      <div class="fg-meta" style="font-weight:700;color:var(--text1);margin-top:.45rem;display:flex;align-items:center;justify-content:center;gap:6px;font-size:.85rem">
+        <i class="fas fa-cloud" style="font-size:.8rem;color:var(--primary)"></i> ${fmt(used)} / <span style="color:#00e5ff;font-size:1.15rem;font-weight:800;line-height:1" title="Unlimited Storage">∞</span>
       </div>
+      <div class="dc-bar" style="margin:.45rem 0 .3rem;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden"><div class="dc-fill" style="height:100%;border-radius:3px;width:100%;background:linear-gradient(90deg,var(--primary),#00e5ff);box-shadow:0 0 8px rgba(0,229,255,0.4)"></div></div>
+      <div class="fg-remaining" style="font-size:.76rem;color:#00e5ff;font-weight:700;display:flex;align-items:center;justify-content:center;gap:4px"><i class="fas fa-infinity" style="font-size:.72rem"></i> Unlimited Space</div>
     `}
     <div class="fg-acts" style="margin-top:.5rem">
       ${canRename?`<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameDrive('${esc(d.id)}','${esc(d.name).replace(/'/g,"\\'")}')" title="Rename Drive"><i class="fas fa-pen"></i></button>`:''}
@@ -389,7 +394,10 @@ function folderCard(f){
   const isLocked = !!f.isLocked;
   const isAdmin = S.ses && S.ses.role === 'admin';
   const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
-  return `<div class="fg-card ${isSelected ? 'is-selected' : ''} ${isLocked ? 'is-locked-folder' : ''}" data-item-id="${esc(f.id)}" ondblclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')" onclick="handleFolderCardClick('${esc(f.driveId)}','${esc(f.id)}', event)">
+  const isAdminOnly = !!f.adminOnly;
+  const isCustomAccess = Array.isArray(f.allowedUsers) && f.allowedUsers.length > 0;
+
+  return `<div class="fg-card folder-card ${isSelected ? 'is-selected' : ''} ${isLocked ? 'is-locked-folder' : ''} ${isAdminOnly ? 'is-admin-only' : ''}" data-item-id="${esc(f.id)}" ondblclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')" onclick="handleFolderCardClick('${esc(f.driveId)}','${esc(f.id)}', event)">
     <div class="card-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select folder">
       <i class="fas fa-check"></i>
     </div>
@@ -402,18 +410,25 @@ function folderCard(f){
         <i class="fas fa-lock"></i> <span class="sec-label">Protect</span>
       </div>
     `}
+    ${isAdmin && isAdminOnly ? `
+      <div class="card-admin-badge" title="Hidden from all users & guests (Admin Only)">
+        <i class="fas fa-user-secret"></i> Admin Only
+      </div>
+    ` : isAdmin && isCustomAccess ? `
+      <div class="card-custom-badge" title="Restricted to ${f.allowedUsers.length} user(s)">
+        <i class="fas fa-user-lock"></i> Restricted
+      </div>
+    ` : ''}
     <div class="fg-icon xl" style="position:relative;margin-top:0.35rem">
       <i class="fas ${isLocked ? 'fa-folder-closed' : 'fa-folder'}" style="color:${isLocked ? '#ffd700' : '#ff9f0a'}"></i>
     </div>
     <div class="fg-name" style="display:flex;align-items:center;justify-content:center;gap:4px">
       <span class="truncate">${esc(f.name)}</span>
     </div>
-    <div class="fg-acts">
-      ${isLocked ? `
-        <button class="icon-btn xs" style="color:#ffd700" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected Folder - Click to manage password"><i class="fas fa-shield-halved"></i></button>
-      ` : `
-        <button class="icon-btn xs" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protect Folder with Password"><i class="fas fa-lock"></i></button>
-      `}
+    <div class="fg-acts folder-acts">
+      ${isAdmin ? `
+        <button class="icon-btn xs" onclick="event.stopPropagation();showFolderVisibilityDialog('${esc(f.id)}')" title="Folder Visibility & Privacy Settings"><i class="fas ${isAdminOnly ? 'fa-eye-slash' : isCustomAccess ? 'fa-user-lock' : 'fa-eye'}"></i></button>
+      ` : ''}
       ${canDelete ? `<button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete folder"><i class="fas fa-trash-alt"></i></button>` : ''}
     </div>
   </div>`;
@@ -480,12 +495,16 @@ function folderRow(f){
   const isLocked = !!f.isLocked;
   const isAdmin = S.ses && S.ses.role === 'admin';
   const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
+  const isAdminOnly = !!f.adminOnly;
+  const isCustomAccess = Array.isArray(f.allowedUsers) && f.allowedUsers.length > 0;
   return `<div class="fl-row ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')" onclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')">
     <span style="display:flex;align-items:center;gap:8px">
       <input type="checkbox" class="row-select-check" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')">
       <i class="fas ${isLocked ? 'fa-folder-closed' : 'fa-folder'}" style="color:${isLocked ? '#ffd700' : '#ff9f0a'};margin-right:.4rem"></i>
       ${esc(f.name)}
       ${isLocked ? `<span class="badge-locked sm" style="margin-left:6px"><i class="fas fa-shield-halved"></i> Protected</span>` : ''}
+      ${isAdmin && isAdminOnly ? `<span class="badge-admin-only sm" style="margin-left:6px"><i class="fas fa-user-secret"></i> Admin Only</span>` : ''}
+      ${isAdmin && isCustomAccess ? `<span class="badge-custom-access sm" style="margin-left:6px"><i class="fas fa-user-lock"></i> Restricted</span>` : ''}
     </span>
     <span>—</span><span>${fmtDate(f.date)}</span>
     <span style="display:flex;gap:.3rem;align-items:center">
@@ -494,6 +513,9 @@ function folderRow(f){
       ` : `
         <button class="icon-btn xs" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Set Folder Password"><i class="fas fa-lock"></i></button>
       `}
+      ${isAdmin ? `
+        <button class="icon-btn xs" onclick="event.stopPropagation();showFolderVisibilityDialog('${esc(f.id)}')" title="Folder Visibility & Privacy Settings"><i class="fas ${isAdminOnly ? 'fa-eye-slash' : isCustomAccess ? 'fa-user-lock' : 'fa-eye'}"></i></button>
+      ` : ''}
       ${canDelete ? `<button class="icon-btn xs danger" onclick="confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>` : ''}
     </span>
   </div>`;
@@ -788,12 +810,14 @@ function renderTM(){
     const col = isDone ? 'var(--success)' : (isFailed || isInterrupted) ? 'var(--danger)' : isPaused ? '#ff9f0a' : isQueued ? 'var(--text3)' : 'var(--primary)';
     const ico = isDone ? 'fa-check-circle' : isFailed ? 'fa-times-circle' : isInterrupted ? 'fa-triangle-exclamation' : isPaused ? 'fa-circle-pause' : isQueued ? 'fa-clock' : 'fa-spinner fa-spin';
 
+    const remBytes = Math.max(0, (t.size || 0) - (t.uploaded || 0));
+    const etaStr = (t.speed > 0 && remBytes > 0) ? ` · ${fmtEta(remBytes, t.speed)}` : '';
     const uMB=(t.uploaded/1048576||0).toFixed(1), tMB=(t.size/1048576||0).toFixed(1), spd=t.speed?` · ${fmtSpeed(t.speed)}`:'';
     const sub = isQueued ? `Queued · ${fmt(t.size||0)}` :
                 isInterrupted ? `Interrupted (Browser closed)` :
                 isFailed ? `Failed` :
                 isDone ? `Done · ${fmt(t.size||0)}` :
-                (isPaused ? `Paused · ${uMB}/${tMB} MB` : `${uMB}/${tMB} MB${spd}`);
+                (isPaused ? `Paused · ${uMB}/${tMB} MB` : `${uMB}/${tMB} MB${spd}${etaStr}`);
 
     return `<div class="tm-item">
       <div class="tm-ico" style="color:${col}"><i class="fas ${ico}"></i></div>

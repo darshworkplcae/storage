@@ -404,11 +404,12 @@ code{background:var(--bg5);padding:.1rem .35rem;border-radius:4px;font-size:.78r
 
 /* ─── Upload bar ─── */
 .up-bar{
-  position:absolute;bottom:1rem;left:50%;transform:translateX(-50%);
-  background:var(--bg2);border:1px solid var(--border);
-  border-radius:var(--r12);padding:.7rem 1rem;
-  box-shadow:var(--shadow);z-index:200;
-  min-width:320px;max-width:420px;
+  position:fixed;bottom:1.25rem;left:50%;transform:translateX(-50%);
+  background:rgba(14,16,26,0.94);border:1px solid rgba(255,255,255,0.15);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-radius:var(--r12);padding:.75rem 1.1rem;
+  box-shadow:0 12px 36px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.08);z-index:1050;
+  width:calc(100% - 2rem);max-width:480px;
 }
 .up-bar.hidden{display:none;}
 .up-inner{display:flex;align-items:center;gap:.65rem;}
@@ -1277,6 +1278,89 @@ body {
   transform: translateY(-1px) scale(1.04);
 }
 
+/* Folder Card Action placement — Prevents any overlap with Security Badge */
+.folder-card .fg-acts {
+  top: auto;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(14, 16, 26, 0.88);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 2px 5px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 5;
+}
+
+/* Card Admin & Restricted Badges */
+.card-admin-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  background: rgba(255, 69, 58, 0.16);
+  color: #ff453a;
+  border: 1px solid rgba(255, 69, 58, 0.35);
+  letter-spacing: 0.02em;
+  z-index: 4;
+}
+
+.card-custom-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  background: rgba(191, 90, 242, 0.16);
+  color: #bf5af2;
+  border: 1px solid rgba(191, 90, 242, 0.35);
+  letter-spacing: 0.02em;
+  z-index: 4;
+}
+
+.badge-admin-only {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: rgba(255, 69, 58, 0.16);
+  color: #ff453a;
+  border: 1px solid rgba(255, 69, 58, 0.35);
+}
+
+.badge-custom-access {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: rgba(191, 90, 242, 0.16);
+  color: #bf5af2;
+  border: 1px solid rgba(191, 90, 242, 0.35);
+}
+
+/* Suppress native video download option */
+video::-internal-media-controls-download-button {
+  display: none !important;
+}
+
 
 /* Floating Multi-Select Toolbar */
 .multi-select-bar {
@@ -1779,6 +1863,17 @@ body {
   }
   .card-security-btn .sec-label {
     display: inline;
+  }
+  .up-bar {
+    width: calc(100% - 1.25rem);
+    max-width: 440px;
+    bottom: 0.85rem;
+    padding: 0.65rem 0.85rem;
+  }
+  .folder-card .fg-acts {
+    opacity: 0.95;
+    bottom: 6px;
+    right: 6px;
   }
   .hide-xs {
     display: none !important;
