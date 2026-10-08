@@ -49,7 +49,7 @@ function sFold(f){
 async function hDB(req,env){
   const db=await uGet(env,'td:db');
   if(!db)return J(null);
-  const policy = db.policy || { allowUserDownload: true, allowUserDelete: true, allowUserRename: true };
+  const policy = db.policy || { allowUserDownload: true, allowUserDelete: true };
   const r=await vSes(req,env,null);
   if(r==='admin'){
     return J({
@@ -258,6 +258,7 @@ async function hDL(req,env,gId){
     }
   }
 
+  if (url.searchParams.get('thumb') === '1') return hThumb(req, env, gId);
   const isInline=url.searchParams.get('inline')==='1';
   if(!isInline && db && db.policy && db.policy.allowUserDownload === false && ses !== 'admin'){
     return J({error:'File downloads are disabled by administrator'}, 403);
@@ -271,32 +272,6 @@ async function hDL(req,env,gId){
   const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
   const at=await gAT(env,drv.encToken);
-
-  const isThumb = url.searchParams.get('thumb') === '1';
-  if (isThumb) {
-    try {
-      const metaResp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?fields=thumbnailLink`, {
-        headers: { Authorization: `Bearer ${at}` }
-      });
-      const meta = await metaResp.json();
-      if (meta && meta.thumbnailLink) {
-        const tUrl = meta.thumbnailLink.replace(/=s\d+$/, '=s360');
-        const tResp = await fetch(tUrl);
-        if (tResp.ok) {
-          const thumbHeaders = new Headers();
-          thumbHeaders.set('Access-Control-Allow-Origin', '*');
-          thumbHeaders.set('Access-Control-Allow-Headers', 'Content-Type,Authorization,Range');
-          thumbHeaders.set('Content-Type', tResp.headers.get('Content-Type') || 'image/jpeg');
-          thumbHeaders.set('Cache-Control', 'public, max-age=604800, s-maxage=604800, immutable');
-          return new Response(tResp.body, { status: 200, headers: thumbHeaders });
-        }
-      }
-    } catch(err) {}
-    if (fileObj && fileObj.mimeType && fileObj.mimeType.startsWith('video/')) {
-      return J({ error: 'Thumbnail not available' }, 404);
-    }
-  }
-
   const range=req.headers.get('Range');
   const gResp=await fetch(`https://www.googleapis.com/drive/v3/files/${gId}?alt=media`,{
     headers:{
@@ -322,6 +297,187 @@ async function hDL(req,env,gId){
     headers:respHeaders
   });
 }
+async function hThumb(req,env,gId){
+  const url=new URL(req.url);
+  const tokenParam=url.searchParams.get('token');
+  let ses=null;
+  if(tokenParam){
+    const v=await uGet(env,`td:ses:${tokenParam}`);
+    ses=String(v||'').replace(/^"|"$/g,'')||null;
+  }
+  if(!ses) ses=await vSes(req,env,null);
+  const db=await uGet(env,'td:db');
+  const fileObj=(db&&db.files||[]).find(f=>f.googleFileId===gId);
+
+  // Security checks: file-level and parent/ancestor folder visibility
+  if(fileObj){
+    if(fileObj.adminOnly && ses !== 'admin') return new Response('Access denied',{status:403,headers:COR});
+    if(fileObj.destroyed && ses !== 'admin') return new Response('Access denied',{status:403,headers:COR});
+    if(Array.isArray(fileObj.allowedUsers) && fileObj.allowedUsers.length && ses !== 'admin' && (!ses || !fileObj.allowedUsers.includes(ses))){
+      return new Response('Access denied',{status:403,headers:COR});
+    }
+    if(isFolderAccessDenied(fileObj.folderId, db, ses)) return new Response('Access denied',{status:403,headers:COR});
+    if(ses && ses !== 'admin'){
+      const u=(db.users||[]).find(x=>x.id===ses);
+      const allowed = u ? u.allowedDrives : null;
+      const allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
+      if(allowedList && !allowedList.includes(fileObj.driveId)) return new Response('Access denied',{status:403,headers:COR});
+    }
+  }
+
+  if(!ses){
+    const dIdParam=fileObj ? fileObj.driveId : url.searchParams.get('driveId');
+    const isPublicDrive=(db&&db.openDriveId&&(dIdParam===db.openDriveId || !dIdParam));
+    if(!isPublicDrive) return new Response('Sign in required',{status:401,headers:COR});
+  }
+
+  const dId=url.searchParams.get('driveId') || (fileObj ? fileObj.driveId : null);
+  const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
+  if(!drv) return new Response('Drive not found',{status:404,headers:COR});
+
+  // Check Upstash KV cache for thumbnail link
+  let cachedThumbUrl=await uGet(env,`td:th:${gId}`);
+  if(cachedThumbUrl && typeof cachedThumbUrl==='string' && cachedThumbUrl.startsWith('http')){
+    try{
+      const tResp=await fetch(cachedThumbUrl);
+      if(tResp.ok){
+        const ct=tResp.headers.get('Content-Type')||'image/jpeg';
+        return new Response(tResp.body,{
+          status:200,
+          headers:{
+            ...COR,
+            'Content-Type':ct,
+            'Cache-Control':'public, max-age=2592000, s-maxage=2592000, immutable'
+          }
+        });
+      }
+    }catch(e){}
+  }
+
+  // Fetch thumbnail info from Google Drive API
+  const at=await gAT(env,drv.encToken);
+  const gResp=await fetch(`https://www.googleapis.com/drive/v3/files/${gId}?fields=id,name,mimeType,thumbnailLink,hasThumbnail`,{
+    headers:{Authorization:`Bearer ${at}`}
+  });
+  if(!gResp.ok){
+    return new Response('Thumbnail not available',{status:404,headers:COR});
+  }
+  const gData=await gResp.json();
+  if(!gData.thumbnailLink){
+    return new Response('No thumbnail',{status:404,headers:COR});
+  }
+
+  // Enhanced resolution =s360 for high-DPI cards
+  const highResThumb=gData.thumbnailLink.replace(/=s\d+$/, '=s360');
+
+  // Cache thumbnail in Upstash for 14 days
+  await uSet(env,`td:th:${gId}`,highResThumb);
+  await uExp(env,`td:th:${gId}`,1209600);
+
+  const tResp=await fetch(highResThumb);
+  if(!tResp.ok){
+    return new Response('Failed to load thumbnail',{status:404,headers:COR});
+  }
+  const ct=tResp.headers.get('Content-Type')||'image/jpeg';
+  return new Response(tResp.body,{
+    status:200,
+    headers:{
+      ...COR,
+      'Content-Type':ct,
+      'Cache-Control':'public, max-age=2592000, s-maxage=2592000, immutable'
+    }
+  });
+}
+
+async function hRenameFile(req,env,fileId){
+  const ses=await vSes(req,env,null);
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const file=(db.files||[]).find(f=>f.id===fileId || f.googleFileId===fileId);
+  if(!file) return J({error:'File not found'},404);
+
+  const isOpenTarget=(db.openDriveId && file.driveId===db.openDriveId);
+  if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
+  if(db.policy && db.policy.allowUserRename === false && ses !== 'admin'){
+    return J({error:'Renaming is disabled by administrator'},403);
+  }
+
+  if(file.adminOnly && ses !== 'admin') return J({error:'Access denied'},403);
+  if(isFolderAccessDenied(file.folderId, db, ses)) return J({error:'Access denied'},403);
+
+  const body=await req.json().catch(()=>({}));
+  const newName=(body.name||'').trim();
+  if(!newName) return J({error:'New file name is required'},400);
+
+  const drv=(db.drives||[]).find(d=>d.id===file.driveId);
+  if(!drv) return J({error:'Drive not found'},404);
+
+  // Update name in Google Drive
+  try{
+    const at=await gAT(env,drv.encToken);
+    await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.googleFileId)}?supportsAllDrives=true`,{
+      method:'PATCH',
+      headers:{
+        Authorization:`Bearer ${at}`,
+        'Content-Type':'application/json'
+      },
+      body:JSON.stringify({name:newName})
+    });
+  }catch(e){
+    console.error('Google Drive rename error:', e);
+  }
+
+  const oldName=file.name;
+  file.name=newName;
+
+  if(!db.activityLog) db.activityLog=[];
+  db.activityLog.unshift({id:uid(),type:'rename',name:newName,oldName,driveId:file.driveId,by:ses||'guest',ts:new Date().toISOString()});
+  if(db.activityLog.length>500) db.activityLog=db.activityLog.slice(0,500);
+
+  await uSet(env,'td:db',db);
+  return J({ok:true,name:newName});
+}
+
+async function hRenameFolder(req,env,folderId){
+  const ses=await vSes(req,env,null);
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const folder=(db.folders||[]).find(f=>f.id===folderId);
+  if(!folder) return J({error:'Folder not found'},404);
+
+  const isOpenTarget=(db.openDriveId && folder.driveId===db.openDriveId);
+  if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
+  if(db.policy && db.policy.allowUserRename === false && ses !== 'admin'){
+    return J({error:'Renaming is disabled by administrator'},403);
+  }
+  if(folder.adminOnly && ses !== 'admin') return J({error:'Access denied'},403);
+
+  const body=await req.json().catch(()=>({}));
+  const newName=(body.name||'').trim();
+  if(!newName) return J({error:'New folder name is required'},400);
+
+  const drv=(db.drives||[]).find(d=>d.id===folder.driveId);
+  if(drv && folder.googleFolderId){
+    try{
+      const at=await gAT(env,drv.encToken);
+      await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folder.googleFolderId)}?supportsAllDrives=true`,{
+        method:'PATCH',
+        headers:{
+          Authorization:`Bearer ${at}`,
+          'Content-Type':'application/json'
+        },
+        body:JSON.stringify({name:newName})
+      });
+    }catch(e){
+      console.error('Google Drive folder rename error:', e);
+    }
+  }
+
+  folder.name=newName;
+  await uSet(env,'td:db',db);
+  return J({ok:true,name:newName});
+}
+
 async function hDF(req,env,fileId){
   const db=await uGet(env,'td:db');
   if(!db) return J({error:'DB error'},500);
@@ -959,6 +1115,7 @@ async function hSetFolderVisibility(req,env){
 async function hGetPolicy(req,env){
   const db=await uGet(env,'td:db');
   const policy=(db&&db.policy)||{allowUserDownload:true,allowUserDelete:true,allowUserRename:true};
+  if(policy.allowUserRename === undefined) policy.allowUserRename = true;
   return J({ok:true,policy});
 }
 
@@ -1003,84 +1160,6 @@ async function hRenameDrive(req,env,driveId){
   return J({ok:true,name:drv.name});
 }
 
-async function hRenameFile(req,env,fileId){
-  const ses=await vSes(req,env,null);
-  const db=await uGet(env,'td:db');
-  if(!db) return J({error:'DB error'},500);
-  const file=(db.files||[]).find(f=>f.id===fileId || f.googleFileId===fileId);
-  if(!file) return J({error:'File not found'},404);
-  const isOpenTarget=(db.openDriveId && file.driveId===db.openDriveId);
-  if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
-
-  if(db.policy && db.policy.allowUserRename === false && ses !== 'admin'){
-    return J({error:'File renaming is disabled by administrator'}, 403);
-  }
-
-  const{name}=await req.json().catch(()=>({}));
-  if(!name||!name.trim()) return J({error:'Valid file name required'},400);
-  const newName=name.trim();
-  const oldName=file.name;
-  file.name=newName;
-
-  const drv=(db.drives||[]).find(d=>d.id===file.driveId);
-  if(drv && file.googleFileId){
-    try{
-      const at=await gAT(env,drv.encToken);
-      await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.googleFileId)}?supportsAllDrives=true`,{
-        method:'PATCH',
-        headers:{Authorization:`Bearer ${at}`,'Content-Type':'application/json'},
-        body:JSON.stringify({name:newName})
-      });
-    }catch(err){}
-  }
-
-  if(!db.activityLog) db.activityLog=[];
-  db.activityLog.unshift({id:uid(),type:'rename_file',oldName,name:newName,driveId:file.driveId,by:ses||'guest',ts:new Date().toISOString()});
-  if(db.activityLog.length>500) db.activityLog=db.activityLog.slice(0,500);
-
-  await uSet(env,'td:db',db);
-  return J({ok:true,file});
-}
-
-async function hRenameFolder(req,env,folderId){
-  const ses=await vSes(req,env,null);
-  const db=await uGet(env,'td:db');
-  if(!db) return J({error:'DB error'},500);
-  const folder=(db.folders||[]).find(f=>f.id===folderId);
-  if(!folder) return J({error:'Folder not found'},404);
-  const isOpenTarget=(db.openDriveId && folder.driveId===db.openDriveId);
-  if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
-
-  if(db.policy && db.policy.allowUserRename === false && ses !== 'admin'){
-    return J({error:'Folder renaming is disabled by administrator'}, 403);
-  }
-
-  const{name}=await req.json().catch(()=>({}));
-  if(!name||!name.trim()) return J({error:'Valid folder name required'},400);
-  const newName=name.trim();
-  const oldName=folder.name;
-  folder.name=newName;
-
-  const drv=(db.drives||[]).find(d=>d.id===folder.driveId);
-  if(drv && folder.googleFolderId){
-    try{
-      const at=await gAT(env,drv.encToken);
-      await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folder.googleFolderId)}?supportsAllDrives=true`,{
-        method:'PATCH',
-        headers:{Authorization:`Bearer ${at}`,'Content-Type':'application/json'},
-        body:JSON.stringify({name:newName})
-      });
-    }catch(err){}
-  }
-
-  if(!db.activityLog) db.activityLog=[];
-  db.activityLog.unshift({id:uid(),type:'rename_folder',oldName,name:newName,driveId:folder.driveId,by:ses||'guest',ts:new Date().toISOString()});
-  if(db.activityLog.length>500) db.activityLog=db.activityLog.slice(0,500);
-
-  await uSet(env,'td:db',db);
-  return J({ok:true,folder});
-}
-
 async function hOpenDrive(req,env){
   if(!await vSes(req,env,'admin')) return J({error:'Unauthorized'},401);
   const{openDriveId}=await req.json().catch(()=>({}));
@@ -1109,6 +1188,8 @@ export async function onRequest({request,env}){
     if(p==='upload/chunk'&&m==='PUT')return hUChunk(request,env);
     if(p==='upload/complete'&&m==='POST')return hUC(request,env);
     if(p.startsWith('download/')&&m==='GET')return hDL(request,env,p.replace('download/',''));
+    if(p.startsWith('thumb/')&&m==='GET')return hThumb(request,env,p.replace('thumb/',''));
+    if(p.startsWith('files/rename/')&&m==='POST')return hRenameFile(request,env,p.replace('files/rename/',''));
     if(p==='files/batch-trash'&&m==='POST')return hBatchTrash(request,env);
     if(p==='files/trash/empty'&&(m==='POST'||m==='DELETE'))return hEmptyTrash(request,env);
     if(p==='files/trash/batch-request-restore'&&m==='POST')return hBatchRequestRestore(request,env);
@@ -1119,6 +1200,7 @@ export async function onRequest({request,env}){
     if(p.startsWith('files/trash/permanent-delete/')&&m==='DELETE')return hPermanentDelete(request,env,p.replace('files/trash/permanent-delete/',''));
     if(p.startsWith('files/star/')&&m==='POST')return hStar(request,env,p.replace('files/star/',''));
     if(p.startsWith('files/')&&m==='DELETE')return hDF(request,env,p.replace('files/',''));
+    if(p.startsWith('folders/rename/')&&m==='POST')return hRenameFolder(request,env,p.replace('folders/rename/',''));
     if(p==='folders/visibility'&&m==='POST')return hSetFolderVisibility(request,env);
     if(p==='folders'&&m==='POST')return hMF(request,env);
     if(p.startsWith('folders/lock/')&&m==='POST')return hLockFolder(request,env,p.replace('folders/lock/',''));
@@ -1134,8 +1216,6 @@ export async function onRequest({request,env}){
     if(p==='admin/change-password'&&m==='POST')return hCP(request,env);
     if(p==='admin/open-drive'&&m==='POST')return hOpenDrive(request,env);
     if(p.startsWith('drives/rename/')&&m==='POST')return hRenameDrive(request,env,p.replace('drives/rename/',''));
-    if(p.startsWith('files/rename/')&&m==='POST')return hRenameFile(request,env,p.replace('files/rename/',''));
-    if(p.startsWith('folders/rename/')&&m==='POST')return hRenameFolder(request,env,p.replace('folders/rename/',''));
     if(p==='admin/init'&&m==='POST')return hInit(request,env);
     return J({error:'Not found',path:p},404);
   }catch(e){return J({error:e.message||'Server error'},500);}

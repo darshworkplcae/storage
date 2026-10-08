@@ -1013,6 +1013,94 @@ function showNewFolderDialog() {
   });
 }
 
+async function promptRenameFile(fileId, currentName) {
+  var isAdmin = S.ses && S.ses.role === 'admin';
+  if (!isAdmin && S.db && S.db.policy && S.db.policy.allowUserRename === false) {
+    toast('File renaming is disabled by administrator', 'warning');
+    return;
+  }
+  var newName = prompt('Enter new file name:', currentName || '');
+  if (!newName || !newName.trim() || newName.trim() === currentName) return;
+  toast('Renaming file…', 'info');
+  var res = await apiRenameFile(fileId, newName.trim());
+  if (res && res.ok) {
+    toast('File renamed to: ' + res.name, 'success');
+    if (S.db && Array.isArray(S.db.files)) {
+      var f = S.db.files.find(function(x){ return x.id === fileId || x.googleFileId === fileId; });
+      if (f) f.name = res.name;
+    }
+    renderFilesPage(_driveId, _folderId);
+  } else {
+    toast(res ? (res.error || 'Failed to rename file') : 'Network error', 'error');
+  }
+}
+
+async function promptRenameFolder(folderId, currentName) {
+  var isAdmin = S.ses && S.ses.role === 'admin';
+  if (!isAdmin && S.db && S.db.policy && S.db.policy.allowUserRename === false) {
+    toast('Folder renaming is disabled by administrator', 'warning');
+    return;
+  }
+  var newName = prompt('Enter new folder name:', currentName || '');
+  if (!newName || !newName.trim() || newName.trim() === currentName) return;
+  toast('Renaming folder…', 'info');
+  var res = await apiRenameFolder(folderId, newName.trim());
+  if (res && res.ok) {
+    toast('Folder renamed to: ' + res.name, 'success');
+    if (S.db && Array.isArray(S.db.folders)) {
+      var f = S.db.folders.find(function(x){ return x.id === folderId; });
+      if (f) f.name = res.name;
+    }
+    renderFilesPage(_driveId, _folderId);
+  } else {
+    toast(res ? (res.error || 'Failed to rename folder') : 'Network error', 'error');
+  }
+}
+
+function showIPhoneFastUploadTip() {
+  if (typeof toggleMobileFab === 'function') toggleMobileFab(false);
+  var html = `
+    <div class="modal-backdrop" id="iphoneTipModal" onclick="if(event.target===this)this.remove()">
+      <div class="modal-card" style="max-width:440px">
+        <div class="modal-hd">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:36px;height:36px;border-radius:10px;background:rgba(255,215,0,0.15);color:#ffd700;display:flex;align-items:center;justify-content:center;font-size:1.1rem">
+              <i class="fas fa-bolt"></i>
+            </div>
+            <div>
+              <h3 style="margin:0;font-size:1rem;color:var(--text1)">iPhone Fast Upload Guide</h3>
+              <p style="margin:0;font-size:.75rem;color:var(--text3)">Bypass the 30-minute "Preparing video" wheel</p>
+            </div>
+          </div>
+          <button class="icon-btn xs" onclick="this.closest('.modal-backdrop').remove()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body" style="font-size:.85rem;color:var(--text2);line-height:1.55;display:flex;flex-direction:column;gap:12px">
+          <div style="background:rgba(255,69,58,0.1);border:1px solid rgba(255,69,58,0.25);border-radius:10px;padding:10px 12px;color:#ff8585;font-size:.8rem">
+            <i class="fas fa-circle-info" style="margin-right:6px"></i> <strong>Why iPhone spins the white wheel:</strong> iOS tries to compress and convert 4K/HEVC videos before sending them to Safari, taking 30–45 minutes on 5GB–10GB videos.
+          </div>
+          <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px">
+            <div style="font-weight:600;color:var(--text1);margin-bottom:6px;display:flex;align-items:center;gap:6px">
+              <span style="background:var(--primary);color:#fff;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:.72rem">1</span>
+              Method 1: Instant "Choose Files" (Zero Wait)
+            </div>
+            <p style="margin:0;font-size:.8rem;color:var(--text2)">When you tap Upload and iOS asks where to choose from, tap <strong>"Choose Files"</strong> (Files app / iCloud / On My iPhone) instead of "Photo Library". Large 10GB–20GB videos upload immediately without any verification or conversion wait!</p>
+          </div>
+          <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px">
+            <div style="font-weight:600;color:var(--text1);margin-bottom:6px;display:flex;align-items:center;gap:6px">
+              <span style="background:var(--primary);color:#fff;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:.72rem">2</span>
+              Method 2: Permanent iPhone Setting
+            </div>
+            <p style="margin:0;font-size:.8rem;color:var(--text2)">Open iPhone <strong>Settings → Photos</strong>, scroll down to <strong>"Transfer to Mac or PC"</strong>, and choose <strong>"Keep Originals"</strong>. This stops iOS from converting videos forever!</p>
+          </div>
+        </div>
+        <div class="modal-ft" style="display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn-primary sm" onclick="this.closest('.modal-backdrop').remove();triggerMobileUploadFiles()"><i class="fas fa-cloud-arrow-up"></i> Upload Now</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
 async function requestRestoreFile(fileId) {
   toast('Requesting restore…', 'info');
   var r = await apiRequestRestore(fileId);

@@ -194,6 +194,10 @@ function toggleMobileFab(forceState) {
 
 function triggerMobileUploadFiles() {
   toggleMobileFab(false);
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  if (isIOS) {
+    toast('⚡ iPhone: Choose "Choose Files" for 0-wait 10GB video upload!', 'info', 5000);
+  }
   var fi = $('fileInput');
   if (fi) fi.click();
 }

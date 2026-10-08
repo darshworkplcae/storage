@@ -422,97 +422,22 @@ function handleFolderCardClick(driveId, folderId, event){
 }
 
 // ─── Folder / File cards ───────────────────────────────
-window._videoThumbCache = window._videoThumbCache || new Map();
-window._videoThumbQueue = window._videoThumbQueue || [];
-window._videoThumbActive = window._videoThumbActive || 0;
-
 function handleVideoThumbFallback(imgEl) {
   if (!imgEl) return;
-  const vidId = imgEl.dataset.vidId;
-  const vidUrl = imgEl.dataset.vidUrl;
-  if (!vidUrl) return;
-
-  if (window._videoThumbCache.has(vidId)) {
-    imgEl.src = window._videoThumbCache.get(vidId);
-    return;
-  }
-
   imgEl.onerror = null;
-  imgEl.style.opacity = '0.3';
-  window._videoThumbQueue.push({ imgEl, vidUrl, vidId });
-  processVideoThumbQueue();
-}
-
-function processVideoThumbQueue() {
-  if (window._videoThumbActive >= 2 || window._videoThumbQueue.length === 0) return;
-  const item = window._videoThumbQueue.shift();
-  if (!item || !item.imgEl || !document.body.contains(item.imgEl)) {
-    processVideoThumbQueue();
-    return;
-  }
-
-  window._videoThumbActive++;
-  const v = document.createElement('video');
-  v.crossOrigin = 'anonymous';
-  v.preload = 'metadata';
-  v.muted = true;
-  v.playsInline = true;
-
-  let cleaned = false;
-  const cleanup = () => {
-    if (cleaned) return;
-    cleaned = true;
-    try {
-      v.pause();
-      v.removeAttribute('src');
-      v.load();
-      v.remove();
-    } catch(e){}
-    window._videoThumbActive--;
-    setTimeout(processVideoThumbQueue, 50);
-  };
-
-  const timer = setTimeout(cleanup, 6000);
-
-  const captureFrame = () => {
-    clearTimeout(timer);
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = 240;
-      canvas.height = 150;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(v, 0, 0, 240, 150);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-      window._videoThumbCache.set(item.vidId, dataUrl);
-      if (document.body.contains(item.imgEl)) {
-        item.imgEl.src = dataUrl;
-        item.imgEl.style.opacity = '1';
-      }
-    } catch(e) {
-      if (document.body.contains(item.imgEl)) {
-        item.imgEl.style.opacity = '1';
-      }
-    }
-    cleanup();
-  };
-
-  v.onloadeddata = () => {
-    if (v.duration && v.duration > 1) {
-      v.currentTime = 1;
+  imgEl.style.display = 'none';
+  const parent = imgEl.parentElement;
+  if (parent) {
+    let poster = parent.querySelector('.video-thumb-poster');
+    if (!poster) {
+      poster = document.createElement('div');
+      poster.className = 'video-thumb-poster';
+      poster.innerHTML = '<i class="fas fa-film video-strip-icon"></i><span class="video-tag-pill">VIDEO</span>';
+      parent.insertBefore(poster, parent.firstChild);
     } else {
-      captureFrame();
+      poster.style.display = 'flex';
     }
-  };
-
-  v.onseeked = () => {
-    captureFrame();
-  };
-
-  v.onerror = () => {
-    cleanup();
-  };
-
-  v.src = item.vidUrl + '#t=0.5';
+  }
 }
 
 function folderCard(f){
@@ -573,7 +498,7 @@ function fileCard(f){
     </div>
     ${isImage ? `
       <div class="fg-thumb-wrap">
-        <img class="fg-thumb" src="${previewUrl}" alt="${esc(f.name)}" loading="lazy" decoding="async" onerror="this.parentElement.innerHTML='<div class=\\'fg-icon\\' style=\\'color:${cfg.col}\\'><i class=\\'fas ${cfg.icon}\\'></i></div>'">
+        <img class="fg-thumb" src="${previewUrl}&thumb=1" alt="${esc(f.name)}" loading="lazy" decoding="async" onerror="this.parentElement.innerHTML='<div class=\\'fg-icon\\' style=\\'color:${cfg.col}\\'><i class=\\'fas ${cfg.icon}\\'></i></div>'">
         <div class="thumb-hover-overlay"><i class="fas fa-eye"></i></div>
       </div>
     ` : isVideo ? `
