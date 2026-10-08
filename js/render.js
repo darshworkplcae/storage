@@ -389,21 +389,111 @@ function handleFolderCardClick(driveId, folderId, event){
 }
 
 // ─── Folder / File cards ───────────────────────────────
+function captureVideoFrameFromUrl(vidUrl, onCaptured) {
+  if (!vidUrl) return;
+  try {
+    var v = document.createElement('video');
+    v.preload = 'metadata';
+    v.muted = true;
+    v.playsInline = true;
+    v.crossOrigin = 'anonymous';
+    v.src = vidUrl;
+
+    var done = false;
+    var timer = setTimeout(function () {
+      if (!done) { done = true; v.src = ''; }
+    }, 6000);
+
+    v.onloadedmetadata = function () {
+      v.currentTime = 1;
+    };
+
+    v.onseeked = function () {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        var canvas = document.createElement('canvas');
+        var w = v.videoWidth || 360;
+        var h = v.videoHeight || 200;
+        var maxDim = 360;
+        var scale = Math.min(1, maxDim / Math.max(w, h));
+        canvas.width = Math.round(w * scale);
+        canvas.height = Math.round(h * scale);
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+        var dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        v.src = '';
+        onCaptured(dataUrl);
+      } catch (e) {
+        v.src = '';
+      }
+    };
+    v.onerror = function () {
+      if (!done) { done = true; clearTimeout(timer); v.src = ''; }
+    };
+  } catch (e) {}
+}
+
 function handleVideoThumbFallback(imgEl) {
   if (!imgEl) return;
   imgEl.onerror = null;
-  imgEl.style.display = 'none';
-  const parent = imgEl.parentElement;
-  if (parent) {
-    let poster = parent.querySelector('.video-thumb-poster');
-    if (!poster) {
-      poster = document.createElement('div');
-      poster.className = 'video-thumb-poster';
-      poster.innerHTML = '<i class="fas fa-film video-strip-icon"></i><span class="video-tag-pill">VIDEO</span>';
-      parent.insertBefore(poster, parent.firstChild);
-    } else {
-      poster.style.display = 'flex';
-    }
+
+  var parent = imgEl.parentElement;
+  var poster = parent ? parent.querySelector('.video-thumb-poster') : null;
+  if (parent && !poster) {
+    poster = document.createElement('div');
+    poster.className = 'video-thumb-poster';
+    poster.innerHTML = '<i class="fas fa-film video-strip-icon"></i><span class="video-tag-pill">VIDEO</span>';
+    parent.insertBefore(poster, parent.firstChild);
+  } else if (poster) {
+    poster.style.display = 'flex';
+  }
+
+  var vidUrl = imgEl.dataset.vidUrl;
+  var vidId = imgEl.dataset.vidId;
+  var gId = imgEl.dataset.gid;
+
+  // 1. Try to capture a frame directly from the streaming video URL
+  if (vidUrl) {
+    captureVideoFrameFromUrl(vidUrl, function(dataUrl) {
+      if (dataUrl && imgEl.isConnected) {
+        imgEl.src = dataUrl;
+        imgEl.style.display = 'block';
+        if (poster) poster.style.display = 'none';
+        try {
+          if (gId) localStorage.setItem('td_vthumb_' + gId, dataUrl);
+          if (vidId) localStorage.setItem('td_vthumb_' + vidId, dataUrl);
+        } catch(e) {}
+      }
+    });
+  }
+
+  // 2. Start smart retry polling for Google Drive async thumbnail generation
+  var retries = parseInt(imgEl.dataset.retries || '0', 10);
+  if (retries < 8) {
+    imgEl.dataset.retries = String(retries + 1);
+    var delay = 3500 + retries * 1500;
+    setTimeout(function () {
+      if (!imgEl.isConnected) return;
+      var testImg = new Image();
+      var base = imgEl.src.split('&_retry=')[0];
+      testImg.src = base + '&_retry=' + Date.now();
+      testImg.onload = function () {
+        if (imgEl.isConnected) {
+          imgEl.src = testImg.src;
+          imgEl.style.display = 'block';
+          if (poster) poster.style.display = 'none';
+          try {
+            if (gId) localStorage.setItem('td_vthumb_' + gId, testImg.src);
+            if (vidId) localStorage.setItem('td_vthumb_' + vidId, testImg.src);
+          } catch(e) {}
+        }
+      };
+      testImg.onerror = function () {
+        handleVideoThumbFallback(imgEl);
+      };
+    }, delay);
   }
 }
 
@@ -484,7 +574,7 @@ function fileCard(f){
       </div>
     ` : isVideo ? `
       <div class="fg-thumb-wrap video-thumb-wrap">
-        <img class="fg-thumb video-fg-thumb" src="${previewUrl}&thumb=1" alt="${esc(f.name)}" loading="lazy" decoding="async" data-vid-url="${previewUrl}" data-vid-id="${esc(f.id)}" onerror="handleVideoThumbFallback(this)">
+        <img class="fg-thumb video-fg-thumb" src="${(localStorage.getItem('td_vthumb_' + f.googleFileId) || localStorage.getItem('td_vthumb_' + f.id)) || (previewUrl + '&thumb=1')}" alt="${esc(f.name)}" loading="lazy" decoding="async" data-vid-url="${previewUrl}" data-vid-id="${esc(f.id)}" data-gid="${esc(f.googleFileId)}" onerror="handleVideoThumbFallback(this)">
         <div class="video-play-badge"><i class="fas fa-play"></i></div>
         <span class="video-tag-pill">VIDEO</span>
         <div class="thumb-hover-overlay"><i class="fas fa-play"></i></div>

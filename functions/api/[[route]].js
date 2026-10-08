@@ -171,7 +171,7 @@ async function hUI(req,env){
 }
 async function hUC(req,env){
   const body=await req.json().catch(()=>({}));
-  const{fileLocalId,googleFileId,driveId,folderId,name,size,mimeType}=body;
+  const{fileLocalId,googleFileId,driveId,folderId,name,size,mimeType,thumb}=body;
   const db=await uGet(env,'td:db');
   const isOpenTarget=(db&&db.openDriveId&&driveId===db.openDriveId);
   const ses=await vSes(req,env,null);
@@ -201,6 +201,12 @@ async function hUC(req,env){
   db.activityLog.unshift({id:uid(),type:'upload',name,size,driveId,driveLetter:drv?drv.email:'?',ts:new Date().toISOString()});
   if(db.activityLog.length>500) db.activityLog=db.activityLog.slice(0,500);
   await uSet(env,'td:db',db);
+  if(thumb && typeof thumb === 'string' && thumb.startsWith('data:image/')){
+    try{
+      await uSet(env, `td:th:${googleFileId}`, thumb);
+      await uExp(env, `td:th:${googleFileId}`, 2592000);
+    }catch(e){}
+  }
   return J({ok:true});
 }
 function isFolderAccessDenied(folderId, db, ses) {
@@ -335,23 +341,41 @@ async function hThumb(req,env,gId){
   const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
   if(!drv) return new Response('Drive not found',{status:404,headers:COR});
 
-  // Check Upstash KV cache for thumbnail link
+  // Check Upstash KV cache for thumbnail link or data URI
   let cachedThumbUrl=await uGet(env,`td:th:${gId}`);
-  if(cachedThumbUrl && typeof cachedThumbUrl==='string' && cachedThumbUrl.startsWith('http')){
-    try{
-      const tResp=await fetch(cachedThumbUrl);
-      if(tResp.ok){
-        const ct=tResp.headers.get('Content-Type')||'image/jpeg';
-        return new Response(tResp.body,{
-          status:200,
-          headers:{
+  if(cachedThumbUrl && typeof cachedThumbUrl==='string'){
+    if(cachedThumbUrl.startsWith('data:image/')){
+      try{
+        const commaIdx = cachedThumbUrl.indexOf(',');
+        const meta = cachedThumbUrl.slice(0, commaIdx);
+        const b64 = cachedThumbUrl.slice(commaIdx + 1);
+        const ct = meta.split(';')[0].replace('data:', '') || 'image/jpeg';
+        const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        return new Response(bin, {
+          status: 200,
+          headers: {
             ...COR,
-            'Content-Type':ct,
-            'Cache-Control':'public, max-age=2592000, s-maxage=2592000, immutable'
+            'Content-Type': ct,
+            'Cache-Control': 'public, max-age=2592000, s-maxage=2592000, immutable'
           }
         });
-      }
-    }catch(e){}
+      }catch(e){}
+    } else if(cachedThumbUrl.startsWith('http')){
+      try{
+        const tResp=await fetch(cachedThumbUrl);
+        if(tResp.ok){
+          const ct=tResp.headers.get('Content-Type')||'image/jpeg';
+          return new Response(tResp.body,{
+            status:200,
+            headers:{
+              ...COR,
+              'Content-Type':ct,
+              'Cache-Control':'public, max-age=2592000, s-maxage=2592000, immutable'
+            }
+          });
+        }
+      }catch(e){}
+    }
   }
 
   // Fetch thumbnail info from Google Drive API
@@ -360,11 +384,11 @@ async function hThumb(req,env,gId){
     headers:{Authorization:`Bearer ${at}`}
   });
   if(!gResp.ok){
-    return new Response('Thumbnail not available',{status:404,headers:COR});
+    return new Response('Thumbnail not available',{status:404,headers:{...COR,'Cache-Control':'no-cache, no-store, must-revalidate'}});
   }
   const gData=await gResp.json();
   if(!gData.thumbnailLink){
-    return new Response('No thumbnail',{status:404,headers:COR});
+    return new Response('Thumbnail processing by Google Drive',{status:404,headers:{...COR,'Cache-Control':'no-cache, no-store, must-revalidate'}});
   }
 
   // Enhanced resolution =s360 for high-DPI cards

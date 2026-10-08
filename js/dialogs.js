@@ -363,6 +363,72 @@ async function processFolderFiles(files) {
   }
 }
 
+async function generateLocalVideoThumbnail(file) {
+  return new Promise(function (resolve) {
+    if (!file) return resolve(null);
+    var isVid = (file.type && file.type.startsWith('video/')) || /\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(file.name);
+    if (!isVid) return resolve(null);
+    try {
+      var video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      var objUrl = URL.createObjectURL(file);
+      video.src = objUrl;
+
+      var done = false;
+      var timer = setTimeout(function () {
+        if (!done) {
+          done = true;
+          URL.revokeObjectURL(objUrl);
+          resolve(null);
+        }
+      }, 5000);
+
+      video.onloadedmetadata = function () {
+        var seekTime = 1;
+        if (video.duration && video.duration > 0) {
+          seekTime = Math.min(2, video.duration * 0.15);
+        }
+        video.currentTime = seekTime;
+      };
+
+      video.onseeked = function () {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        try {
+          var canvas = document.createElement('canvas');
+          var w = video.videoWidth || 360;
+          var h = video.videoHeight || 200;
+          var maxDim = 360;
+          var scale = Math.min(1, maxDim / Math.max(w, h));
+          canvas.width = Math.round(w * scale);
+          canvas.height = Math.round(h * scale);
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          var dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          URL.revokeObjectURL(objUrl);
+          resolve(dataUrl);
+        } catch (e) {
+          URL.revokeObjectURL(objUrl);
+          resolve(null);
+        }
+      };
+
+      video.onerror = function () {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        URL.revokeObjectURL(objUrl);
+        resolve(null);
+      };
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
 async function uploadOne(file, targetFolderId, existingTid) {
   _cancelSignal = { cancelled: false, paused: false, resumeResolve: null, xhr: null };
   var tId = existingTid || uid();
@@ -382,6 +448,8 @@ async function uploadOne(file, targetFolderId, existingTid) {
 
   try {
     var destFolder = targetFolderId || _folderId || null;
+    var localThumbPromise = generateLocalVideoThumbnail(file);
+
     // Step 1: Get Google Drive resumable upload URL from backend
     if (upStatus) upStatus.textContent = 'Connecting…';
     var init = await apiUploadInit(_driveId, destFolder, file.name, file.size, file.type || 'application/octet-stream');
@@ -401,6 +469,14 @@ async function uploadOne(file, targetFolderId, existingTid) {
       tmUpdate(tId, pct, speed, loaded);
     }, _cancelSignal);
 
+    var localThumb = await localThumbPromise;
+    if (localThumb) {
+      try {
+        localStorage.setItem('td_vthumb_' + result.googleFileId, localThumb);
+        localStorage.setItem('td_vthumb_' + init.fileLocalId, localThumb);
+      } catch(e) {}
+    }
+
     // Step 3: Save metadata to our DB
     if (upStatus) upStatus.textContent = 'Saving…';
     var activeDriveId = _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : null);
@@ -411,7 +487,8 @@ async function uploadOne(file, targetFolderId, existingTid) {
       folderId: destFolder,
       name: file.name,
       size: file.size,
-      mimeType: file.type || 'application/octet-stream'
+      mimeType: file.type || 'application/octet-stream',
+      thumb: localThumb || undefined
     });
 
     tmDone(tId, true);
