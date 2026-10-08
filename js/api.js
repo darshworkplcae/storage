@@ -29,8 +29,10 @@ function getFileDownloadUrl(gId, dId, inline) {
   return API + '/download/' + encodeURIComponent(gId) + '?driveId=' + encodeURIComponent(dId||'') + (inline ? '&inline=1' : '') + (tok ? '&token=' + encodeURIComponent(tok) : '');
 }
 function apiDeleteFile(gId, dId)  { return apiFetch('files/'+gId+'?driveId='+dId, { method:'DELETE' }); }
+function apiRenameFile(fileId, newName) { return apiFetch('files/rename/' + encodeURIComponent(fileId), { method: 'POST', body: JSON.stringify({ name: newName }) }); }
 function apiCreateFolder(body)    { return apiFetch('folders',          { method:'POST', body:JSON.stringify(body) }); }
 function apiDeleteFolder(id)      { return apiFetch('folders/'+id,      { method:'DELETE' }); }
+function apiRenameFolder(folderId, newName) { return apiFetch('folders/rename/' + encodeURIComponent(folderId), { method: 'POST', body: JSON.stringify({ name: newName }) }); }
 function apiCreateUser(u, p, d)   { return apiFetch('admin/users',      { method:'POST', body:JSON.stringify({username:u,password:p,allowedDrives:d}) }); }
 function apiDeleteUser(id)        { return apiFetch('admin/users/'+id,  { method:'DELETE' }); }
 function apiChangeAdminPass(p)    { return apiFetch('admin/change-password', { method:'POST', body:JSON.stringify({newPassword:p}) }); }

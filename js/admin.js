@@ -96,6 +96,13 @@ function renderSettingsPage() {
         '</div>',
         '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyAllowDelete" '+(db.policy&&db.policy.allowUserDelete===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
       '</div>',
+      '<div class="policy-card" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:1.1rem;display:flex;align-items:center;justify-content:space-between">',
+        '<div>',
+          '<div style="font-weight:600;font-size:.9rem;color:var(--text1);display:flex;align-items:center;gap:8px"><i class="fas fa-pen" style="color:#ff9f0a"></i> Allow File & Folder Renaming</div>',
+          '<div style="font-size:.78rem;color:var(--text3);margin-top:3px">If disabled, non-admins cannot rename files or folders; only administrators can rename.</div>',
+        '</div>',
+        '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyAllowRename" '+(db.policy&&db.policy.allowUserRename===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
+      '</div>',
     '</div>',
     '</div>',
 
@@ -474,9 +481,11 @@ async function promptRenameDrive(driveId, currentName) {
 async function updateAdminPolicy() {
   var dlCh = $('policyAllowDownload');
   var delCh = $('policyAllowDelete');
+  var renCh = $('policyAllowRename');
   var policy = {
     allowUserDownload: dlCh ? dlCh.checked : true,
-    allowUserDelete: delCh ? delCh.checked : true
+    allowUserDelete: delCh ? delCh.checked : true,
+    allowUserRename: renCh ? renCh.checked : true
   };
   toast('Updating permissions policy…', 'info');
   var res = await apiSetPolicy(policy);
@@ -486,6 +495,36 @@ async function updateAdminPolicy() {
     toast('Permissions policy updated successfully!', 'success');
   } else {
     toast(res ? (res.error || 'Failed to update policy') : 'Network error', 'error');
+  }
+}
+
+async function promptRenameFile(fileId, currentName) {
+  var newName = prompt('Enter new file name:', currentName);
+  if (!newName || !newName.trim() || newName.trim() === currentName) return;
+  toast('Renaming file…', 'info');
+  var res = await apiRenameFile(fileId, newName.trim());
+  if (res && res.ok) {
+    toast('File renamed to: ' + res.file.name, 'success');
+    S.db = await apiFetchDB();
+    if (typeof _curPage !== 'undefined' && _curPage === 'recent') renderRecentPage();
+    else if (typeof _curPage !== 'undefined' && _curPage === 'starred') renderStarredPage();
+    else if (typeof _driveId !== 'undefined' && _driveId) renderFilesPage(_driveId, _folderId);
+  } else {
+    toast(res ? (res.error || 'Failed to rename file') : 'Network error', 'error');
+  }
+}
+
+async function promptRenameFolder(folderId, currentName) {
+  var newName = prompt('Enter new folder name:', currentName);
+  if (!newName || !newName.trim() || newName.trim() === currentName) return;
+  toast('Renaming folder…', 'info');
+  var res = await apiRenameFolder(folderId, newName.trim());
+  if (res && res.ok) {
+    toast('Folder renamed to: ' + res.folder.name, 'success');
+    S.db = await apiFetchDB();
+    if (typeof _driveId !== 'undefined' && _driveId) renderFilesPage(_driveId, _folderId);
+  } else {
+    toast(res ? (res.error || 'Failed to rename folder') : 'Network error', 'error');
   }
 }
 

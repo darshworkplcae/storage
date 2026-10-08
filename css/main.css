@@ -271,17 +271,168 @@ select.inp{cursor:pointer;}
 
 /* Grid sizes */
 .file-grid{display:grid;gap:.7rem;}
-.file-grid.xs{grid-template-columns:repeat(auto-fill,minmax(90px,1fr));}
-.file-grid.sm{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));}
-.file-grid.md{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));}
-.file-grid.lg{grid-template-columns:repeat(auto-fill,minmax(200px,1fr));}
+.file-grid.xs{grid-template-columns:repeat(auto-fill,minmax(90px,110px));}
+.file-grid.sm{grid-template-columns:repeat(auto-fill,minmax(120px,140px));}
+.file-grid.md{grid-template-columns:repeat(auto-fill,minmax(135px,170px));}
+.file-grid.lg{grid-template-columns:repeat(auto-fill,minmax(160px,200px));}
+
+/* ─── Compact Folders Shelf ─── */
+.folders-shelf-section {
+  margin-bottom: 1.25rem;
+}
+.shelf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.65rem;
+  padding: 0 4px;
+}
+.shelf-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.shelf-title i {
+  color: var(--primary);
+  font-size: 0.85rem;
+}
+.shelf-count {
+  font-size: 0.7rem;
+  background: var(--bg4);
+  color: var(--text3);
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+}
+.folders-shelf {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+.folder-chip-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+  position: relative;
+  width: auto;
+  min-width: 90px;
+  max-width: 280px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.folder-chip-card:hover {
+  background: var(--bg4);
+  border-color: var(--border2);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.folder-chip-card.is-selected {
+  border-color: var(--primary);
+  background: rgba(78, 134, 245, 0.12);
+}
+.fchip-select-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.55rem;
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  margin-right: -2px;
+  flex-shrink: 0;
+}
+.folder-chip-card:hover .fchip-select-btn,
+.fchip-select-btn.selected {
+  opacity: 1;
+}
+.fchip-select-btn.selected {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.fchip-icon {
+  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.fchip-name {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+.fchip-badge {
+  font-size: 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 5px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.fchip-badge.locked {
+  color: #ffd700;
+  background: rgba(255, 215, 0, 0.14);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+}
+.fchip-badge.unlocked {
+  color: var(--text3);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.folder-chip-card:hover .fchip-badge.unlocked {
+  opacity: 0.7;
+}
+.fchip-badge.admin {
+  color: #ff453a;
+  background: rgba(255, 69, 58, 0.15);
+  border: 1px solid rgba(255, 69, 58, 0.3);
+}
+.fchip-badge.custom {
+  color: #bf5af2;
+  background: rgba(191, 90, 242, 0.15);
+  border: 1px solid rgba(191, 90, 242, 0.3);
+}
+.fchip-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.folder-chip-card:hover .fchip-acts {
+  opacity: 1;
+}
 
 /* Grid cards */
 .fg-card{
   background:var(--bg2);border:1px solid var(--border);border-radius:12px;
-  padding:.85rem .75rem .7rem;cursor:pointer;transition:.15s;
+  padding:.75rem .65rem .65rem;cursor:pointer;transition:.15s;
   display:flex;flex-direction:column;align-items:center;gap:.45rem;
   text-align:center;position:relative;user-select:none;
+  max-width:175px;width:100%;
 }
 .fg-card:hover{border-color:var(--border2);background:var(--bg4);transform:translateY(-1px);box-shadow:var(--shadow-sm);}
 .fg-card.selected{border-color:var(--primary);background:rgba(78,134,245,.08);}
@@ -291,6 +442,13 @@ select.inp{cursor:pointer;}
 .fg-meta{font-size:.68rem;color:var(--text3);}
 .fg-acts{display:flex;gap:.15rem;position:absolute;top:4px;right:4px;opacity:0;transition:.12s;}
 .fg-card:hover .fg-acts{opacity:1;}
+.video-fg-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+}
 
 /* List view */
 .file-list{display:flex;flex-direction:column;}
@@ -2605,4 +2763,40 @@ video::-internal-media-controls-download-button {
 }
 [data-theme="light"] .theme-toggle-btn {
   color: #2563eb !important;
+}
+
+/* ── Light Theme for Folders Shelf & Policy Cards ── */
+[data-theme="light"] .folder-chip-card {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+[data-theme="light"] .folder-chip-card:hover {
+  background: #f8fafc !important;
+  border-color: #94a3b8 !important;
+}
+[data-theme="light"] .fchip-name {
+  color: #0f172a !important;
+}
+[data-theme="light"] .fchip-select-btn {
+  border-color: #94a3b8 !important;
+}
+[data-theme="light"] .shelf-count {
+  background: #e2e8f0 !important;
+  color: #334155 !important;
+  border-color: #cbd5e1 !important;
+}
+[data-theme="light"] .shelf-title {
+  color: #475569 !important;
+}
+[data-theme="light"] .policy-card {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+}
+[data-theme="light"] .policy-card > div > div:first-child {
+  color: #0f172a !important;
+}
+[data-theme="light"] .policy-card > div > div:last-child {
+  color: #64748b !important;
 }

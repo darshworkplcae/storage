@@ -251,9 +251,42 @@ function renderFilesPage(driveId, folderId){
   }
 
   const gridView=S.listMode!==true;
-  const html=gridView
-    ?`<div class="file-grid ${sz}">${folders.map(f=>folderCard(f)).join('')}${files.map(f=>fileCard(f)).join('')}</div>`
-    :`<div class="file-list"><div class="fl-hdr"><span>Name</span><span>Size</span><span>Date</span><span></span></div>${folders.map(f=>folderRow(f)).join('')}${files.map(f=>fileRow(f)).join('')}</div>`;
+  let html = '';
+  if (gridView) {
+    let foldersHtml = '';
+    if (folders.length > 0) {
+      foldersHtml = `
+        <div class="folders-shelf-section">
+          <div class="shelf-header">
+            <span class="shelf-title"><i class="fas fa-folder"></i> Folders <span class="shelf-count">${folders.length}</span></span>
+          </div>
+          <div class="folders-shelf">
+            ${folders.map(f => folderCard(f)).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    let filesHtml = '';
+    if (files.length > 0) {
+      filesHtml = `
+        <div class="files-shelf-section">
+          ${folders.length > 0 ? `
+            <div class="shelf-header">
+              <span class="shelf-title"><i class="fas fa-file"></i> Files <span class="shelf-count">${files.length}</span></span>
+            </div>
+          ` : ''}
+          <div class="file-grid ${sz}">
+            ${files.map(f => fileCard(f)).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    html = foldersHtml + filesHtml;
+  } else {
+    html = `<div class="file-list"><div class="fl-hdr"><span>Name</span><span>Size</span><span>Date</span><span></span></div>${folders.map(f=>folderRow(f)).join('')}${files.map(f=>fileRow(f)).join('')}</div>`;
+  }
 
   pc.innerHTML=`<div class="explorer-page">
     <div class="ex-toolbar">${toolbarHtml(driveId,folderId)}</div>
@@ -389,46 +422,129 @@ function handleFolderCardClick(driveId, folderId, event){
 }
 
 // ─── Folder / File cards ───────────────────────────────
+window._videoThumbCache = window._videoThumbCache || new Map();
+window._videoThumbQueue = window._videoThumbQueue || [];
+window._videoThumbActive = window._videoThumbActive || 0;
+
+function handleVideoThumbFallback(imgEl) {
+  if (!imgEl) return;
+  const vidId = imgEl.dataset.vidId;
+  const vidUrl = imgEl.dataset.vidUrl;
+  if (!vidUrl) return;
+
+  if (window._videoThumbCache.has(vidId)) {
+    imgEl.src = window._videoThumbCache.get(vidId);
+    return;
+  }
+
+  imgEl.onerror = null;
+  imgEl.style.opacity = '0.3';
+  window._videoThumbQueue.push({ imgEl, vidUrl, vidId });
+  processVideoThumbQueue();
+}
+
+function processVideoThumbQueue() {
+  if (window._videoThumbActive >= 2 || window._videoThumbQueue.length === 0) return;
+  const item = window._videoThumbQueue.shift();
+  if (!item || !item.imgEl || !document.body.contains(item.imgEl)) {
+    processVideoThumbQueue();
+    return;
+  }
+
+  window._videoThumbActive++;
+  const v = document.createElement('video');
+  v.crossOrigin = 'anonymous';
+  v.preload = 'metadata';
+  v.muted = true;
+  v.playsInline = true;
+
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    try {
+      v.pause();
+      v.removeAttribute('src');
+      v.load();
+      v.remove();
+    } catch(e){}
+    window._videoThumbActive--;
+    setTimeout(processVideoThumbQueue, 50);
+  };
+
+  const timer = setTimeout(cleanup, 6000);
+
+  const captureFrame = () => {
+    clearTimeout(timer);
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 240;
+      canvas.height = 150;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(v, 0, 0, 240, 150);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      window._videoThumbCache.set(item.vidId, dataUrl);
+      if (document.body.contains(item.imgEl)) {
+        item.imgEl.src = dataUrl;
+        item.imgEl.style.opacity = '1';
+      }
+    } catch(e) {
+      if (document.body.contains(item.imgEl)) {
+        item.imgEl.style.opacity = '1';
+      }
+    }
+    cleanup();
+  };
+
+  v.onloadeddata = () => {
+    if (v.duration && v.duration > 1) {
+      v.currentTime = 1;
+    } else {
+      captureFrame();
+    }
+  };
+
+  v.onseeked = () => {
+    captureFrame();
+  };
+
+  v.onerror = () => {
+    cleanup();
+  };
+
+  v.src = item.vidUrl + '#t=0.5';
+}
+
 function folderCard(f){
   const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
   const isLocked = !!f.isLocked;
   const isAdmin = S.ses && S.ses.role === 'admin';
   const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
+  const canRename = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserRename !== false;
   const isAdminOnly = !!f.adminOnly;
   const isCustomAccess = Array.isArray(f.allowedUsers) && f.allowedUsers.length > 0;
 
-  return `<div class="fg-card folder-card ${isSelected ? 'is-selected' : ''} ${isLocked ? 'is-locked-folder' : ''} ${isAdminOnly ? 'is-admin-only' : ''}" data-item-id="${esc(f.id)}" ondblclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')" onclick="handleFolderCardClick('${esc(f.driveId)}','${esc(f.id)}', event)">
-    <div class="card-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select folder">
+  return `<div class="folder-chip-card ${isSelected ? 'is-selected' : ''} ${isLocked ? 'is-locked-folder' : ''} ${isAdminOnly ? 'is-admin-only' : ''}" data-item-id="${esc(f.id)}" ondblclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')" onclick="handleFolderCardClick('${esc(f.driveId)}','${esc(f.id)}', event)" title="${esc(f.name)}">
+    <div class="fchip-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select folder">
       <i class="fas fa-check"></i>
     </div>
-    ${isLocked ? `
-      <div class="card-security-btn locked" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected Folder (Click to manage password)">
-        <i class="fas fa-shield-halved"></i> <span class="sec-label">Protected</span>
-      </div>
-    ` : `
-      <div class="card-security-btn unlocked" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Set Folder Password Protection">
-        <i class="fas fa-lock"></i> <span class="sec-label">Protect</span>
-      </div>
-    `}
-    ${isAdmin && isAdminOnly ? `
-      <div class="card-admin-badge" title="Hidden from all users & guests (Admin Only)">
-        <i class="fas fa-user-secret"></i> Admin Only
-      </div>
-    ` : isAdmin && isCustomAccess ? `
-      <div class="card-custom-badge" title="Restricted to ${f.allowedUsers.length} user(s)">
-        <i class="fas fa-user-lock"></i> Restricted
-      </div>
-    ` : ''}
-    <div class="fg-icon xl" style="position:relative;margin-top:0.35rem">
+    <div class="fchip-icon">
       <i class="fas ${isLocked ? 'fa-folder-closed' : 'fa-folder'}" style="color:${isLocked ? '#ffd700' : '#ff9f0a'}"></i>
     </div>
-    <div class="fg-name" style="display:flex;align-items:center;justify-content:center;gap:4px">
-      <span class="truncate">${esc(f.name)}</span>
-    </div>
-    <div class="fg-acts folder-acts">
-      ${isAdmin ? `
-        <button class="icon-btn xs" onclick="event.stopPropagation();showFolderVisibilityDialog('${esc(f.id)}')" title="Folder Visibility & Privacy Settings"><i class="fas ${isAdminOnly ? 'fa-eye-slash' : isCustomAccess ? 'fa-user-lock' : 'fa-eye'}"></i></button>
-      ` : ''}
+    <span class="fchip-name">${esc(f.name)}</span>
+    ${isLocked ? `
+      <span class="fchip-badge locked" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected Folder (Click to manage password)"><i class="fas fa-shield-halved"></i></span>
+    ` : `
+      <span class="fchip-badge unlocked" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protect Folder"><i class="fas fa-lock"></i></span>
+    `}
+    ${isAdmin && isAdminOnly ? `
+      <span class="fchip-badge admin" title="Hidden from all users & guests (Admin Only)"><i class="fas fa-user-secret"></i></span>
+    ` : isAdmin && isCustomAccess ? `
+      <span class="fchip-badge custom" title="Restricted to ${f.allowedUsers.length} user(s)"><i class="fas fa-user-lock"></i></span>
+    ` : ''}
+    <div class="fchip-acts">
+      ${canRename ? `<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameFolder('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Rename Folder"><i class="fas fa-pen"></i></button>` : ''}
+      ${isAdmin ? `<button class="icon-btn xs" onclick="event.stopPropagation();showFolderVisibilityDialog('${esc(f.id)}')" title="Folder Visibility & Privacy"><i class="fas ${isAdminOnly ? 'fa-eye-slash' : isCustomAccess ? 'fa-user-lock' : 'fa-eye'}"></i></button>` : ''}
       ${canDelete ? `<button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete folder"><i class="fas fa-trash-alt"></i></button>` : ''}
     </div>
   </div>`;
@@ -447,6 +563,7 @@ function fileCard(f){
   const isAdmin = S.ses && S.ses.role === 'admin';
   const canDownload = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDownload !== false;
   const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
+  const canRename = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserRename !== false;
 
   const dblAction = isMedia ? `openMedia('${esc(f.id)}')` : isPdf ? `openPdfViewer('${esc(f.id)}')` : isArchive ? `openArchiveViewer('${esc(f.id)}')` : (canDownload ? `downloadFile('${esc(f.id)}')` : `toast('File downloads disabled by administrator','warning')`);
 
@@ -461,11 +578,9 @@ function fileCard(f){
       </div>
     ` : isVideo ? `
       <div class="fg-thumb-wrap video-thumb-wrap">
-        <div class="video-thumb-poster">
-          <i class="fas fa-film video-strip-icon"></i>
-          <div class="video-play-badge"><i class="fas fa-play"></i></div>
-          <span class="video-tag-pill">VIDEO</span>
-        </div>
+        <img class="fg-thumb video-fg-thumb" src="${previewUrl}&thumb=1" alt="${esc(f.name)}" loading="lazy" decoding="async" data-vid-url="${previewUrl}" data-vid-id="${esc(f.id)}" onerror="handleVideoThumbFallback(this)">
+        <div class="video-play-badge"><i class="fas fa-play"></i></div>
+        <span class="video-tag-pill">VIDEO</span>
         <div class="thumb-hover-overlay"><i class="fas fa-play"></i></div>
       </div>
     ` : isPdf ? `
@@ -485,6 +600,7 @@ function fileCard(f){
     <div class="fg-meta">${fmt(f.size||0)}</div>
     <div class="fg-acts">
       <button class="icon-btn xs star-btn ${f.starred?'starred':''}" data-star-id="${esc(f.id)}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ffcc00':''}"></i></button>
+      ${canRename ? `<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameFile('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Rename File"><i class="fas fa-pen"></i></button>` : ''}
       ${isMedia ? `<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
         isPdf ? `<button class="icon-btn xs" onclick="event.stopPropagation();openPdfViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
         isArchive ? `<button class="icon-btn xs" onclick="event.stopPropagation();openArchiveViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` : ''}
@@ -499,6 +615,7 @@ function folderRow(f){
   const isLocked = !!f.isLocked;
   const isAdmin = S.ses && S.ses.role === 'admin';
   const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
+  const canRename = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserRename !== false;
   const isAdminOnly = !!f.adminOnly;
   const isCustomAccess = Array.isArray(f.allowedUsers) && f.allowedUsers.length > 0;
   return `<div class="fl-row ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')" onclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')">
@@ -512,6 +629,7 @@ function folderRow(f){
     </span>
     <span>—</span><span>${fmtDate(f.date)}</span>
     <span style="display:flex;gap:.3rem;align-items:center">
+      ${canRename ? `<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameFolder('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Rename Folder"><i class="fas fa-pen"></i></button>` : ''}
       ${isLocked ? `
         <button class="icon-btn xs" style="color:#ffd700" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected folder - Click to manage password"><i class="fas fa-shield-halved"></i></button>
       ` : `
@@ -534,6 +652,7 @@ function fileRow(f){
   const isAdmin = S.ses && S.ses.role === 'admin';
   const canDownload = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDownload !== false;
   const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
+  const canRename = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserRename !== false;
   const dblAction = isMedia ? `openMedia('${esc(f.id)}')` : isPdf ? `openPdfViewer('${esc(f.id)}')` : isArchive ? `openArchiveViewer('${esc(f.id)}')` : (canDownload ? `downloadFile('${esc(f.id)}')` : `toast('File downloads disabled by administrator','warning')`);
 
   return `<div class="fl-row ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="${dblAction}">
@@ -544,6 +663,7 @@ function fileRow(f){
     <span>${fmt(f.size||0)}</span><span>${fmtDate(f.date)}</span>
     <span style="display:flex;gap:.2rem">
       <button class="icon-btn xs star-btn ${f.starred?'starred':''}" data-star-id="${esc(f.id)}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ffcc00':''}"></i></button>
+      ${canRename ? `<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameFile('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Rename File"><i class="fas fa-pen"></i></button>` : ''}
       ${isMedia ? `<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
         isPdf ? `<button class="icon-btn xs" onclick="event.stopPropagation();openPdfViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
         isArchive ? `<button class="icon-btn xs" onclick="event.stopPropagation();openArchiveViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` : ''}
@@ -606,11 +726,11 @@ function updateSelectionUI() {
     if (msDeleteBtn) msDeleteBtn.style.display = canDelete ? '' : 'none';
   }
 
-  document.querySelectorAll('.fg-card, .fl-row').forEach(el => {
+  document.querySelectorAll('.fg-card, .fl-row, .folder-chip-card').forEach(el => {
     const id = el.getAttribute('data-item-id');
     const isSelected = id && S.selectedFiles && S.selectedFiles.has(id);
     el.classList.toggle('is-selected', !!isSelected);
-    const btn = el.querySelector('.card-select-btn');
+    const btn = el.querySelector('.card-select-btn, .fchip-select-btn');
     if (btn) btn.classList.toggle('selected', !!isSelected);
     const chk = el.querySelector('.row-select-check');
     if (chk) chk.checked = !!isSelected;
