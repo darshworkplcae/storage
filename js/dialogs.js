@@ -429,6 +429,31 @@ async function generateLocalVideoThumbnail(file) {
   });
 }
 
+async function generateLocalImageThumbnail(file) {
+  return new Promise(function (resolve) {
+    if (!file) return resolve(null);
+    var isImg = (file.type && file.type.startsWith('image/')) || /\.(jpg|jpeg|png|webp|gif|bmp|heic|heif|avif)$/i.test(file.name);
+    if (!isImg) return resolve(null);
+    if (window.createImageBitmap) {
+      createImageBitmap(file).then(function (bmp) {
+        var canvas = document.createElement('canvas');
+        var maxDim = 360;
+        var scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+        canvas.width = Math.round(bmp.width * scale);
+        canvas.height = Math.round(bmp.height * scale);
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+        var dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        resolve(dataUrl);
+      }).catch(function () {
+        resolve(null);
+      });
+      return;
+    }
+    resolve(null);
+  });
+}
+
 async function uploadOne(file, targetFolderId, existingTid) {
   _cancelSignal = { cancelled: false, paused: false, resumeResolve: null, xhr: null };
   var tId = existingTid || uid();
@@ -448,7 +473,9 @@ async function uploadOne(file, targetFolderId, existingTid) {
 
   try {
     var destFolder = targetFolderId || _folderId || null;
-    var localThumbPromise = generateLocalVideoThumbnail(file);
+    var isVid = (file.type && file.type.startsWith('video/')) || /\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(file.name);
+    var isImg = (file.type && file.type.startsWith('image/')) || /\.(jpg|jpeg|png|webp|gif|bmp|heic|heif|avif)$/i.test(file.name);
+    var localThumbPromise = isVid ? generateLocalVideoThumbnail(file) : isImg ? generateLocalImageThumbnail(file) : Promise.resolve(null);
 
     // Step 1: Get Google Drive resumable upload URL from backend
     if (upStatus) upStatus.textContent = 'Connecting…';
@@ -472,8 +499,9 @@ async function uploadOne(file, targetFolderId, existingTid) {
     var localThumb = await localThumbPromise;
     if (localThumb) {
       try {
-        localStorage.setItem('td_vthumb_' + result.googleFileId, localThumb);
-        localStorage.setItem('td_vthumb_' + init.fileLocalId, localThumb);
+        var prefix = isVid ? 'td_vthumb_' : 'td_ithumb_';
+        localStorage.setItem(prefix + result.googleFileId, localThumb);
+        localStorage.setItem(prefix + init.fileLocalId, localThumb);
       } catch(e) {}
     }
 
@@ -1021,10 +1049,12 @@ async function openMedia(fileLocalId) {
   var mediaUrl = getFileDownloadUrl(f.googleFileId, driveId, true);
   var dlUrl = getFileDownloadUrl(f.googleFileId, driveId, false);
   var cfg = ftCfg(f.name, f.mimeType);
+  var isHeic = /\.(heic|heif)$/i.test(f.name) || (f.mimeType && f.mimeType.toLowerCase().includes('heic'));
+  var displayImgUrl = isHeic ? (mediaUrl + '&thumb=1&sz=s2048') : mediaUrl;
   var ov = document.createElement('div'); ov.className = 'media-ov';
   var dlBtnHtml = canDownload ? '<a href="' + dlUrl + '" class="icon-btn" title="Download" download><i class="fas fa-download"></i></a>' : '';
   var noDlAttrs = !canDownload ? ' controlsList="nodownload noplaybackrate" disablePictureInPicture oncontextmenu="return false;" ' : ' controlsList="nodownload" ';
-  ov.innerHTML = '<div class="media-hd"><div class="media-title"><i class="fas ' + cfg.icon + '" style="color:' + cfg.col + '"></i> ' + esc(f.name) + '</div><div style="display:flex;gap:.5rem">' + dlBtnHtml + '<button class="icon-btn" onclick="this.closest(\'.media-ov\').remove()"><i class="fas fa-times"></i></button></div></div><div class="media-body">' + (cfg.cat === 'image' ? '<img class="media-img" src="' + mediaUrl + '" alt="' + esc(f.name) + '" oncontextmenu="' + (!canDownload ? 'return false;' : '') + '">' : cfg.cat === 'video' ? '<video class="media-vid" src="' + mediaUrl + '" controls' + noDlAttrs + 'autoplay playsinline></video>' : cfg.cat === 'audio' ? '<audio src="' + mediaUrl + '" controls' + noDlAttrs + 'autoplay style="width:80%;max-width:500px"></audio>' : '<div style="text-align:center;padding:2rem"><i class="fas fa-file" style="font-size:3rem;color:var(--text2)"></i><p style="margin:1rem 0">Preview not available for this file type</p>' + (canDownload ? '<a href="' + dlUrl + '" class="btn-primary"><i class="fas fa-download"></i> Download File</a>' : '') + '</div>') + '</div>';
+  ov.innerHTML = '<div class="media-hd"><div class="media-title"><i class="fas ' + cfg.icon + '" style="color:' + cfg.col + '"></i> ' + esc(f.name) + '</div><div style="display:flex;gap:.5rem">' + dlBtnHtml + '<button class="icon-btn" onclick="this.closest(\'.media-ov\').remove()"><i class="fas fa-times"></i></button></div></div><div class="media-body">' + (cfg.cat === 'image' ? '<img class="media-img" src="' + displayImgUrl + '" alt="' + esc(f.name) + '" data-fallback="' + mediaUrl + '" onerror="if(this.src!==this.dataset.fallback&&!this.dataset.triedFallback){this.dataset.triedFallback=\'1\';this.src=this.dataset.fallback;}" oncontextmenu="' + (!canDownload ? 'return false;' : '') + '">' : cfg.cat === 'video' ? '<video class="media-vid" src="' + mediaUrl + '" controls' + noDlAttrs + 'autoplay playsinline></video>' : cfg.cat === 'audio' ? '<audio src="' + mediaUrl + '" controls' + noDlAttrs + 'autoplay style="width:80%;max-width:500px"></audio>' : '<div style="text-align:center;padding:2rem"><i class="fas fa-file" style="font-size:3rem;color:var(--text2)"></i><p style="margin:1rem 0">Preview not available for this file type</p>' + (canDownload ? '<a href="' + dlUrl + '" class="btn-primary"><i class="fas fa-download"></i> Download File</a>' : '') + '</div>') + '</div>';
   ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
   document.body.appendChild(ov);
 }

@@ -361,8 +361,10 @@ async function hThumb(req,env,gId){
         });
       }catch(e){}
     } else if(cachedThumbUrl.startsWith('http')){
+      const reqSz = url.searchParams.get('sz') || 's360';
+      const fetchUrl = (reqSz !== 's360') ? cachedThumbUrl.replace(/=s\d+$/, '=' + reqSz) : cachedThumbUrl;
       try{
-        const tResp=await fetch(cachedThumbUrl);
+        const tResp=await fetch(fetchUrl);
         if(tResp.ok){
           const ct=tResp.headers.get('Content-Type')||'image/jpeg';
           return new Response(tResp.body,{
@@ -391,12 +393,15 @@ async function hThumb(req,env,gId){
     return new Response('Thumbnail processing by Google Drive',{status:404,headers:{...COR,'Cache-Control':'no-cache, no-store, must-revalidate'}});
   }
 
-  // Enhanced resolution =s360 for high-DPI cards
-  const highResThumb=gData.thumbnailLink.replace(/=s\d+$/, '=s360');
+  // Enhanced resolution =s360 for high-DPI cards (or =s2048 for full view)
+  const reqSz = url.searchParams.get('sz') || 's360';
+  const highResThumb=gData.thumbnailLink.replace(/=s\d+$/, '=' + reqSz);
 
   // Cache thumbnail in Upstash for 14 days
-  await uSet(env,`td:th:${gId}`,highResThumb);
-  await uExp(env,`td:th:${gId}`,1209600);
+  if (reqSz === 's360') {
+    await uSet(env,`td:th:${gId}`,highResThumb);
+    await uExp(env,`td:th:${gId}`,1209600);
+  }
 
   const tResp=await fetch(highResThumb);
   if(!tResp.ok){

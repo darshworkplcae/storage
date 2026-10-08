@@ -494,6 +494,36 @@ function handleVideoThumbFallback(imgEl) {
         handleVideoThumbFallback(imgEl);
       };
     }, delay);
+}
+
+function handleImageThumbFallback(imgEl) {
+  if (!imgEl) return;
+  imgEl.onerror = null;
+  var retries = parseInt(imgEl.dataset.retries || '0', 10);
+  if (retries < 6) {
+    imgEl.dataset.retries = String(retries + 1);
+    var delay = 3000 + retries * 1500;
+    setTimeout(function () {
+      if (!imgEl.isConnected) return;
+      var testImg = new Image();
+      var base = imgEl.src.split('&_r=')[0];
+      testImg.src = base + '&_r=' + Date.now();
+      testImg.onload = function () {
+        if (imgEl.isConnected) {
+          imgEl.src = testImg.src;
+          imgEl.style.display = 'block';
+        }
+      };
+      testImg.onerror = function () {
+        handleImageThumbFallback(imgEl);
+      };
+    }, delay);
+    return;
+  }
+  var col = imgEl.dataset.col || '#30d158';
+  var icon = imgEl.dataset.icon || 'fa-file-image';
+  if (imgEl.parentElement) {
+    imgEl.parentElement.innerHTML = '<div class="fg-icon" style="color:' + col + '"><i class="fas ' + icon + '"></i></div>';
   }
 }
 
@@ -569,7 +599,7 @@ function fileCard(f){
     </div>
     ${isImage ? `
       <div class="fg-thumb-wrap">
-        <img class="fg-thumb" src="${previewUrl}&thumb=1" alt="${esc(f.name)}" loading="lazy" decoding="async" onerror="this.parentElement.innerHTML='<div class=\\'fg-icon\\' style=\\'color:${cfg.col}\\'><i class=\\'fas ${cfg.icon}\\'></i></div>'">
+        <img class="fg-thumb" src="${(localStorage.getItem('td_ithumb_' + f.googleFileId) || localStorage.getItem('td_ithumb_' + f.id)) || (previewUrl + '&thumb=1')}" alt="${esc(f.name)}" loading="lazy" decoding="async" data-col="${cfg.col}" data-icon="${cfg.icon}" onerror="handleImageThumbFallback(this)">
         <div class="thumb-hover-overlay"><i class="fas fa-eye"></i></div>
       </div>
     ` : isVideo ? `

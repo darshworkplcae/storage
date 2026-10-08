@@ -43,9 +43,9 @@ function toast(msg, type) {
 }
 function ftCfg(name, mime) {
   var ext = (name||'').split('.').pop().toLowerCase();
-  var m = mime || '';
-  if (m.startsWith('image/') || ['jpg','jpeg','png','gif','webp','svg','bmp','ico'].includes(ext)) return { icon:'fa-file-image', col:'#30d158', cat:'image' };
-  if (m.startsWith('video/') || ['mp4','mkv','avi','mov','webm','flv','wmv'].includes(ext)) return { icon:'fa-file-video', col:'#ff9f0a', cat:'video' };
+  var m = (mime || '').toLowerCase();
+  if (m.startsWith('image/') || ['jpg','jpeg','png','gif','webp','svg','bmp','ico','heic','heif','avif','tiff','tif','raw','dng'].includes(ext) || m.includes('heic') || m.includes('heif')) return { icon:'fa-file-image', col:'#30d158', cat:'image' };
+  if (m.startsWith('video/') || ['mp4','mkv','avi','mov','webm','flv','wmv','m4v'].includes(ext)) return { icon:'fa-file-video', col:'#ff9f0a', cat:'video' };
   if (m.startsWith('audio/') || ['mp3','flac','wav','aac','ogg','m4a'].includes(ext)) return { icon:'fa-file-audio', col:'#bf5af2', cat:'audio' };
   if (['pdf'].includes(ext)) return { icon:'fa-file-pdf', col:'#ff453a', cat:'doc' };
   if (['doc','docx'].includes(ext)) return { icon:'fa-file-word', col:'#4e86f5', cat:'doc' };
