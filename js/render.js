@@ -251,42 +251,9 @@ function renderFilesPage(driveId, folderId){
   }
 
   const gridView=S.listMode!==true;
-  let html = '';
-  if (gridView) {
-    let foldersHtml = '';
-    if (folders.length > 0) {
-      foldersHtml = `
-        <div class="folders-shelf-section">
-          <div class="shelf-header">
-            <span class="shelf-title"><i class="fas fa-folder"></i> Folders <span class="shelf-count">${folders.length}</span></span>
-          </div>
-          <div class="folders-shelf">
-            ${folders.map(f => folderCard(f)).join('')}
-          </div>
-        </div>
-      `;
-    }
-
-    let filesHtml = '';
-    if (files.length > 0) {
-      filesHtml = `
-        <div class="files-shelf-section">
-          ${folders.length > 0 ? `
-            <div class="shelf-header">
-              <span class="shelf-title"><i class="fas fa-file"></i> Files <span class="shelf-count">${files.length}</span></span>
-            </div>
-          ` : ''}
-          <div class="file-grid ${sz}">
-            ${files.map(f => fileCard(f)).join('')}
-          </div>
-        </div>
-      `;
-    }
-
-    html = foldersHtml + filesHtml;
-  } else {
-    html = `<div class="file-list"><div class="fl-hdr"><span>Name</span><span>Size</span><span>Date</span><span></span></div>${folders.map(f=>folderRow(f)).join('')}${files.map(f=>fileRow(f)).join('')}</div>`;
-  }
+  const html=gridView
+    ?`<div class="file-grid ${sz}">${folders.map(f=>folderCard(f)).join('')}${files.map(f=>fileCard(f)).join('')}</div>`
+    :`<div class="file-list"><div class="fl-hdr"><span>Name</span><span>Size</span><span>Date</span><span></span></div>${folders.map(f=>folderRow(f)).join('')}${files.map(f=>fileRow(f)).join('')}</div>`;
 
   pc.innerHTML=`<div class="explorer-page">
     <div class="ex-toolbar">${toolbarHtml(driveId,folderId)}</div>
@@ -303,9 +270,9 @@ function toolbarHtml(driveId,folderId){
     <button class="icon-btn" onclick="goUp()" title="Up"><i class="fas fa-arrow-up"></i></button>
   </div>
   <div class="toolbar-upload-btns" style="display:flex;gap:.35rem;align-items:center">
-    <button class="btn-primary sm" onclick="triggerFileUpload()" title="Upload Files to this folder"><i class="fas fa-cloud-arrow-up"></i> <span class="hide-xs">Upload</span></button>
-    <button class="btn-ghost sm" onclick="triggerFolderUpload()" title="Upload entire folder from device"><i class="fas fa-folder-arrow-up"></i> <span class="hide-xs">Upload Folder</span></button>
-    <button class="btn-ghost sm" onclick="showNewFolderDialog()" title="Create New Folder"><i class="fas fa-folder-plus"></i> <span class="hide-xs">New Folder</span></button>
+    <button class="btn-primary sm" onclick="triggerFileUpload()" title="Upload Files to this folder"><i class="fas fa-cloud-arrow-up"></i> <span>Upload</span></button>
+    <button class="btn-ghost sm" onclick="triggerFolderUpload()" title="Upload entire folder from device"><i class="fas fa-folder-arrow-up"></i> <span>Folder ↑</span></button>
+    <button class="btn-ghost sm" onclick="showNewFolderDialog()" title="Create New Folder"><i class="fas fa-folder-plus"></i> <span>+ Folder</span></button>
   </div>
   <div class="filter-tabs">
     <button class="ftab ${(!S.filter||S.filter==='all')?'active':''}" data-filter="all">All</button>
@@ -448,28 +415,42 @@ function folderCard(f){
   const canRename = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserRename !== false;
   const isAdminOnly = !!f.adminOnly;
   const isCustomAccess = Array.isArray(f.allowedUsers) && f.allowedUsers.length > 0;
+  const subCount = (S.db && S.db.files ? S.db.files.filter(x => x.folderId === f.id && !x.isTrash).length : 0) + (S.db && S.db.folders ? S.db.folders.filter(x => x.parentId === f.id && !x.isTrash).length : 0);
 
-  return `<div class="folder-chip-card ${isSelected ? 'is-selected' : ''} ${isLocked ? 'is-locked-folder' : ''} ${isAdminOnly ? 'is-admin-only' : ''}" data-item-id="${esc(f.id)}" ondblclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')" onclick="handleFolderCardClick('${esc(f.driveId)}','${esc(f.id)}', event)" title="${esc(f.name)}">
-    <div class="fchip-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select folder">
+  return `<div class="fg-card folder-card ${isSelected ? 'is-selected' : ''} ${isLocked ? 'is-locked-folder' : ''} ${isAdminOnly ? 'is-admin-only' : ''}" data-item-id="${esc(f.id)}" ondblclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')" onclick="handleFolderCardClick('${esc(f.driveId)}','${esc(f.id)}', event)" title="${esc(f.name)}">
+    <div class="card-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select folder">
       <i class="fas fa-check"></i>
     </div>
-    <div class="fchip-icon">
-      <i class="fas ${isLocked ? 'fa-folder-closed' : 'fa-folder'}" style="color:${isLocked ? '#ffd700' : '#ff9f0a'}"></i>
-    </div>
-    <span class="fchip-name">${esc(f.name)}</span>
     ${isLocked ? `
-      <span class="fchip-badge locked" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected Folder (Click to manage password)"><i class="fas fa-shield-halved"></i></span>
+      <div class="card-security-btn locked" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected Folder (Click to manage password)">
+        <i class="fas fa-shield-halved"></i> <span class="sec-label">Protected</span>
+      </div>
     ` : `
-      <span class="fchip-badge unlocked" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protect Folder"><i class="fas fa-lock"></i></span>
+      <div class="card-security-btn unlocked" onclick="event.stopPropagation();showLockFolderDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Set Folder Password Protection">
+        <i class="fas fa-lock"></i> <span class="sec-label">Protect</span>
+      </div>
     `}
     ${isAdmin && isAdminOnly ? `
-      <span class="fchip-badge admin" title="Hidden from all users & guests (Admin Only)"><i class="fas fa-user-secret"></i></span>
+      <div class="card-admin-badge" title="Hidden from all users & guests (Admin Only)">
+        <i class="fas fa-user-secret"></i> Admin Only
+      </div>
     ` : isAdmin && isCustomAccess ? `
-      <span class="fchip-badge custom" title="Restricted to ${f.allowedUsers.length} user(s)"><i class="fas fa-user-lock"></i></span>
+      <div class="card-custom-badge" title="Restricted to ${f.allowedUsers.length} user(s)">
+        <i class="fas fa-user-lock"></i> Restricted
+      </div>
     ` : ''}
-    <div class="fchip-acts">
-      ${canRename ? `<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameFolder('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Rename Folder"><i class="fas fa-pen"></i></button>` : ''}
-      ${isAdmin ? `<button class="icon-btn xs" onclick="event.stopPropagation();showFolderVisibilityDialog('${esc(f.id)}')" title="Folder Visibility & Privacy"><i class="fas ${isAdminOnly ? 'fa-eye-slash' : isCustomAccess ? 'fa-user-lock' : 'fa-eye'}"></i></button>` : ''}
+    <div class="fg-icon xl" style="position:relative;margin-top:0.35rem">
+      <i class="fas ${isLocked ? 'fa-folder-closed' : 'fa-folder'}" style="color:${isLocked ? '#ffd700' : '#ff9f0a'}"></i>
+    </div>
+    <div class="fg-name" style="display:flex;align-items:center;justify-content:center;gap:4px">
+      <span class="truncate">${esc(f.name)}</span>
+    </div>
+    <div class="fg-meta">${subCount > 0 ? subCount + ' items' : 'Folder'}</div>
+    <div class="fg-acts folder-acts">
+      ${isAdmin ? `
+        <button class="icon-btn xs" onclick="event.stopPropagation();showFolderVisibilityDialog('${esc(f.id)}')" title="Folder Visibility & Privacy Settings"><i class="fas ${isAdminOnly ? 'fa-eye-slash' : isCustomAccess ? 'fa-user-lock' : 'fa-eye'}"></i></button>
+      ` : ''}
+      ${canRename ? `<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameFolder('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Rename folder"><i class="fas fa-pen"></i></button>` : ''}
       ${canDelete ? `<button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFolder('${esc(f.id)}','${esc(f.name)}')" title="Delete folder"><i class="fas fa-trash-alt"></i></button>` : ''}
     </div>
   </div>`;

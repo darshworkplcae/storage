@@ -200,10 +200,34 @@
     <!-- Mobile Floating Action Button (FAB) for fast mobile uploading -->
     <div class="mobile-fab-wrap" id="mobileFabWrap">
       <div class="mobile-fab-menu hidden" id="mobileFabMenu">
-        <button class="fab-menu-item" onclick="triggerMobileUploadFiles()"><i class="fas fa-cloud-arrow-up"></i> Upload Photos / Videos</button>
-        <button class="fab-menu-item" onclick="showIPhoneFastUploadTip()"><i class="fas fa-bolt" style="color:#ffd700"></i> iPhone 10GB Fast Guide</button>
-        <button class="fab-menu-item" onclick="triggerMobileUploadFolder()"><i class="fas fa-folder-arrow-up"></i> Upload Folder</button>
-        <button class="fab-menu-item" onclick="showNewFolderDialog(); toggleMobileFab(false)"><i class="fas fa-folder-plus"></i> New Folder</button>
+        <button class="fab-menu-item" onclick="triggerMobileUploadFiles()">
+          <div class="fab-item-icon upload-icon"><i class="fas fa-cloud-arrow-up"></i></div>
+          <div class="fab-item-text">
+            <strong>Upload Files</strong>
+            <span>Photos, 4K videos & docs</span>
+          </div>
+        </button>
+        <button class="fab-menu-item" onclick="triggerMobileUploadFolder()">
+          <div class="fab-item-icon folderup-icon"><i class="fas fa-folder-arrow-up"></i></div>
+          <div class="fab-item-text">
+            <strong>Upload Folder</strong>
+            <span>Upload entire directory tree</span>
+          </div>
+        </button>
+        <button class="fab-menu-item" onclick="showNewFolderDialog(); toggleMobileFab(false)">
+          <div class="fab-item-icon newfolder-icon"><i class="fas fa-folder-plus"></i></div>
+          <div class="fab-item-text">
+            <strong>Create Folder</strong>
+            <span>New folder to organize files</span>
+          </div>
+        </button>
+        <button class="fab-menu-item" onclick="showIPhoneFastUploadTip()">
+          <div class="fab-item-icon tip-icon"><i class="fas fa-bolt"></i></div>
+          <div class="fab-item-text">
+            <strong>iPhone Fast Upload</strong>
+            <span>Bypass slow Apple verify wheel</span>
+          </div>
+        </button>
       </div>
       <button class="mobile-fab-btn" id="mobileFabBtn" onclick="toggleMobileFab()" title="Upload & New">
         <i class="fas fa-plus"></i>

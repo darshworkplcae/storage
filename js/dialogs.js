@@ -368,7 +368,10 @@ async function uploadOne(file, targetFolderId, existingTid) {
   var tId = existingTid || uid();
   var upBar = $('upBar'), upName = $('upName'), upStatus = $('upStatus'), upFill = $('upFill'), upPct = $('upPct'), upPauseBtn = $('upPauseBtn');
 
-  if (upBar) upBar.classList.remove('hidden');
+  if (upBar) {
+    upBar.classList.remove('hidden');
+    document.body.classList.add('has-active-upload');
+  }
   if (upPauseBtn) {
     upPauseBtn.innerHTML = '<i class="fas fa-pause"></i>';
     upPauseBtn.onclick = toggleUploadPause;
@@ -428,6 +431,7 @@ async function uploadOne(file, targetFolderId, existingTid) {
     tmDone(tId, false);
   } finally {
     if (upBar) upBar.classList.add('hidden');
+    document.body.classList.remove('has-active-upload');
     if (upFill) upFill.style.width = '0%';
     if (upPct) upPct.textContent = '0%';
   }
