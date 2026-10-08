@@ -8,6 +8,12 @@
   <link rel="alternate icon" href="favicon.svg?v=obito">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <link rel="stylesheet" href="css/main.css">
+  <script>
+    (function(){
+      var t = localStorage.getItem('td_theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
 </head>
 <body>
 
@@ -103,6 +109,7 @@
       <button class="icon-btn xs" onclick="toggleSbMenu()"><i class="fas fa-ellipsis-v"></i></button>
       <div class="sb-pmenu hidden" id="sbMenu">
         <div class="pmenu-item admin-only hidden" onclick="navTo('settings')"><i class="fas fa-gear"></i> Settings</div>
+        <div class="pmenu-item" onclick="toggleTheme()"><i class="fas fa-circle-half-stroke"></i> Switch Theme</div>
         <div class="pmenu-item danger user-or-admin hidden" id="pmenuLogout" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
         <div class="pmenu-item guest-only" id="pmenuLogin" onclick="showSignInModal()"><i class="fas fa-arrow-right-to-bracket"></i> Sign In</div>
       </div>
@@ -151,6 +158,9 @@
           <button class="vsz active" id="btnGridView" onclick="setLayoutMode(false)" title="Grid View"><i class="fas fa-grip"></i></button>
           <button class="vsz" id="btnListView" onclick="setLayoutMode(true)" title="List View"><i class="fas fa-list"></i></button>
         </div>
+        <button class="icon-btn theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle Light / Dark Theme">
+          <i class="fas fa-sun" id="themeIcon"></i>
+        </button>
         <div class="upload-group" style="display:flex;gap:6px">
           <button class="btn-primary sm hidden" id="uploadBtn"><i class="fas fa-cloud-arrow-up"></i> Upload Files</button>
           <button class="btn-ghost sm hidden" id="folderUpBtn"><i class="fas fa-folder-arrow-up"></i> Upload Folder</button>

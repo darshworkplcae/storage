@@ -87,3 +87,26 @@ function getFirstLockedFolder(folderId) {
   }
   return null;
 }
+
+function toggleTheme() {
+  var cur = document.documentElement.getAttribute('data-theme') || 'dark';
+  var next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('td_theme', next); } catch(e){}
+  updateThemeIcon();
+}
+
+function updateThemeIcon() {
+  var cur = document.documentElement.getAttribute('data-theme') || 'dark';
+  var icon = $('themeIcon');
+  if (icon) {
+    icon.className = cur === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    icon.style.color = cur === 'dark' ? '#ffd700' : '#2563eb';
+  }
+}
+
+function initTheme() {
+  var t = localStorage.getItem('td_theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  document.documentElement.setAttribute('data-theme', t);
+  updateThemeIcon();
+}

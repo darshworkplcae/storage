@@ -283,6 +283,8 @@ function debounce(fn,ms){var t;return function(){clearTimeout(t);t=setTimeout(fn
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 async function init() {
+  if (typeof initTheme === 'function') initTheme();
+
   // Check hash — if #/admin, show admin login on the login page
   if(window.location.hash==='#/admin'||window.location.hash.startsWith('#/admin/')){
     showAdminLogin(null);

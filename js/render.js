@@ -456,13 +456,17 @@ function fileCard(f){
     </div>
     ${isImage ? `
       <div class="fg-thumb-wrap">
-        <img class="fg-thumb" src="${previewUrl}" alt="${esc(f.name)}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\'fg-icon\\' style=\\'color:${cfg.col}\\'><i class=\\'fas ${cfg.icon}\\'></i></div>'">
+        <img class="fg-thumb" src="${previewUrl}" alt="${esc(f.name)}" loading="lazy" decoding="async" onerror="this.parentElement.innerHTML='<div class=\\'fg-icon\\' style=\\'color:${cfg.col}\\'><i class=\\'fas ${cfg.icon}\\'></i></div>'">
         <div class="thumb-hover-overlay"><i class="fas fa-eye"></i></div>
       </div>
     ` : isVideo ? `
       <div class="fg-thumb-wrap video-thumb-wrap">
-        <video class="fg-thumb-vid" src="${previewUrl}#t=0.5" preload="metadata" muted playsinline></video>
-        <div class="video-play-badge"><i class="fas fa-play"></i></div>
+        <div class="video-thumb-poster">
+          <i class="fas fa-film video-strip-icon"></i>
+          <div class="video-play-badge"><i class="fas fa-play"></i></div>
+          <span class="video-tag-pill">VIDEO</span>
+        </div>
+        <div class="thumb-hover-overlay"><i class="fas fa-play"></i></div>
       </div>
     ` : isPdf ? `
       <div class="fg-icon" style="color:#ff453a;position:relative">

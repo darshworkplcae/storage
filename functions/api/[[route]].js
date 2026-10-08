@@ -203,6 +203,25 @@ async function hUC(req,env){
   await uSet(env,'td:db',db);
   return J({ok:true});
 }
+function isFolderAccessDenied(folderId, db, ses) {
+  if (ses === 'admin') return false;
+  if (!folderId || !db || !Array.isArray(db.folders)) return false;
+  let curId = folderId;
+  const visited = new Set();
+  while (curId && !visited.has(curId)) {
+    visited.add(curId);
+    const f = db.folders.find(x => x.id === curId);
+    if (!f) break;
+    if (f.adminOnly && ses !== 'admin') return true;
+    if (f.destroyed && ses !== 'admin') return true;
+    if (Array.isArray(f.allowedUsers) && f.allowedUsers.length > 0) {
+      if (!ses || !f.allowedUsers.includes(ses)) return true;
+    }
+    curId = f.parentId;
+  }
+  return false;
+}
+
 async function hDL(req,env,gId){
   const url=new URL(req.url);
   const tokenParam=url.searchParams.get('token');
@@ -214,22 +233,41 @@ async function hDL(req,env,gId){
   if(!ses) ses=await vSes(req,env,null);
   const db=await uGet(env,'td:db');
   const fileObj=(db&&db.files||[]).find(f=>f.googleFileId===gId);
-  if(fileObj && fileObj.adminOnly && ses !== 'admin'){
-    return J({error:'Access denied'}, 403);
+
+  // Security checks: file-level and parent/ancestor folder visibility
+  if(fileObj){
+    if(fileObj.adminOnly && ses !== 'admin'){
+      return J({error:'Access denied'}, 403);
+    }
+    if(fileObj.destroyed && ses !== 'admin'){
+      return J({error:'Access denied'}, 403);
+    }
+    if(Array.isArray(fileObj.allowedUsers) && fileObj.allowedUsers.length && ses !== 'admin' && (!ses || !fileObj.allowedUsers.includes(ses))){
+      return J({error:'Access denied'}, 403);
+    }
+    if(isFolderAccessDenied(fileObj.folderId, db, ses)){
+      return J({error:'Access denied'}, 403);
+    }
+    if(ses && ses !== 'admin'){
+      const u=(db.users||[]).find(x=>x.id===ses);
+      const allowed = u ? u.allowedDrives : null;
+      const allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
+      if(allowedList && !allowedList.includes(fileObj.driveId)){
+        return J({error:'Access denied for this drive'}, 403);
+      }
+    }
   }
-  if(fileObj && Array.isArray(fileObj.allowedUsers) && fileObj.allowedUsers.length && ses !== 'admin' && (!ses || !fileObj.allowedUsers.includes(ses))){
-    return J({error:'Access denied'}, 403);
-  }
+
   const isInline=url.searchParams.get('inline')==='1';
   if(!isInline && db && db.policy && db.policy.allowUserDownload === false && ses !== 'admin'){
     return J({error:'File downloads are disabled by administrator'}, 403);
   }
   if(!ses){
-    const dIdParam=url.searchParams.get('driveId');
+    const dIdParam=fileObj ? fileObj.driveId : url.searchParams.get('driveId');
     const isPublicDrive=(db&&db.openDriveId&&(dIdParam===db.openDriveId || !dIdParam));
     if(!isPublicDrive) return J({error:'Sign in required'},401);
   }
-  const dId=url.searchParams.get('driveId');
+  const dId=url.searchParams.get('driveId') || (fileObj ? fileObj.driveId : null);
   const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
   const at=await gAT(env,drv.encToken);
@@ -250,6 +288,9 @@ async function hDL(req,env,gId){
   if(gResp.headers.get('Content-Range')) respHeaders.set('Content-Range',gResp.headers.get('Content-Range'));
   respHeaders.set('Accept-Ranges','bytes');
   respHeaders.set('Content-Disposition',`${isInline?'inline':'attachment'}; filename="${fileName}"; filename*=UTF-8''${fileName}`);
+  if(isInline){
+    respHeaders.set('Cache-Control','public, max-age=604800, s-maxage=604800, immutable');
+  }
   return new Response(gResp.body,{
     status:gResp.status,
     headers:respHeaders

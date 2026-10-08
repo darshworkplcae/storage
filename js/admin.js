@@ -155,35 +155,164 @@ async function loadAdminFolderVisibility() {
     return;
   }
 
-  el.innerHTML = '<table class="users-table" style="margin-bottom:1rem">' +
-    '<thead><tr><th>Folder</th><th>Drive</th><th>Visibility Status</th><th>Target Audience</th><th>Actions</th></tr></thead>' +
-    '<tbody>' + folders.map(function(f){
-      var drv = (db.drives || []).find(function(d){ return d.id === f.driveId; });
-      var isAdm = !!f.adminOnly;
-      var hasSpecific = Array.isArray(f.allowedUsers) && f.allowedUsers.length > 0;
-      var statusBadge = isAdm
-        ? '<span class="badge" style="background:rgba(255,69,58,0.18);color:#ff453a;border:1px solid rgba(255,69,58,0.3)"><i class="fas fa-user-secret"></i> Admin Only</span>'
-        : hasSpecific
-        ? '<span class="badge" style="background:rgba(191,90,242,0.18);color:#bf5af2;border:1px solid rgba(191,90,242,0.3)"><i class="fas fa-user-lock"></i> Restricted</span>'
-        : '<span class="badge" style="background:rgba(48,209,88,0.18);color:#30d158;border:1px solid rgba(48,209,88,0.3)"><i class="fas fa-globe"></i> Public</span>';
+  // Build tree hierarchy
+  var folderMap = new Map();
+  var childrenMap = new Map();
+  folders.forEach(function(f) {
+    folderMap.set(f.id, f);
+    if (!childrenMap.has(f.parentId || null)) childrenMap.set(f.parentId || null, []);
+  });
+  folders.forEach(function(f) {
+    var pid = f.parentId || null;
+    if (!childrenMap.has(pid)) childrenMap.set(pid, []);
+    childrenMap.get(pid).push(f);
+  });
 
-      var audienceTxt = isAdm
-        ? '<span style="color:#ff453a;font-size:.78rem;font-weight:600">Hidden from all users & guests</span>'
-        : hasSpecific
-        ? '<span style="color:#bf5af2;font-size:.78rem;font-weight:600">' + f.allowedUsers.length + ' specific user(s)</span>'
-        : '<span style="color:var(--text3);font-size:.78rem">All drive visitors</span>';
+  // Identify root folders (no parent or parent not in active folders)
+  var rootFolders = folders.filter(function(f) {
+    return !f.parentId || !folderMap.has(f.parentId);
+  });
 
-      return '<tr>' +
-        '<td><strong style="display:flex;align-items:center;gap:6px"><i class="fas fa-folder" style="color:#ff9f0a"></i> ' + esc(f.name) + '</strong></td>' +
-        '<td>' + esc(drv ? drv.name : 'Unknown Drive') + '</td>' +
-        '<td>' + statusBadge + '</td>' +
-        '<td>' + audienceTxt + '</td>' +
-        '<td>' +
-          '<button class="btn-ghost xs" onclick="showFolderVisibilityDialog(\'' + f.id + '\')" title="Edit Visibility"><i class="fas fa-sliders"></i> Change</button>' +
-        '</td>' +
-      '</tr>';
-    }).join('') +
-    '</tbody></table>';
+  function renderFolderRow(f, level) {
+    var drv = (db.drives || []).find(function(d){ return d.id === f.driveId; });
+    var isAdm = !!f.adminOnly;
+    var hasSpecific = Array.isArray(f.allowedUsers) && f.allowedUsers.length > 0;
+    var statusBadge = isAdm
+      ? '<span class="badge" style="background:rgba(255,69,58,0.18);color:#ff453a;border:1px solid rgba(255,69,58,0.3)"><i class="fas fa-user-secret"></i> Admin Only</span>'
+      : hasSpecific
+      ? '<span class="badge" style="background:rgba(191,90,242,0.18);color:#bf5af2;border:1px solid rgba(191,90,242,0.3)"><i class="fas fa-user-lock"></i> Restricted</span>'
+      : '<span class="badge" style="background:rgba(48,209,88,0.18);color:#30d158;border:1px solid rgba(48,209,88,0.3)"><i class="fas fa-globe"></i> Public</span>';
+
+    var audienceTxt = isAdm
+      ? '<span style="color:#ff453a;font-size:.78rem;font-weight:600">Hidden from all users & guests</span>'
+      : hasSpecific
+      ? '<span style="color:#bf5af2;font-size:.78rem;font-weight:600">' + f.allowedUsers.length + ' specific user(s)</span>'
+      : '<span style="color:var(--text3);font-size:.78rem">All drive visitors</span>';
+
+    var children = childrenMap.get(f.id) || [];
+    var hasChildren = children.length > 0;
+    var isSub = level > 0;
+
+    var toggleBtn = hasChildren
+      ? '<button class="icon-btn xs" onclick="toggleAdminFolderTree(\'' + f.id + '\')" title="Expand/Collapse Subfolders" style="margin-right:4px;color:var(--primary);cursor:pointer"><i class="fas fa-chevron-right" id="visTreeIco_' + f.id + '"></i></button>'
+      : '<span style="display:inline-block;width:24px"></span>';
+
+    var subBadge = hasChildren
+      ? '<span class="badge sm" onclick="toggleAdminFolderTree(\'' + f.id + '\')" style="cursor:pointer;background:rgba(78,134,245,0.15);color:var(--primary);margin-left:8px;font-size:.7rem;padding:1px 6px;border-radius:10px" title="Click arrow to expand ' + children.length + ' subfolder(s)"><i class="fas fa-folder-tree"></i> ' + children.length + '</span>'
+      : '';
+
+    var indent = isSub
+      ? '<span style="display:inline-block;width:' + (level * 22) + 'px"></span><i class="fas fa-turn-up fa-rotate-90" style="color:var(--text3);margin-right:6px;font-size:.75rem"></i>'
+      : '';
+
+    var rowClass = isSub ? 'vis-subfolder-row vis-child-of-' + f.parentId + ' hidden' : 'vis-root-row';
+
+    var html = '<tr class="' + rowClass + '" id="visRow_' + f.id + '" data-folder-id="' + f.id + '" data-parent-id="' + (f.parentId || '') + '" data-name="' + esc(f.name).toLowerCase() + '">' +
+      '<td>' +
+        '<div style="display:flex;align-items:center">' +
+          indent +
+          toggleBtn +
+          '<i class="fas ' + (hasChildren ? 'fa-folder-tree' : 'fa-folder') + '" style="color:' + (isAdm ? '#ff453a' : '#ff9f0a') + ';margin-right:6px"></i>' +
+          '<strong style="font-size:.88rem">' + esc(f.name) + '</strong>' +
+          subBadge +
+        '</div>' +
+      '</td>' +
+      '<td>' + esc(drv ? drv.name : 'Unknown Drive') + '</td>' +
+      '<td>' + statusBadge + '</td>' +
+      '<td>' + audienceTxt + '</td>' +
+      '<td>' +
+        '<button class="btn-ghost xs" onclick="showFolderVisibilityDialog(\'' + f.id + '\')" title="Edit Visibility"><i class="fas fa-sliders"></i> Change</button>' +
+      '</td>' +
+    '</tr>';
+
+    if (hasChildren) {
+      children.forEach(function(child) {
+        html += renderFolderRow(child, level + 1);
+      });
+    }
+
+    return html;
+  }
+
+  var tableHtml = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.8rem;gap:10px;flex-wrap:wrap">' +
+    '<div style="display:flex;align-items:center;gap:8px">' +
+      '<input type="text" class="inp" id="folderVisSearch" placeholder="Filter folders by name…" style="max-width:240px;padding:.32rem .65rem;font-size:.82rem" oninput="filterAdminFolderVisTable(this.value)">' +
+      '<span style="font-size:.78rem;color:var(--text3)">' + rootFolders.length + ' root folders (' + folders.length + ' total)</span>' +
+    '</div>' +
+    '<div style="display:flex;gap:6px">' +
+      '<button class="btn-ghost xs" onclick="toggleAllAdminFolderVis(true)"><i class="fas fa-angles-down"></i> Expand All</button>' +
+      '<button class="btn-ghost xs" onclick="toggleAllAdminFolderVis(false)"><i class="fas fa-angles-up"></i> Collapse All</button>' +
+    '</div>' +
+  '</div>' +
+  '<table class="users-table" style="margin-bottom:1rem">' +
+    '<thead><tr><th>Folder (Click arrow to expand)</th><th>Drive</th><th>Visibility Status</th><th>Target Audience</th><th>Actions</th></tr></thead>' +
+    '<tbody>' +
+      rootFolders.map(function(f){ return renderFolderRow(f, 0); }).join('') +
+    '</tbody>' +
+  '</table>';
+
+  el.innerHTML = tableHtml;
+}
+
+function toggleAdminFolderTree(folderId) {
+  var ico = $('visTreeIco_' + folderId);
+  var isExpanded = ico && ico.classList.contains('fa-chevron-down');
+  var childRows = document.querySelectorAll('.vis-child-of-' + folderId);
+
+  if (isExpanded) {
+    if (ico) {
+      ico.classList.remove('fa-chevron-down');
+      ico.classList.add('fa-chevron-right');
+    }
+    // Collapse all descendants recursively
+    function hideDescendants(pId) {
+      var rows = document.querySelectorAll('.vis-child-of-' + pId);
+      rows.forEach(function(r) {
+        r.classList.add('hidden');
+        var subIco = r.querySelector('[id^="visTreeIco_"]');
+        if (subIco) {
+          subIco.classList.remove('fa-chevron-down');
+          subIco.classList.add('fa-chevron-right');
+        }
+        var subId = r.getAttribute('data-folder-id');
+        if (subId) hideDescendants(subId);
+      });
+    }
+    hideDescendants(folderId);
+  } else {
+    if (ico) {
+      ico.classList.remove('fa-chevron-right');
+      ico.classList.add('fa-chevron-down');
+    }
+    childRows.forEach(function(r) {
+      r.classList.remove('hidden');
+    });
+  }
+}
+
+function toggleAllAdminFolderVis(expand) {
+  var allSubRows = document.querySelectorAll('.vis-subfolder-row');
+  allSubRows.forEach(function(r) {
+    r.classList.toggle('hidden', !expand);
+  });
+  document.querySelectorAll('[id^="visTreeIco_"]').forEach(function(ico) {
+    ico.className = expand ? 'fas fa-chevron-down' : 'fas fa-chevron-right';
+  });
+}
+
+function filterAdminFolderVisTable(query) {
+  var q = (query || '').toLowerCase().trim();
+  var allRows = document.querySelectorAll('#folderVisibilityContainer tbody tr');
+  if (!q) {
+    // Reset to default collapsed state
+    toggleAllAdminFolderVis(false);
+    return;
+  }
+  allRows.forEach(function(r) {
+    var name = r.getAttribute('data-name') || '';
+    var matches = name.includes(q);
+    r.classList.toggle('hidden', !matches);
+  });
 }
 
 async function loadAdminLockedFolders() {
