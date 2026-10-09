@@ -494,6 +494,7 @@ function handleVideoThumbFallback(imgEl) {
         handleVideoThumbFallback(imgEl);
       };
     }, delay);
+  }
 }
 
 function handleImageThumbFallback(imgEl) {

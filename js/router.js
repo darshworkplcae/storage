@@ -56,15 +56,22 @@ function navTo(page, driveId, folderId) {
   var pc = $('pageContent');
   if(pc) pc.innerHTML = '<div class="loading-full"><i class="fas fa-spinner fa-spin"></i></div>';
 
-  if      (page==='files')    renderFilesPage(driveId, folderId);
-  else if (page==='quota')    { if(S.ses.role==='admin'||S.ses.role==='user') renderQuotaPage(); else navTo('files'); }
-  else if (page==='recent')   renderRecentPage();
-  else if (page==='activity') { if(S.ses.role==='admin') renderActivityPage(); else navTo('files'); }
-  else if (page==='settings') { if(S.ses.role==='admin') renderSettingsPage(); else navTo('files'); }
-  else if (page==='apikeys')  { if(S.ses.role==='admin') renderApiKeysPage(); else navTo('files'); }
-  else if (page==='starred')  renderStarredPage();
-  else if (page==='trash')    renderTrashPage();
-  else renderFilesPage(null, null);
+  try {
+    if      (page==='files')    renderFilesPage(driveId, folderId);
+    else if (page==='quota')    { if(S.ses.role==='admin'||S.ses.role==='user') renderQuotaPage(); else navTo('files'); }
+    else if (page==='recent')   renderRecentPage();
+    else if (page==='activity') { if(S.ses.role==='admin') renderActivityPage(); else navTo('files'); }
+    else if (page==='settings') { if(S.ses.role==='admin') renderSettingsPage(); else navTo('files'); }
+    else if (page==='apikeys')  { if(S.ses.role==='admin') renderApiKeysPage(); else navTo('files'); }
+    else if (page==='starred')  renderStarredPage();
+    else if (page==='trash')    renderTrashPage();
+    else renderFilesPage(null, null);
+  } catch (err) {
+    console.error('[Router] Error rendering page ' + page + ':', err);
+    if (pc) {
+      pc.innerHTML = '<div class="inner-page" style="text-align:center;padding:3.5rem 1rem;"><div class="empty-icon" style="color:var(--danger);font-size:2.5rem;margin-bottom:1rem"><i class="fas fa-triangle-exclamation"></i></div><h3>Failed to load page</h3><p style="color:var(--text2);margin-bottom:1.5rem;font-size:.9rem">' + esc(err.message || String(err)) + '</p><button class="btn btn-primary" onclick="navTo(\'files\')"><i class="fas fa-rotate-right"></i> Reload Files</button></div>';
+    }
+  }
 }
 
 function updateBreadcrumb(page, driveId, folderId) {
