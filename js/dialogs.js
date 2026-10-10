@@ -1172,7 +1172,7 @@ function showIPhoneFastUploadTip() {
   if (typeof toggleMobileFab === 'function') toggleMobileFab(false);
   var html = `
     <div class="modal-backdrop" id="iphoneTipModal" onclick="if(event.target===this)this.remove()">
-      <div class="modal-card" style="max-width:440px">
+      <div class="modal-card" style="max-width:460px">
         <div class="modal-hd">
           <div style="display:flex;align-items:center;gap:10px">
             <div style="width:36px;height:36px;border-radius:10px;background:rgba(255,215,0,0.15);color:#ffd700;display:flex;align-items:center;justify-content:center;font-size:1.1rem">
@@ -1180,28 +1180,48 @@ function showIPhoneFastUploadTip() {
             </div>
             <div>
               <h3 style="margin:0;font-size:1rem;color:var(--text1)">iPhone Fast Upload Guide</h3>
-              <p style="margin:0;font-size:.75rem;color:var(--text3)">Bypass the 30-minute "Preparing video" wheel</p>
+              <p style="margin:0;font-size:.75rem;color:var(--text3)">Fix the white round spinner & upload instantly</p>
             </div>
           </div>
           <button class="icon-btn xs" onclick="this.closest('.modal-backdrop').remove()"><i class="fas fa-times"></i></button>
         </div>
-        <div class="modal-body" style="font-size:.85rem;color:var(--text2);line-height:1.55;display:flex;flex-direction:column;gap:12px">
-          <div style="background:rgba(255,69,58,0.1);border:1px solid rgba(255,69,58,0.25);border-radius:10px;padding:10px 12px;color:#ff8585;font-size:.8rem">
-            <i class="fas fa-circle-info" style="margin-right:6px"></i> <strong>Why iPhone spins the white wheel:</strong> iOS tries to compress and convert 4K/HEVC videos before sending them to Safari, taking 30–45 minutes on 5GB–10GB videos.
+        <div class="modal-body" style="font-size:.85rem;color:var(--text2);line-height:1.55;display:flex;flex-direction:column;gap:12px;max-height:75vh;overflow-y:auto">
+          <div style="background:rgba(255,69,58,0.12);border:1px solid rgba(255,69,58,0.3);border-radius:10px;padding:10px 12px;color:#ff8585;font-size:.8rem">
+            <i class="fas fa-circle-exclamation" style="margin-right:6px"></i> <strong>Why the white round circle appears:</strong>
+            <p style="margin:4px 0 0;color:var(--text2)">Your video is actually stored in <strong>iCloud</strong>, not on your iPhone's local storage. When you pick it from "Photo Library", iOS has to <strong>download the entire video from Apple iCloud servers</strong> first! That white circle is the iCloud download progress bar.</p>
           </div>
+
+          <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px">
+            <div style="font-weight:600;color:#ffd700;margin-bottom:6px;display:flex;align-items:center;gap:6px">
+              <span style="background:#ffd700;color:#000;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700">⚡</span>
+              The 0-Second Bypass: "Save to Files" (100% Instant!)
+            </div>
+            <ol style="margin:4px 0 0;padding-left:18px;font-size:.8rem;color:var(--text2);display:flex;flex-direction:column;gap:4px">
+              <li>Open the <strong>Photos</strong> app on your iPhone and select the video.</li>
+              <li>Tap the <strong>Share</strong> icon (square with arrow pointing up).</li>
+              <li>Tap <strong>"Save to Files"</strong> → select <strong>"On My iPhone"</strong> (or Downloads) → tap <strong>Save</strong>.</li>
+              <li>In TeleDrive, tap <strong>Upload Files</strong> below.</li>
+              <li>When iOS asks, tap <strong>"Choose Files"</strong> (NOT "Photo Library")!</li>
+            </ol>
+            <div style="margin-top:6px;font-size:.76rem;color:#30d158;font-weight:600"><i class="fas fa-check-circle"></i> Bypasses all Apple processing & verification instantly!</div>
+          </div>
+
           <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px">
             <div style="font-weight:600;color:var(--text1);margin-bottom:6px;display:flex;align-items:center;gap:6px">
               <span style="background:var(--primary);color:#fff;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:.72rem">1</span>
-              Method 1: Instant "Choose Files" (Zero Wait)
+              Fix iCloud Setting: Stop Offloading Videos
             </div>
-            <p style="margin:0;font-size:.8rem;color:var(--text2)">When you tap Upload and iOS asks where to choose from, tap <strong>"Choose Files"</strong> (Files app / iCloud / On My iPhone) instead of "Photo Library". Large 10GB–20GB videos upload immediately without any verification or conversion wait!</p>
+            <p style="margin:0;font-size:.8rem;color:var(--text2)">Open iPhone <strong>Settings → Photos</strong> (or Settings → Your Apple ID → iCloud → Photos):<br>
+            Change from <strong>"Optimize iPhone Storage"</strong> to <strong>"Download and Keep Originals"</strong>.<br>
+            <span style="font-size:.74rem;color:var(--text3)">This keeps full original videos locally on your phone so iOS never has to download them from iCloud.</span></p>
           </div>
+
           <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px">
             <div style="font-weight:600;color:var(--text1);margin-bottom:6px;display:flex;align-items:center;gap:6px">
               <span style="background:var(--primary);color:#fff;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:.72rem">2</span>
-              Method 2: Permanent iPhone Setting
+              Camera Settings: Keep Raw Format
             </div>
-            <p style="margin:0;font-size:.8rem;color:var(--text2)">Open iPhone <strong>Settings → Photos</strong>, scroll down to <strong>"Transfer to Mac or PC"</strong>, and choose <strong>"Keep Originals"</strong>. This stops iOS from converting videos forever!</p>
+            <p style="margin:0;font-size:.8rem;color:var(--text2)">Open iPhone <strong>Settings → Camera → Formats</strong>: Choose <strong>Most Compatible</strong> (H.264) or keep High Efficiency (HEVC) with "Keep Originals" in Photos.</p>
           </div>
         </div>
         <div class="modal-ft" style="display:flex;justify-content:flex-end;gap:8px">
