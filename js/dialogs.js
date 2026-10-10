@@ -1508,6 +1508,357 @@ function closePdfViewer() {
   }
 }
 
+// ─── In-App Office & Document Viewer (Word, Excel, PowerPoint, Text) ─────────
+function closeDocViewer() {
+  var ov = document.getElementById('docViewerModal');
+  if (ov) {
+    if (ov._keyHandler) window.removeEventListener('keydown', ov._keyHandler);
+    ov.remove();
+  }
+}
+
+async function openDocViewer(fileId) {
+  var f = (S.db && S.db.files || []).find(function (x) { return x.id === fileId; });
+  if (!f) return;
+
+  // Delegate if file belongs to another specialized viewer
+  if (/\.pdf$/i.test(f.name) || f.mimeType === 'application/pdf') {
+    return openPdfViewer(fileId);
+  }
+  if (/\.(zip|rar|7z|tar|gz|bz2)$/i.test(f.name)) {
+    return openArchiveViewer(fileId);
+  }
+  var cat = ftCfg(f.name, f.mimeType).cat;
+  if (['image', 'video', 'audio'].includes(cat)) {
+    return openMedia(fileId);
+  }
+
+  var isAdmin = S.ses && S.ses.role === 'admin';
+  var canDownload = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDownload !== false;
+  var driveId = f.driveId || _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : '');
+  var previewUrl = getFileDownloadUrl(f.googleFileId, driveId, true);
+  var downloadUrl = getFileDownloadUrl(f.googleFileId, driveId, false);
+  var googleEmbedUrl = 'https://drive.google.com/file/d/' + encodeURIComponent(f.googleFileId) + '/preview';
+
+  var ext = (f.name || '').split('.').pop().toLowerCase();
+  var isDocx = ext === 'docx';
+  var isExcel = ['xlsx', 'xls', 'csv', 'tsv', 'ods'].includes(ext);
+  var isPpt = ['pptx', 'ppt'].includes(ext);
+  var isLegacyDoc = ext === 'doc';
+  var isText = ['txt', 'md', 'log', 'json', 'xml', 'yaml', 'yml', 'ini', 'cfg', 'html', 'css', 'js', 'py', 'sql', 'sh', 'bat'].includes(ext);
+  var cfg = ftCfg(f.name, f.mimeType);
+
+  var typeLabel = isDocx ? 'Microsoft Word Document' :
+    isExcel ? 'Microsoft Excel Spreadsheet' :
+    isPpt ? 'PowerPoint Presentation' :
+    isLegacyDoc ? 'Word Document (97-2003)' :
+    isText ? 'Text / Source Document' : 'Document';
+
+  var ov = document.createElement('div');
+  ov.className = 'doc-viewer-overlay';
+  ov.id = 'docViewerModal';
+  ov.innerHTML = `
+    <div class="doc-viewer-container">
+      <div class="doc-viewer-header">
+        <div class="doc-viewer-title">
+          <div style="width:38px;height:38px;border-radius:10px;background:${cfg.col}22;border:1px solid ${cfg.col}44;display:flex;align-items:center;justify-content:center;color:${cfg.col};font-size:1.25rem;flex-shrink:0">
+            <i class="fas ${cfg.icon}"></i>
+          </div>
+          <div style="min-width:0;flex:1">
+            <div class="doc-title-text" title="${esc(f.name)}">${esc(f.name)}</div>
+            <div class="doc-sub-text">
+              <span>${fmt(f.size || 0)}</span>
+              <span>·</span>
+              <span style="color:${cfg.col};font-weight:600">${typeLabel}</span>
+            </div>
+          </div>
+        </div>
+        <div class="doc-toolbar-controls" id="docToolbarControls"></div>
+        <div class="doc-viewer-actions">
+          ${canDownload ? `<a href="${downloadUrl}" download="${esc(f.name)}" class="btn-ghost sm hide-xs" title="Download Document"><i class="fas fa-download"></i> Download</a>` : ''}
+          <a href="${previewUrl}" target="_blank" rel="noopener" class="btn-ghost sm" title="Open in New Tab"><i class="fas fa-arrow-up-right-from-square"></i> <span class="hide-xs">New Tab</span></a>
+          <button class="icon-btn sm" onclick="closeDocViewer()" title="Close Viewer"><i class="fas fa-times"></i></button>
+        </div>
+      </div>
+      <div class="sheet-tabs-bar hidden" id="docSheetTabsBar"></div>
+      <div class="doc-viewer-body" id="docViewerBody">
+        <div id="docLoading" class="pdf-loader-state" style="margin:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4rem 1rem">
+          <div class="vault-shield-badge gold-glow" style="width:58px;height:58px;font-size:1.5rem;margin-bottom:12px">
+            <i class="fas fa-circle-notch fa-spin"></i>
+          </div>
+          <div id="docLoadMsg" style="font-size:.9rem;color:var(--text2);font-weight:600">Loading document…</div>
+        </div>
+        <div id="docContentWrap" style="flex:1;width:100%;height:100%;display:none;position:relative;overflow:auto"></div>
+        <div id="docErrorBox" class="pdf-error-box hidden" style="margin:auto;padding:3rem 1.5rem;text-align:center">
+          <i class="fas fa-triangle-exclamation" style="font-size:2.4rem;color:var(--warning);margin-bottom:8px"></i>
+          <h3 style="margin-bottom:6px">Could Not Display Document In-App</h3>
+          <p id="docErrDetail" style="font-size:.82rem;color:var(--text3);max-width:380px;margin:0 auto 16px"></p>
+          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+            <a href="${googleEmbedUrl}" target="_blank" rel="noopener" class="btn-primary sm"><i class="fab fa-google-drive"></i> Open in Google Drive</a>
+            <a href="${previewUrl}" target="_blank" rel="noopener" class="btn-ghost sm"><i class="fas fa-arrow-up-right-from-square"></i> Open Native File</a>
+            ${canDownload ? `<a href="${downloadUrl}" download="${esc(f.name)}" class="btn-ghost sm"><i class="fas fa-download"></i> Download</a>` : ''}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(ov);
+
+  var keyHandler = function (e) {
+    if (e.key === 'Escape') closeDocViewer();
+  };
+  window.addEventListener('keydown', keyHandler);
+  ov._keyHandler = keyHandler;
+  ov.addEventListener('click', function(e) {
+    if (e.target === ov) closeDocViewer();
+  });
+
+  function showDocError(err) {
+    console.error('Document preview error:', err);
+    var loadSpin = ov.querySelector('#docLoading');
+    if (loadSpin) loadSpin.style.display = 'none';
+    var errBox = ov.querySelector('#docErrorBox');
+    if (errBox) {
+      errBox.classList.remove('hidden');
+      var detail = errBox.querySelector('#docErrDetail');
+      if (detail) detail.textContent = (err && err.message) ? err.message : 'Could not decode document.';
+    }
+  }
+
+  // 1. WORD (.docx)
+  if (isDocx) {
+    var tb = ov.querySelector('#docToolbarControls');
+    tb.innerHTML = `
+      <button class="icon-btn xs" id="docxZoomOut" title="Zoom Out"><i class="fas fa-minus"></i></button>
+      <span class="pdf-zoom-label" id="docxZoomVal">100%</span>
+      <button class="icon-btn xs" id="docxZoomIn" title="Zoom In"><i class="fas fa-plus"></i></button>
+      <button class="btn-ghost xs" id="docxFitBtn" title="Fit to Screen"><i class="fas fa-arrows-left-right-to-line"></i> <span class="hide-xs">Fit</span></button>
+      <span class="pdf-tb-sep"></span>
+      <button class="icon-btn xs" id="docxPrintBtn" title="Print Document"><i class="fas fa-print"></i></button>
+    `;
+
+    var zoomLevel = 1.0;
+    function applyDocxZoom() {
+      var valEl = ov.querySelector('#docxZoomVal');
+      if (valEl) valEl.textContent = Math.round(zoomLevel * 100) + '%';
+      var sections = ov.querySelectorAll('.docx-wrapper > section.docx');
+      sections.forEach(function(s) {
+        s.style.transform = zoomLevel === 1.0 ? '' : 'scale(' + zoomLevel + ')';
+        s.style.transformOrigin = 'top center';
+      });
+    }
+
+    ov.querySelector('#docxZoomOut').onclick = function() {
+      zoomLevel = Math.max(0.4, zoomLevel - 0.15);
+      applyDocxZoom();
+    };
+    ov.querySelector('#docxZoomIn').onclick = function() {
+      zoomLevel = Math.min(2.2, zoomLevel + 0.15);
+      applyDocxZoom();
+    };
+    ov.querySelector('#docxFitBtn').onclick = function() {
+      var wrap = ov.querySelector('#docContentWrap');
+      var firstSec = ov.querySelector('.docx-wrapper > section.docx');
+      if (wrap && firstSec) {
+        var avail = wrap.clientWidth - 48;
+        var secW = firstSec.offsetWidth || 800;
+        zoomLevel = Math.min(1.2, Math.max(0.4, avail / secW));
+        applyDocxZoom();
+      }
+    };
+    ov.querySelector('#docxPrintBtn').onclick = function() {
+      window.print();
+    };
+
+    fetch(previewUrl).then(function(r) {
+      if (!r.ok) throw new Error('HTTP error ' + r.status);
+      return r.arrayBuffer();
+    }).then(function(ab) {
+      if (typeof docx !== 'undefined' && docx.renderAsync) {
+        var contentWrap = ov.querySelector('#docContentWrap');
+        contentWrap.style.display = 'block';
+        contentWrap.innerHTML = '';
+        docx.renderAsync(ab, contentWrap, null, {
+          inWrapper: true,
+          breakPages: true,
+          ignoreHeight: false,
+          ignoreWidth: false
+        }).then(function() {
+          var loadSpin = ov.querySelector('#docLoading');
+          if (loadSpin) loadSpin.style.display = 'none';
+        }).catch(function(err) {
+          showDocError(err);
+        });
+      } else {
+        showDocError(new Error('Word document parser not loaded'));
+      }
+    }).catch(function(err) {
+      showDocError(err);
+    });
+  }
+
+  // 2. EXCEL & SPREADSHEETS (.xlsx, .xls, .csv, .tsv, .ods)
+  else if (isExcel) {
+    var tb = ov.querySelector('#docToolbarControls');
+    tb.innerHTML = `
+      <div style="display:flex;align-items:center;gap:6px">
+        <i class="fas fa-search" style="font-size:.74rem;color:var(--text3)"></i>
+        <input type="text" id="excelSearchInp" placeholder="Search cells…" class="inp" style="height:26px;font-size:.76rem;padding:2px 8px;width:130px;background:rgba(255,255,255,0.06);border-radius:12px;border:1px solid rgba(255,255,255,0.1)">
+      </div>
+      <span class="pdf-tb-sep hide-xs"></span>
+      <span id="excelStats" style="font-size:.72rem;color:var(--text3);font-weight:600" class="hide-xs">Loading…</span>
+    `;
+
+    fetch(previewUrl).then(function(r) {
+      if (!r.ok) throw new Error('HTTP error ' + r.status);
+      return r.arrayBuffer();
+    }).then(function(ab) {
+      if (typeof XLSX !== 'undefined' && XLSX.read) {
+        var wb = XLSX.read(new Uint8Array(ab), { type: 'array' });
+        var loadSpin = ov.querySelector('#docLoading');
+        if (loadSpin) loadSpin.style.display = 'none';
+
+        var contentWrap = ov.querySelector('#docContentWrap');
+        contentWrap.style.display = 'block';
+        contentWrap.innerHTML = '<div class="excel-table-wrap" id="excelTableWrap"></div>';
+
+        var tabsBar = ov.querySelector('#docSheetTabsBar');
+        var sheetNames = wb.SheetNames || [];
+        if (sheetNames.length > 0) {
+          tabsBar.classList.remove('hidden');
+          tabsBar.innerHTML = sheetNames.map(function(name, idx) {
+            return '<button class="sheet-tab-btn ' + (idx === 0 ? 'active' : '') + '" data-sheet="' + esc(name) + '"><i class="fas fa-table-cells" style="font-size:.72rem"></i> ' + esc(name) + '</button>';
+          }).join('');
+
+          tabsBar.querySelectorAll('.sheet-tab-btn').forEach(function(btn) {
+            btn.onclick = function() {
+              tabsBar.querySelectorAll('.sheet-tab-btn').forEach(function(b){ b.classList.remove('active'); });
+              btn.classList.add('active');
+              renderSheet(btn.dataset.sheet);
+            };
+          });
+        }
+
+        var currentRows = [];
+        function renderSheet(sheetName) {
+          var ws = wb.Sheets[sheetName];
+          if (!ws) return;
+          var data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+          currentRows = data;
+          updateExcelTable(data);
+        }
+
+        function updateExcelTable(data, filterQuery) {
+          var container = ov.querySelector('#excelTableWrap');
+          if (!container) return;
+          var q = (filterQuery || '').toLowerCase().trim();
+          var maxCols = 0;
+          data.forEach(function(r){ if (Array.isArray(r) && r.length > maxCols) maxCols = r.length; });
+          if (maxCols === 0) maxCols = 1;
+
+          var html = '<table class="excel-table"><thead><tr><th class="col-corner">#</th>';
+          for (var c = 0; c < maxCols; c++) {
+            var colLetter = String.fromCharCode(65 + (c % 26));
+            if (c >= 26) colLetter = String.fromCharCode(64 + Math.floor(c / 26)) + colLetter;
+            html += '<th>' + colLetter + '</th>';
+          }
+          html += '</tr></thead><tbody>';
+
+          var matchCount = 0;
+          data.forEach(function(row, rIdx) {
+            var rowMatches = true;
+            if (q) {
+              rowMatches = Array.isArray(row) && row.some(function(cell){ return String(cell).toLowerCase().includes(q); });
+            }
+            if (!rowMatches) return;
+            matchCount++;
+            html += '<tr><td class="row-num">' + (rIdx + 1) + '</td>';
+            for (var c = 0; c < maxCols; c++) {
+              var val = (row && row[c] !== undefined && row[c] !== null) ? String(row[c]) : '';
+              var isHit = q && val.toLowerCase().includes(q);
+              html += '<td class="' + (isHit ? 'highlight-match' : '') + '" title="' + esc(val) + '">' + esc(val) + '</td>';
+            }
+            html += '</tr>';
+          });
+          html += '</tbody></table>';
+          container.innerHTML = html;
+
+          var statsEl = ov.querySelector('#excelStats');
+          if (statsEl) {
+            statsEl.textContent = data.length + ' rows · ' + maxCols + ' cols' + (q ? ' (' + matchCount + ' matches)' : '');
+          }
+        }
+
+        var searchInp = ov.querySelector('#excelSearchInp');
+        if (searchInp) {
+          searchInp.oninput = debounce(function() {
+            updateExcelTable(currentRows, searchInp.value);
+          }, 200);
+        }
+
+        if (sheetNames.length > 0) renderSheet(sheetNames[0]);
+      } else {
+        showDocError(new Error('Excel spreadsheet parser not ready'));
+      }
+    }).catch(function(err) {
+      showDocError(err);
+    });
+  }
+
+  // 3. POWERPOINT (.pptx, .ppt) & LEGACY WORD (.doc)
+  else if (isPpt || isLegacyDoc) {
+    var tb = ov.querySelector('#docToolbarControls');
+    tb.innerHTML = `
+      <a href="${googleEmbedUrl}" target="_blank" rel="noopener" class="btn-ghost xs" title="Open Fullscreen"><i class="fas fa-expand"></i> Fullscreen</a>
+    `;
+
+    var contentWrap = ov.querySelector('#docContentWrap');
+    contentWrap.style.display = 'block';
+    contentWrap.innerHTML = `
+      <iframe src="${googleEmbedUrl}" style="width:100%;height:100%;border:none;background:#0d0d12" allowfullscreen></iframe>
+    `;
+    var loadSpin = ov.querySelector('#docLoading');
+    if (loadSpin) loadSpin.style.display = 'none';
+  }
+
+  // 4. TEXT & SOURCE FILES (.txt, .md, .json, etc.)
+  else {
+    var tb = ov.querySelector('#docToolbarControls');
+    tb.innerHTML = `
+      <button class="btn-ghost xs" id="textWrapBtn" title="Toggle Word Wrap"><i class="fas fa-text-width"></i> <span class="hide-xs">Wrap</span></button>
+      <button class="btn-ghost xs" id="textCopyBtn" title="Copy Content"><i class="fas fa-copy"></i> <span class="hide-xs">Copy</span></button>
+    `;
+
+    fetch(previewUrl).then(function(r) {
+      if (!r.ok) throw new Error('HTTP error ' + r.status);
+      return r.text();
+    }).then(function(txt) {
+      var loadSpin = ov.querySelector('#docLoading');
+      if (loadSpin) loadSpin.style.display = 'none';
+
+      var contentWrap = ov.querySelector('#docContentWrap');
+      contentWrap.style.display = 'block';
+      contentWrap.innerHTML = '<pre class="text-doc-body" id="textDocBody"><code>' + esc(txt) + '</code></pre>';
+
+      var isWrapped = false;
+      ov.querySelector('#textWrapBtn').onclick = function() {
+        isWrapped = !isWrapped;
+        var body = ov.querySelector('#textDocBody');
+        if (body) body.classList.toggle('wrap', isWrapped);
+      };
+      ov.querySelector('#textCopyBtn').onclick = function() {
+        navigator.clipboard.writeText(txt).then(function() {
+          toast('Text copied to clipboard!', 'success');
+        }).catch(function() {
+          toast('Failed to copy', 'error');
+        });
+      };
+    }).catch(function(err) {
+      showDocError(err);
+    });
+  }
+}
+
 // ─── In-App ZIP / RAR Archive Inspector (High-Speed HTTP Range Parser) ───
 async function fastReadZipHeaders(downloadUrl, fileSize, onStatus) {
   if (onStatus) onStatus('Probing archive header…');

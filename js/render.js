@@ -528,6 +528,21 @@ function handleImageThumbFallback(imgEl) {
   }
 }
 
+function handleDocThumbFallback(imgEl) {
+  if (!imgEl) return;
+  imgEl.onerror = null;
+  var col = imgEl.dataset.col || '#4e86f5';
+  var icon = imgEl.dataset.icon || 'fa-file-lines';
+  var pill = imgEl.dataset.pill || 'DOC';
+  var parent = imgEl.parentElement;
+  if (parent) {
+    parent.className = 'fg-icon doc-icon-fallback';
+    parent.style.color = col;
+    parent.style.position = 'relative';
+    parent.innerHTML = '<i class="fas ' + icon + '"></i><span class="file-type-pill" style="position:absolute;bottom:-4px;font-size:.58rem;background:' + col + '26;color:' + col + ';padding:1px 5px;border-radius:4px;font-weight:700">' + pill + '</span>';
+  }
+}
+
 function folderCard(f){
   const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
   const isLocked = !!f.isLocked;
@@ -584,6 +599,9 @@ function fileCard(f){
   const isVideo=cfg.cat==='video';
   const isPdf = /\.pdf$/i.test(f.name) || f.mimeType === 'application/pdf';
   const isArchive = /\.(zip|rar|7z|tar|gz)$/i.test(f.name);
+  const isDoc = /\.(docx?|xlsx?|pptx?|csv|tsv|ods|txt|md|log|json|xml|rtf)$/i.test(f.name);
+  const docExt = (f.name||'').split('.').pop().toUpperCase();
+  const docPillText = ['DOCX','DOC'].includes(docExt)?'DOCX':['XLSX','XLS','ODS'].includes(docExt)?'EXCEL':docExt==='CSV'?'CSV':['PPTX','PPT'].includes(docExt)?'PPT':docExt==='PDF'?'PDF':(docExt||'DOC');
   const driveId=f.driveId||_driveId||(S.db&&S.db.drives&&S.db.drives[0]?S.db.drives[0].id:'');
   const previewUrl=getFileDownloadUrl(f.googleFileId, driveId, true);
   const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
@@ -592,7 +610,11 @@ function fileCard(f){
   const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
   const canRename = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserRename !== false;
 
-  const dblAction = isMedia ? `openMedia('${esc(f.id)}')` : isPdf ? `openPdfViewer('${esc(f.id)}')` : isArchive ? `openArchiveViewer('${esc(f.id)}')` : (canDownload ? `downloadFile('${esc(f.id)}')` : `toast('File downloads disabled by administrator','warning')`);
+  const dblAction = isMedia ? `openMedia('${esc(f.id)}')` :
+    isPdf ? `openPdfViewer('${esc(f.id)}')` :
+    isDoc ? `openDocViewer('${esc(f.id)}')` :
+    isArchive ? `openArchiveViewer('${esc(f.id)}')` :
+    (canDownload ? `downloadFile('${esc(f.id)}')` : `toast('File downloads disabled by administrator','warning')`);
 
   return `<div class="fg-card ${isImage?'is-image':isVideo?'is-video':''} ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="${dblAction}" onclick="handleCardClick('${esc(f.id)}', event)">
     <div class="card-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select file">
@@ -610,10 +632,11 @@ function fileCard(f){
         <span class="video-tag-pill">VIDEO</span>
         <div class="thumb-hover-overlay"><i class="fas fa-play"></i></div>
       </div>
-    ` : isPdf ? `
-      <div class="fg-icon" style="color:#ff453a;position:relative">
-        <i class="fas fa-file-pdf"></i>
-        <span class="file-type-pill" style="position:absolute;bottom:-4px;font-size:.58rem;background:rgba(255,69,58,0.2);color:#ff453a;padding:1px 5px;border-radius:4px;font-weight:700">PDF</span>
+    ` : (isDoc || isPdf) ? `
+      <div class="fg-thumb-wrap doc-thumb-wrap">
+        <img class="fg-thumb doc-fg-thumb" src="${previewUrl}&thumb=1" alt="${esc(f.name)}" loading="lazy" decoding="async" data-col="${cfg.col}" data-icon="${cfg.icon}" data-pill="${docPillText}" onerror="handleDocThumbFallback(this)">
+        <div class="doc-badge-pill" style="background:${cfg.col}">${docPillText}</div>
+        <div class="thumb-hover-overlay"><i class="fas fa-eye"></i></div>
       </div>
     ` : isArchive ? `
       <div class="fg-icon" style="color:#ff9f0a;position:relative">
@@ -628,9 +651,10 @@ function fileCard(f){
     <div class="fg-acts">
       <button class="icon-btn xs star-btn ${f.starred?'starred':''}" data-star-id="${esc(f.id)}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ffcc00':''}"></i></button>
       ${canRename ? `<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameFile('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Rename File"><i class="fas fa-pen"></i></button>` : ''}
-      ${isMedia ? `<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
-        isPdf ? `<button class="icon-btn xs" onclick="event.stopPropagation();openPdfViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
-        isArchive ? `<button class="icon-btn xs" onclick="event.stopPropagation();openArchiveViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` : ''}
+      ${isMedia ? `<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')" title="Preview Media"><i class="fas fa-eye"></i></button>` :
+        isPdf ? `<button class="icon-btn xs" onclick="event.stopPropagation();openPdfViewer('${esc(f.id)}')" title="View PDF"><i class="fas fa-eye"></i></button>` :
+        isDoc ? `<button class="icon-btn xs" onclick="event.stopPropagation();openDocViewer('${esc(f.id)}')" title="View Document"><i class="fas fa-eye"></i></button>` :
+        isArchive ? `<button class="icon-btn xs" onclick="event.stopPropagation();openArchiveViewer('${esc(f.id)}')" title="View Archive"><i class="fas fa-eye"></i></button>` : ''}
       ${canDownload ? `<button class="icon-btn xs" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')" title="Download"><i class="fas fa-download"></i></button>` : ''}
       ${canDelete ? `<button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>` : ''}
     </div>
@@ -675,12 +699,17 @@ function fileRow(f){
   const isMedia = ['image','video','audio'].includes(cfg.cat);
   const isPdf = /\.pdf$/i.test(f.name) || f.mimeType === 'application/pdf';
   const isArchive = /\.(zip|rar|7z|tar|gz)$/i.test(f.name);
+  const isDoc = /\.(docx?|xlsx?|pptx?|csv|tsv|ods|txt|md|log|json|xml|rtf)$/i.test(f.name);
   const isSelected = S.selectedFiles && S.selectedFiles.has(f.id);
   const isAdmin = S.ses && S.ses.role === 'admin';
   const canDownload = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDownload !== false;
   const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
   const canRename = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserRename !== false;
-  const dblAction = isMedia ? `openMedia('${esc(f.id)}')` : isPdf ? `openPdfViewer('${esc(f.id)}')` : isArchive ? `openArchiveViewer('${esc(f.id)}')` : (canDownload ? `downloadFile('${esc(f.id)}')` : `toast('File downloads disabled by administrator','warning')`);
+  const dblAction = isMedia ? `openMedia('${esc(f.id)}')` :
+    isPdf ? `openPdfViewer('${esc(f.id)}')` :
+    isDoc ? `openDocViewer('${esc(f.id)}')` :
+    isArchive ? `openArchiveViewer('${esc(f.id)}')` :
+    (canDownload ? `downloadFile('${esc(f.id)}')` : `toast('File downloads disabled by administrator','warning')`);
 
   return `<div class="fl-row ${isSelected ? 'is-selected' : ''}" data-item-id="${esc(f.id)}" ondblclick="${dblAction}">
     <span style="display:flex;align-items:center;gap:8px">
@@ -693,6 +722,7 @@ function fileRow(f){
       ${canRename ? `<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameFile('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Rename File"><i class="fas fa-pen"></i></button>` : ''}
       ${isMedia ? `<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
         isPdf ? `<button class="icon-btn xs" onclick="event.stopPropagation();openPdfViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
+        isDoc ? `<button class="icon-btn xs" onclick="event.stopPropagation();openDocViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
         isArchive ? `<button class="icon-btn xs" onclick="event.stopPropagation();openArchiveViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` : ''}
       ${canDownload ? `<button class="icon-btn xs" onclick="event.stopPropagation();downloadFile('${esc(f.id)}')" title="Download"><i class="fas fa-download"></i></button>` : ''}
       ${canDelete ? `<button class="icon-btn xs danger" onclick="event.stopPropagation();confirmDeleteFile('${esc(f.id)}','${esc(f.name)}')" title="Delete"><i class="fas fa-trash-alt"></i></button>` : ''}

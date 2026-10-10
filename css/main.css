@@ -2231,6 +2231,293 @@ body.has-active-upload .mobile-fab-wrap {
   }
 }
 
+/* ─── Office & Document Viewer Modal ────────────────────────────── */
+.doc-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  z-index: 2500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  animation: modalFadeIn 0.2s ease-out;
+}
+
+.doc-viewer-container {
+  display: flex;
+  flex-direction: column;
+  width: 95vw;
+  max-width: 1150px;
+  height: 90vh;
+  background: rgba(18, 20, 32, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  animation: modalPopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.doc-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.doc-viewer-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.doc-title-text {
+  font-weight: 700;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
+
+.doc-sub-text {
+  font-size: 0.75rem;
+  color: var(--text3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.doc-toolbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 4px 10px;
+  border-radius: 20px;
+  flex-shrink: 0;
+}
+
+.doc-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.doc-viewer-body {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  background: #14161f;
+  position: relative;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Word Document Pages */
+.docx-wrapper {
+  background: transparent !important;
+  padding: 24px 16px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 20px !important;
+  width: 100% !important;
+  min-height: 100% !important;
+}
+
+.docx-wrapper > section.docx {
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45) !important;
+  border-radius: 4px !important;
+  margin-bottom: 24px !important;
+  transform-origin: top center;
+  transition: transform 0.15s ease-out;
+}
+
+/* Excel Spreadsheet Grid */
+.excel-table-wrap {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  position: relative;
+  background: var(--bg);
+}
+
+.excel-table {
+  border-collapse: collapse;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+  font-size: 0.82rem;
+  width: max-content;
+  min-width: 100%;
+  color: var(--text1);
+}
+
+.excel-table th, .excel-table td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px 14px;
+  white-space: nowrap;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.excel-table th {
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 700;
+  color: #30d158;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  text-align: center;
+}
+
+.excel-table td.row-num {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+  color: var(--text3);
+  text-align: right;
+  width: 46px;
+  user-select: none;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+.excel-table th.col-corner {
+  position: sticky;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.excel-table tr:hover td {
+  background: rgba(48, 209, 88, 0.08);
+}
+
+.excel-table td.highlight-match {
+  background: rgba(255, 215, 0, 0.28) !important;
+  color: #ffd700 !important;
+  font-weight: 700;
+}
+
+/* Sheet Tabs Bar */
+.sheet-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 6px 14px;
+  background: rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.sheet-tab-btn {
+  padding: 5px 14px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text2);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sheet-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text1);
+}
+
+.sheet-tab-btn.active {
+  background: rgba(48, 209, 88, 0.2);
+  color: #30d158;
+  border-color: rgba(48, 209, 88, 0.45);
+}
+
+/* Text Reader */
+.text-doc-body {
+  padding: 1.5rem 1.8rem;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.65;
+  color: var(--text1);
+  overflow: auto;
+  height: 100%;
+  white-space: pre;
+  tab-size: 2;
+  margin: 0;
+}
+
+.text-doc-body.wrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Document Card Pill Badge */
+.doc-badge-pill {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #ffffff;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  z-index: 2;
+}
+
+@media (max-width: 768px) {
+  .doc-viewer-overlay {
+    padding: 0;
+  }
+  .doc-viewer-container {
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+    border: none;
+  }
+  .doc-viewer-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0.6rem 0.8rem;
+  }
+  .doc-toolbar-controls {
+    order: 3;
+    width: 100%;
+    justify-content: space-between;
+    padding: 3px 8px;
+  }
+  .doc-title-text {
+    max-width: 180px;
+  }
+  .sheet-tabs-bar {
+    padding: 4px 8px;
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════
    LIGHT THEME DEFINITIONS & HIGH-CONTRAST COMPONENT SYSTEM
    ═══════════════════════════════════════════════════════════════ */
