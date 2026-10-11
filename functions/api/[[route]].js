@@ -265,10 +265,14 @@ async function hBackupDB(req,env){
 }
 async function hRestoreDB(req,env){
   if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);
-  const imported=await req.json().catch(()=>null);
+  let imported=await req.json().catch(()=>null);
+  if(typeof imported==='string'){
+    try{ imported=JSON.parse(imported); }catch(e){}
+  }
   if(!imported||typeof imported!=='object')return J({error:'Invalid JSON format'},400);
+  if(!imported.v && !imported.adminHash && !imported.drives)return J({error:'Invalid database structure: missing drives or schema'},400);
   await uSet(env,'td:db',imported);
-  return J({ok:true,message:'Database restored successfully'});
+  return J({ok:true,message:'Database restored successfully',totalDrives:(imported.drives||[]).length,totalFiles:(imported.files||[]).length});
 }
 async function hUI(req,env){
   const body=await req.json().catch(()=>({}));
@@ -1246,8 +1250,8 @@ async function hSetPolicy(req,env){
   return J({ok:true,policy:db.policy});
 }
 
-async function hCU(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const{username,password,allowedDrives}=await req.json().catch(()=>({}));const db=await uGet(env,'td:db');if(!db.users)db.users=[];if(db.users.find(u=>u.username===username))return J({error:'Username taken'},409);db.users.push({id:uid(),username,passwordHash:await sha256(password),allowedDrives:allowedDrives||'all',createdAt:new Date().toISOString()});await uSet(env,'td:db',db);return J({ok:true});}
-async function hDU(req,env,uid2){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const db=await uGet(env,'td:db');db.users=(db.users||[]).filter(u=>u.id!==uid2);await uSet(env,'td:db',db);return J({ok:true});}
+async function hCU(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const{username,password,allowedDrives}=await req.json().catch(()=>({}));let db=await uGet(env,'td:db');if(!db)db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};if(!db.users)db.users=[];if(db.users.find(u=>u.username===username))return J({error:'Username taken'},409);db.users.push({id:uid(),username,passwordHash:await sha256(password),allowedDrives:allowedDrives||'all',createdAt:new Date().toISOString()});await uSet(env,'td:db',db);return J({ok:true});}
+async function hDU(req,env,uid2){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const db=await uGet(env,'td:db');if(!db)return J({ok:true});db.users=(db.users||[]).filter(u=>u.id!==uid2);await uSet(env,'td:db',db);return J({ok:true});}
 
 async function hStar(req,env,fileId){
   const db=await uGet(env,'td:db');
@@ -1277,13 +1281,14 @@ async function hOpenDrive(req,env){
   if(!await vSes(req,env,'admin')) return J({error:'Unauthorized'},401);
   const{openDriveId}=await req.json().catch(()=>({}));
   const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
   db.openDriveId=openDriveId||null;
   (db.drives||[]).forEach(d=>{ d.isOpenDrive = (d.id===openDriveId); });
   await uSet(env,'td:db',db);
   return J({ok:true,openDriveId:db.openDriveId});
 }
 
-async function hCP(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const{newPassword}=await req.json().catch(()=>({}));if(!newPassword||newPassword.length<4)return J({error:'Min 4 chars'},400);const db=await uGet(env,'td:db');db.adminHash=await sha256(newPassword);await uSet(env,'td:db',db);return J({ok:true});}
+async function hCP(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const{newPassword}=await req.json().catch(()=>({}));if(!newPassword||newPassword.length<4)return J({error:'Min 4 chars'},400);let db=await uGet(env,'td:db');if(!db)db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};db.adminHash=await sha256(newPassword);await uSet(env,'td:db',db);return J({ok:true});}
 async function hInit(req,env){const url=new URL(req.url),ex=await uGet(env,'td:db');if(ex&&ex.adminHash&&url.searchParams.get('reset')!=='yes')return J({error:'Already initialized. Add ?reset=yes to force.'},409);const{adminPassword='admin123'}=await req.json().catch(()=>({}));await uSet(env,'td:db',{v:3,adminHash:await sha256(adminPassword),drives:[],files:[],folders:[],activityLog:[],users:[]});return J({ok:true,message:`Password set: ${adminPassword}`});}
 
 export async function onRequest({request,env}){

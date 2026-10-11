@@ -141,10 +141,11 @@ function renderSettingsPage() {
     // Database Maintenance & Backup
     '<div class="settings-section">',
     '<h3 class="sect-title"><i class="fas fa-database" style="color:var(--primary)"></i> Database Backup & Restore</h3>',
-    '<p style="color:var(--text2);font-size:.85rem;margin-bottom:.8rem">Download an instant JSON backup of your database, or restore from a previous backup file.</p>',
+    '<p style="color:var(--text2);font-size:.85rem;margin-bottom:.8rem">Download an instant JSON backup of your database, or restore from a previous backup file / pasted JSON.</p>',
     '<div style="display:flex;gap:10px;flex-wrap:wrap">',
     '<button class="btn-ghost sm" onclick="exportDBBackup()"><i class="fas fa-download"></i> Export Backup (JSON)</button>',
-    '<label class="btn-ghost sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px"><i class="fas fa-upload"></i> Restore Backup (JSON)<input type="file" accept=".json" style="display:none" onchange="importDBBackup(event)"></label>',
+    '<label class="btn-ghost sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px"><i class="fas fa-upload"></i> Restore Backup File<input type="file" accept=".json" style="display:none" onchange="importDBBackup(event)"></label>',
+    '<button class="btn-ghost sm" onclick="promptPasteDBBackup()"><i class="fas fa-paste"></i> Paste Database JSON</button>',
     '</div>',
     '</div>',
 
@@ -655,4 +656,54 @@ async function importDBBackup(event) {
     event.target.value = '';
   };
   reader.readAsText(file);
+}
+
+function promptPasteDBBackup() {
+  var existing = document.getElementById('pasteJsonModal');
+  if (existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.className = 'overlay';
+  ov.id = 'pasteJsonModal';
+  ov.innerHTML = `
+    <div class="modal" style="max-width:560px;padding:1.8rem;box-shadow:0 24px 60px rgba(0,0,0,0.85);border:1px solid rgba(78,134,245,0.3)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+        <h3 style="margin:0;font-size:1.15rem;display:flex;align-items:center;gap:8px">
+          <i class="fas fa-paste" style="color:var(--primary)"></i> Paste Old Database JSON
+        </h3>
+        <button class="icon-btn sm" onclick="document.getElementById('pasteJsonModal').remove()"><i class="fas fa-times"></i></button>
+      </div>
+      <p style="font-size:.82rem;color:var(--text2);margin-bottom:.8rem;line-height:1.5">
+        If you copied the <code>td:db</code> value from Upstash Console Data Browser, paste the JSON text below to merge and restore all your drives, folders, files, and users.
+      </p>
+      <textarea id="rawDbJsonInput" class="inp" style="width:100%;height:180px;font-family:monospace;font-size:.78rem;resize:vertical;margin-bottom:1rem" placeholder='{"v":3,"adminHash":"...","drives":[...]}'></textarea>
+      <div style="display:flex;justify-content:flex-end;gap:10px">
+        <button class="btn-ghost sm" onclick="document.getElementById('pasteJsonModal').remove()">Cancel</button>
+        <button class="btn-primary sm" onclick="submitPastedDBBackup()"><i class="fas fa-check"></i> Save & Restore</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(ov);
+}
+
+async function submitPastedDBBackup() {
+  var inp = document.getElementById('rawDbJsonInput');
+  if (!inp || !inp.value.trim()) { toast('Please paste JSON text', 'warning'); return; }
+  try {
+    var parsed = JSON.parse(inp.value.trim());
+    toast('Restoring database…', 'info');
+    var r = await apiFetch('admin/restore', { method: 'POST', body: JSON.stringify(parsed) });
+    if (r && r.ok) {
+      toast('Database restored! ' + (r.totalFiles || 0) + ' files, ' + (r.totalDrives || 0) + ' drives recovered.', 'success', 6000);
+      var m = document.getElementById('pasteJsonModal');
+      if (m) m.remove();
+      S.db = await apiFetchDB();
+      renderSettingsPage();
+      renderSidebarStorage();
+      if (typeof _curPage !== 'undefined' && _curPage === 'files') renderFilesPage(_driveId, _folderId);
+    } else {
+      toast(r ? (r.error || 'Restore failed') : 'Network error', 'error');
+    }
+  } catch(e) {
+    toast('Invalid JSON syntax: ' + e.message, 'error');
+  }
 }
