@@ -17,9 +17,12 @@ async function uGet(env,key){
       const val=await kv.get(key,'json');
       if(val!==null&&val!==undefined)return val;
       const raw=await kv.get(key,'text');
-      if(!raw)return null;
-      try{return JSON.parse(raw);}catch(e){return raw;}
+      if(raw!==null&&raw!==undefined){
+        try{return JSON.parse(raw);}catch(e){return raw;}
+      }
     }catch(e){console.error('KV get error:',e);}
+    // If KV is bound, do not fail with Upstash suspension error
+    return null;
   }
   try{
     const r=await fetch(`${gUU(env)}/get/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${gUT(env)}`}});
@@ -38,16 +41,18 @@ async function uGet(env,key){
     return null;
   }
 }
-async function uSet(env,key,val){
+async function uSet(env,key,val,ttl){
   const kv=getKV(env);
   if(kv){
     try{
-      await kv.put(key,typeof val==='string'?val:JSON.stringify(val));
+      const opts=(ttl&&ttl>=60)?{expirationTtl:ttl}:undefined;
+      await kv.put(key,typeof val==='string'?val:JSON.stringify(val),opts);
       return;
     }catch(e){console.error('KV put error:',e);}
   }
   try{
     await fetch(`${gUU(env)}/set/${encodeURIComponent(key)}`,{method:'POST',headers:{Authorization:`Bearer ${gUT(env)}`,'Content-Type':'application/json'},body:JSON.stringify(val)});
+    if(ttl) await uExp(env,key,ttl);
   }catch(e){}
 }
 async function uExp(env,key,s){
@@ -81,26 +86,27 @@ async function hAL(req,env){
   const{password=''}=await req.json().catch(()=>({}));
   let db;
   try{ db=await uGet(env,'td:db'); }catch(e){
-    if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash due to monthly bandwidth limit. Please un-suspend or upgrade in Upstash Console.', isDatabaseSuspended:true},503);
+    if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash due to monthly bandwidth limit. Please un-suspend or upgrade in Upstash Console, or bind Cloudflare KV.', isDatabaseSuspended:true},503);
   }
-  if(!db)return J({error:'Not initialized. POST /api/admin/init first.'},503);
+  if(!db){
+    db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};
+    await uSet(env,'td:db',db);
+  }
   if(await sha256(password)!==db.adminHash)return J({error:'Wrong password'},401);
   const t=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b=>b.toString(16).padStart(2,'0')).join('');
-  await uSet(env,`td:ses:${t}`,'admin');
-  await uExp(env,`td:ses:${t}`,604800);
+  await uSet(env,`td:ses:${t}`,'admin',604800);
   return J({token:t,role:'admin'});
 }
 async function hUL(req,env){
   const{username='',password=''}=await req.json().catch(()=>({}));
   let db;
   try{ db=await uGet(env,'td:db'); }catch(e){
-    if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash. Please un-suspend in Upstash Console.', isDatabaseSuspended:true},503);
+    if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash. Please un-suspend in Upstash Console or bind Cloudflare KV.', isDatabaseSuspended:true},503);
   }
   const u=(db&&db.users||[]).find(x=>x.username===username);
   if(!u||await sha256(password)!==u.passwordHash)return J({error:'Wrong username or password'},401);
   const t=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b=>b.toString(16).padStart(2,'0')).join('');
-  await uSet(env,`td:ses:${t}`,u.id);
-  await uExp(env,`td:ses:${t}`,604800);
+  await uSet(env,`td:ses:${t}`,u.id,604800);
   return J({token:t,role:'user',userId:u.id,username:u.username,allowedDrives:u.allowedDrives||'all'});
 }
 async function hAG(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const cid=gGC(env);if(!cid)return J({error:'GOOGLE_CLIENT_ID not set in Cloudflare Pages env vars'},400);const o=new URL(req.url).origin;const u=new URL('https://accounts.google.com/o/oauth2/v2/auth');u.searchParams.set('client_id',cid);u.searchParams.set('redirect_uri',`${o}/api/auth/callback`);u.searchParams.set('response_type','code');u.searchParams.set('scope','https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile');u.searchParams.set('access_type','offline');u.searchParams.set('prompt','consent');return J({url:u.toString()});}
@@ -120,7 +126,10 @@ async function hDB(req,env){
   try{ db=await uGet(env,'td:db'); }catch(e){
     if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash due to monthly bandwidth limit. Please un-suspend in Upstash Console or bind Cloudflare KV.', isDatabaseSuspended:true},503);
   }
-  if(!db)return J(null);
+  if(!db){
+    db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};
+    await uSet(env,'td:db',db);
+  }
   const policy = db.policy || { allowUserDownload: true, allowUserDelete: true };
   const r=await vSes(req,env,null);
   if(r==='admin'){
@@ -207,6 +216,60 @@ async function hQ(req,env){
   return J({drives:res});
 }
 async function hDD(req,env,id){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const db=await uGet(env,'td:db');db.drives=(db.drives||[]).filter(d=>d.id!==id);await uSet(env,'td:db',db);return J({ok:true});}
+async function hScanDrive(req,env,driveId){
+  if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);
+  const db=await uGet(env,'td:db');
+  if(!db)return J({error:'Database not found'},404);
+  const drv=(db.drives||[]).find(d=>d.id===driveId);
+  if(!drv)return J({error:'Drive not found'},404);
+  const at=await gAT(env,drv.encToken);
+  if(!db.folders)db.folders=[];
+  if(!db.files)db.files=[];
+  let addedFiles=0,addedFolders=0;
+  async function scanFolder(googleFolderId,localFolderId){
+    let pageToken='';
+    do{
+      const q=`'${googleFolderId}' in parents and trashed=false`;
+      const u=`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=nextPageToken,files(id,name,mimeType,size,createdTime)&pageSize=500${pageToken?`&pageToken=${pageToken}`:''}`;
+      const res=await(await fetch(u,{headers:{Authorization:`Bearer ${at}`}})).json();
+      if(!res.files)break;
+      for(const item of res.files){
+        if(item.mimeType==='application/vnd.google-apps.folder'){
+          let ef=db.folders.find(f=>f.googleFolderId===item.id);
+          if(!ef){
+            ef={id:uid(),driveId,parentId:localFolderId||null,name:item.name,googleFolderId:item.id,date:item.createdTime||new Date().toISOString(),createdBy:'admin'};
+            db.folders.push(ef);
+            addedFolders++;
+          }
+          await scanFolder(item.id,ef.id);
+        }else{
+          let eFile=db.files.find(f=>f.googleFileId===item.id);
+          if(!eFile){
+            eFile={id:uid(),googleFileId:item.id,driveId,folderId:localFolderId||null,name:item.name,size:parseInt(item.size,10)||0,mimeType:item.mimeType||'application/octet-stream',uploadedBy:'admin',date:item.createdTime||new Date().toISOString()};
+            db.files.push(eFile);
+            addedFiles++;
+          }
+        }
+      }
+      pageToken=res.nextPageToken;
+    }while(pageToken);
+  }
+  await scanFolder(drv.rootFolderId,null);
+  await uSet(env,'td:db',db);
+  return J({ok:true,addedFiles,addedFolders,totalFiles:db.files.length,totalFolders:db.folders.length});
+}
+async function hBackupDB(req,env){
+  if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);
+  const db=await uGet(env,'td:db');
+  return J(db||{});
+}
+async function hRestoreDB(req,env){
+  if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);
+  const imported=await req.json().catch(()=>null);
+  if(!imported||typeof imported!=='object')return J({error:'Invalid JSON format'},400);
+  await uSet(env,'td:db',imported);
+  return J({ok:true,message:'Database restored successfully'});
+}
 async function hUI(req,env){
   const body=await req.json().catch(()=>({}));
   const{driveId,folderId,name,size,mimeType}=body;
@@ -1233,6 +1296,7 @@ export async function onRequest({request,env}){
     if(p==='auth/callback'&&m==='GET')return hCB(request,env);
     if(p==='db'&&m==='GET')return hDB(request,env);
     if(p==='drives/quota'&&m==='GET')return hQ(request,env);
+    if(p.startsWith('drives/scan/')&&m==='POST')return hScanDrive(request,env,p.replace('drives/scan/',''));
     if(p.startsWith('drives/')&&m==='DELETE')return hDD(request,env,p.replace('drives/',''));
     if(p==='upload/init'&&m==='POST')return hUI(request,env);
     if(p==='upload/chunk'&&m==='PUT')return hUChunk(request,env);
@@ -1266,6 +1330,8 @@ export async function onRequest({request,env}){
     if(p==='admin/change-password'&&m==='POST')return hCP(request,env);
     if(p==='admin/open-drive'&&m==='POST')return hOpenDrive(request,env);
     if(p.startsWith('drives/rename/')&&m==='POST')return hRenameDrive(request,env,p.replace('drives/rename/',''));
+    if(p==='admin/backup'&&m==='GET')return hBackupDB(request,env);
+    if(p==='admin/restore'&&m==='POST')return hRestoreDB(request,env);
     if(p==='admin/init'&&m==='POST')return hInit(request,env);
     return J({error:'Not found',path:p},404);
   }catch(e){return J({error:e.message||'Server error'},500);}

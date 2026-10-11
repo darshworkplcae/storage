@@ -161,6 +161,21 @@ function renderFilesPage(driveId, folderId){
 
     const isAdmin=S.ses.role==='admin';
     if(!drives.length){
+      if(db&&db.isDatabaseSuspended){
+        pc.innerHTML=`<div class="inner-page"><div class="empty-state" style="min-height:420px;border:1px dashed #ff453a;border-radius:16px;background:rgba(255,69,58,0.06);padding:2rem">
+          <div class="empty-icon" style="color:#ff453a;background:rgba(255,69,58,0.15)"><i class="fas fa-triangle-exclamation"></i></div>
+          <h3 style="color:#ff6961">Database Suspended on Upstash</h3>
+          <p style="max-width:540px;margin:0.5rem auto 1.2rem;line-height:1.6;color:var(--text2)">
+            Your Upstash Redis database exceeded its 10 GB monthly bandwidth limit during the large upload.<br>
+            <strong>Switch to Cloudflare KV for 100% Free, Unlimited Bandwidth & Zero Lag (No Credit Card Needed)!</strong>
+          </p>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+            <button class="btn-primary" onclick="showCloudflareKVGuideModal()"><i class="fas fa-bolt"></i> View 2-Min Setup Guide</button>
+            <button class="btn-ghost" onclick="location.reload()"><i class="fas fa-rotate"></i> Refresh Page</button>
+          </div>
+        </div></div>`;
+        return;
+      }
       pc.innerHTML=`<div class="inner-page"><div class="empty-state" style="min-height:400px">
         <div class="empty-icon"><i class="fas fa-hard-drive"></i></div>
         <h3>No Drives Connected</h3>

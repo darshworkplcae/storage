@@ -40,9 +40,10 @@ function renderSettingsPage() {
             '</div>' +
             '<div class="dc-bar"><div class="dc-fill" style="width:'+usedPct+'%;background:'+d.color+'"></div></div>' +
             '<div class="dc-usage">'+fmt(used)+' / '+fmt(cap)+' ('+usedPct+'%) · <span style="color:#30d158;font-weight:600">'+fmt(free)+' free</span></div>' +
-            '<div style="margin-top:.6rem;display:flex;gap:6px">' +
+            '<div style="margin-top:.6rem;display:flex;gap:6px;flex-wrap:wrap">' +
               '<button class="btn-ghost xs" style="flex:1" onclick="promptRenameDrive(\''+d.id+'\',\''+esc(d.name).replace(/'/g,"\\'")+'\')"><i class="fas fa-pen"></i> Rename</button>' +
               '<button class="btn-ghost xs" style="flex:1" onclick="toggleOpenDrive(\''+d.id+'\')"><i class="fas fa-users"></i> '+(isOpen?'Disable Open':'Make Open')+'</button>' +
+              '<button class="btn-ghost xs" style="flex:1" onclick="scanDriveFiles(\''+d.id+'\')" title="Scan Google Drive to detect and restore all uploaded files"><i class="fas fa-rotate"></i> Sync Files</button>' +
             '</div>' +
           '</div>';
         }).join('') + '</div>',
@@ -134,6 +135,16 @@ function renderSettingsPage() {
     '<input class="inp" id="newAdminPass" type="password" placeholder="New password (min 4 chars)">',
     '<input class="inp" id="confAdminPass" type="password" placeholder="Confirm password">',
     '<button class="btn-primary" onclick="changeAdminPass()"><i class="fas fa-key"></i> Update Password</button>',
+    '</div>',
+    '</div>',
+
+    // Database Maintenance & Backup
+    '<div class="settings-section">',
+    '<h3 class="sect-title"><i class="fas fa-database" style="color:var(--primary)"></i> Database Backup & Restore</h3>',
+    '<p style="color:var(--text2);font-size:.85rem;margin-bottom:.8rem">Download an instant JSON backup of your database, or restore from a previous backup file.</p>',
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">',
+    '<button class="btn-ghost sm" onclick="exportDBBackup()"><i class="fas fa-download"></i> Export Backup (JSON)</button>',
+    '<label class="btn-ghost sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px"><i class="fas fa-upload"></i> Restore Backup (JSON)<input type="file" accept=".json" style="display:none" onchange="importDBBackup(event)"></label>',
     '</div>',
     '</div>',
 
@@ -575,4 +586,73 @@ async function adminRecoverFolder(folderId, folderName) {
   } else {
     toast(res ? (res.error || 'Recovery failed') : 'Network error', 'error');
   }
+}
+
+async function scanDriveFiles(driveId) {
+  toast('Scanning Google Drive for uploaded files…', 'info', 15000);
+  try {
+    var r = await apiFetch('drives/scan/' + encodeURIComponent(driveId), { method: 'POST' });
+    if (r && r.ok) {
+      toast('Sync complete! Added ' + r.addedFiles + ' file(s) and ' + r.addedFolders + ' folder(s) from Google Drive.', 'success', 6000);
+      S.db = await apiFetchDB();
+      renderSettingsPage();
+      renderSidebarStorage();
+      if (typeof _curPage !== 'undefined' && _curPage === 'files') renderFilesPage(_driveId, _folderId);
+    } else {
+      toast(r ? (r.error || 'Scan failed') : 'Network error', 'error');
+    }
+  } catch(e) {
+    toast(e.message || 'Scan error', 'error');
+  }
+}
+
+async function exportDBBackup() {
+  toast('Generating database backup…', 'info');
+  try {
+    var r = await apiFetch('admin/backup');
+    if (!r || r.error) { toast(r ? r.error : 'Backup failed', 'error'); return; }
+    var jsonStr = JSON.stringify(r, null, 2);
+    var blob = new Blob([jsonStr], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'teledrive-db-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('Backup downloaded successfully!', 'success');
+  } catch(e) {
+    toast(e.message || 'Backup failed', 'error');
+  }
+}
+
+async function importDBBackup(event) {
+  var file = event && event.target && event.target.files && event.target.files[0];
+  if (!file) return;
+  if (!confirm('Are you sure you want to restore database from "' + file.name + '"? This will overwrite existing metadata.')) {
+    event.target.value = '';
+    return;
+  }
+  toast('Restoring database backup…', 'info');
+  var reader = new FileReader();
+  reader.onload = async function(e) {
+    try {
+      var data = JSON.parse(e.target.result);
+      var r = await apiFetch('admin/restore', { method: 'POST', body: JSON.stringify(data) });
+      if (r && r.ok) {
+        toast('Database restored successfully!', 'success', 5000);
+        S.db = await apiFetchDB();
+        renderSettingsPage();
+        renderSidebarStorage();
+        if (typeof _curPage !== 'undefined' && _curPage === 'files') renderFilesPage(_driveId, _folderId);
+      } else {
+        toast(r ? (r.error || 'Restore failed') : 'Network error', 'error');
+      }
+    } catch(err) {
+      toast('Invalid JSON file: ' + err.message, 'error');
+    }
+    event.target.value = '';
+  };
+  reader.readAsText(file);
 }

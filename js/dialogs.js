@@ -2284,3 +2284,71 @@ function loadScript(src) {
     document.head.appendChild(s);
   });
 }
+
+function showCloudflareKVGuideModal() {
+  var existing = document.getElementById('cfKvGuideModal');
+  if (existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.className = 'overlay';
+  ov.id = 'cfKvGuideModal';
+  ov.innerHTML = `
+    <div class="modal" style="max-width:540px;padding:1.8rem;box-shadow:0 24px 60px rgba(0,0,0,0.85);border:1px solid rgba(255,159,10,0.4)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.2rem">
+        <h3 style="display:flex;align-items:center;gap:8px;font-size:1.15rem;margin:0">
+          <i class="fas fa-bolt" style="color:#ff9f0a"></i> Connect Free Cloudflare KV
+        </h3>
+        <button class="icon-btn sm" onclick="var m=document.getElementById('cfKvGuideModal');if(m)m.remove();"><i class="fas fa-times"></i></button>
+      </div>
+
+      <div style="background:rgba(255,159,10,0.08);border:1px solid rgba(255,159,10,0.25);border-radius:10px;padding:12px 14px;font-size:.82rem;line-height:1.5;margin-bottom:1.2rem">
+        <strong>100% Free Forever & Unlimited Bandwidth:</strong><br>
+        No credit card needed! Cloudflare KV has zero bandwidth fees and will never suspend your database again.
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:.84rem;line-height:1.55;color:var(--text2)">
+        <div style="display:flex;gap:10px">
+          <span style="background:var(--primary);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.75rem;flex-shrink:0">1</span>
+          <div>
+            Go to <strong>Cloudflare Dashboard</strong> (<a href="https://dash.cloudflare.com/" target="_blank" style="color:var(--primary);text-decoration:underline">dash.cloudflare.com</a>).
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px">
+          <span style="background:var(--primary);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.75rem;flex-shrink:0">2</span>
+          <div>
+            In left menu, click <strong>Storage & Databases</strong> ➔ <strong>KV</strong> ➔ Click <strong>Create Namespace</strong>.<br>
+            Name it: <code style="background:var(--bg4);padding:2px 6px;border-radius:4px;color:var(--text1)">TELEDRIVE_KV</code> and click <strong>Add</strong>.
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px">
+          <span style="background:var(--primary);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.75rem;flex-shrink:0">3</span>
+          <div>
+            In left menu, click <strong>Workers & Pages</strong> ➔ click your project <strong>storage</strong>.<br>
+            Click <strong>Settings</strong> ➔ <strong>Functions</strong> (left submenu) ➔ scroll to <strong>KV namespace bindings</strong>.<br>
+            Click <strong>Add binding</strong>:
+            <ul style="margin:4px 0 0 16px;padding:0">
+              <li>Variable name: <code style="background:var(--bg4);padding:2px 6px;border-radius:4px;color:var(--text1)">KV</code></li>
+              <li>KV namespace: select <code style="background:var(--bg4);padding:2px 6px;border-radius:4px;color:var(--text1)">TELEDRIVE_KV</code></li>
+            </ul>
+            Click <strong>Save</strong>.
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px">
+          <span style="background:var(--primary);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.75rem;flex-shrink:0">4</span>
+          <div>
+            Go to <strong>Deployments</strong> tab ➔ click <strong>...</strong> on the latest deployment ➔ <strong>Retry deployment</strong>.<br>
+            Once completed, refresh this page and log in as admin (<code style="background:var(--bg4);padding:2px 6px;border-radius:4px;color:var(--text1)">admin123</code>)!
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:1.4rem;display:flex;justify-content:flex-end;gap:10px">
+        <button class="btn-ghost sm" onclick="var m=document.getElementById('cfKvGuideModal');if(m)m.remove();">Close</button>
+        <a href="https://dash.cloudflare.com/" target="_blank" class="btn-primary sm"><i class="fas fa-arrow-up-right-from-square"></i> Open Cloudflare</a>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(ov);
+}
