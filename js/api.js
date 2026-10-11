@@ -48,7 +48,15 @@ function apiUploadComplete(body)  { return apiFetch('upload/complete',  { method
 
 async function apiConnectDrive() {
   var r = await apiFetch('auth/google');
-  if (!r || !r.url) { toast(r ? (r.error||'Cannot get OAuth URL') : 'Network error', 'error'); return false; }
+  if (!r || !r.url) {
+    if (r && (r.error === 'Unauthorized' || r.status === 401)) {
+      toast('Admin session expired. Please enter admin password to authenticate.', 'warning', 6000);
+      if (typeof showAdminLogin === 'function') showAdminLogin(null);
+      return false;
+    }
+    toast(r ? (r.error||'Cannot get OAuth URL') : 'Network error', 'error');
+    return false;
+  }
   var popup = window.open(r.url, 'google-auth', 'width=520,height=620,menubar=no,toolbar=no');
   return new Promise(function(resolve) {
     var done = false;

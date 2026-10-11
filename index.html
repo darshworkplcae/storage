@@ -57,21 +57,23 @@
       </button>
     </div>
 
-    <!-- Footer: hidden admin link -->
-    <div class="lp-footer">
-      <a href="#/admin" class="lp-admin-link" onclick="showAdminLogin(event)">
+    <!-- Hidden admin link (accessible exclusively via /tobi/admin) -->
+    <div class="lp-footer" style="display:none">
+      <a href="#/tobi/admin" class="lp-admin-link" onclick="showAdminLogin(event)">
         <i class="fas fa-shield-halved"></i> Admin
       </a>
     </div>
   </div>
 
-  <!-- Admin Login overlay (inside login page, shown on #/admin) -->
+  <!-- Secret Admin Login overlay (accessed via /tobi/admin) -->
   <div id="adminLoginOverlay" class="admin-login-overlay hidden">
     <div class="lp-card admin-card">
+      <div class="lp-card-shine"></div>
+      <button class="lp-close-btn" onclick="hideAdminLogin()" title="Close"><i class="fas fa-times"></i></button>
       <div class="lp-logo">
-        <div class="lp-logo-icon admin"><i class="fas fa-shield-halved"></i></div>
-        <h1 class="lp-title">Admin Login</h1>
-        <p class="lp-sub">Restricted access</p>
+        <div class="lp-logo-icon admin"><i class="fas fa-user-shield"></i></div>
+        <h1 class="lp-title">Secret Admin Access</h1>
+        <p class="lp-sub">Enter system password to continue</p>
       </div>
       <div id="adminErr" class="lp-err hidden"></div>
       <div class="lp-field">
@@ -79,10 +81,10 @@
         <input class="lp-inp" id="adminPassInp" type="password" placeholder="Admin password" autocomplete="current-password">
       </div>
       <button class="lp-btn admin-btn" id="adminLoginBtn" onclick="doAdminLogin()">
-        <i class="fas fa-shield-halved"></i> Admin Login
+        <i class="fas fa-unlock"></i> Unlock Dashboard
       </button>
       <button class="lp-back-btn" onclick="hideAdminLogin()">
-        <i class="fas fa-arrow-left"></i> Back to user login
+        <i class="fas fa-arrow-left"></i> Back to explorer
       </button>
     </div>
   </div>

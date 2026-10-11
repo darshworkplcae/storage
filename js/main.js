@@ -18,18 +18,28 @@ function hideSignInModal() {
   }
 }
 
-// ─── Admin login overlay ──────────────────────────────────────────────────────
+// ─── Secret Admin login overlay (/tobi/admin) ──────────────────────────────────
+function isTobiAdminRoute() {
+  var p = (window.location.pathname || '').toLowerCase();
+  var h = (window.location.hash || '').toLowerCase();
+  return p.includes('/tobi/admin') || h === '#/tobi/admin' || h.startsWith('#/tobi/admin') || h === '#/admin' || h.startsWith('#/admin');
+}
 function showAdminLogin(e) {
-  if(e) e.preventDefault();
+  if(e && e.preventDefault) e.preventDefault();
+  var lp=$('loginPage'); if(lp) { lp.style.display='flex'; }
   var ov=$('adminLoginOverlay'); if(ov) ov.classList.remove('hidden');
   var inp=$('adminPassInp'); if(inp){inp.value='';inp.focus();}
-  history.replaceState(null,'','#/admin');
 }
 function hideAdminLogin() {
   var ov=$('adminLoginOverlay'); if(ov) ov.classList.add('hidden');
-  history.replaceState(null,'','#/');
+  if(window.location.hash.includes('admin') || window.location.pathname.includes('admin')) {
+    history.replaceState(null,'','#/');
+  }
   var inp=$('adminPassInp'); if(inp) inp.value='';
   var err=$('adminErr'); if(err) err.classList.add('hidden');
+  if(!S.ses || !S.ses.token) {
+    showAppShell();
+  }
 }
 
 // ─── Auth UI helpers ──────────────────────────────────────────────────────────
@@ -285,34 +295,65 @@ function wireEvents() {
 
 function debounce(fn,ms){var t;return function(){clearTimeout(t);t=setTimeout(fn,ms);};}
 
+function init3DLoginCard() {
+  var cards = document.querySelectorAll('.lp-card');
+  cards.forEach(function(card) {
+    if (card._has3DListener) return;
+    card._has3DListener = true;
+    card.addEventListener('mousemove', function(e) {
+      var rect = card.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      var y = e.clientY - rect.top;
+      var centerX = rect.width / 2;
+      var centerY = rect.height / 2;
+      var rotateX = ((y - centerY) / centerY) * -10;
+      var rotateY = ((x - centerX) / centerX) * 10;
+      card.style.transform = 'perspective(1000px) rotateX(' + rotateX.toFixed(2) + 'deg) rotateY(' + rotateY.toFixed(2) + 'deg) translateZ(8px)';
+      card.style.setProperty('--shine-x', (x / rect.width * 100).toFixed(1) + '%');
+      card.style.setProperty('--shine-y', (y / rect.height * 100).toFixed(1) + '%');
+    });
+    card.addEventListener('mouseleave', function() {
+      card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg) translateZ(0px)';
+    });
+  });
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 async function init() {
   if (typeof initTheme === 'function') initTheme();
+  init3DLoginCard();
 
-  // Check hash — if #/admin, show admin login on the login page
-  if(window.location.hash==='#/admin'||window.location.hash.startsWith('#/admin/')){
+  // Secret route checker for admin
+  if (isTobiAdminRoute()) {
     showAdminLogin(null);
   }
+  window.addEventListener('hashchange', function() {
+    if (isTobiAdminRoute()) {
+      showAdminLogin(null);
+    }
+  });
 
-  // Try to restore session from localStorage
+  // Try to restore session from localStorage with server-side validation
   loadSes();
   if(S.ses.token) {
-    // Verify session is still valid by fetching DB
-    var db = await apiFetchDB().catch(function(){return null;});
-    if(db) {
-      S.db = db;
-      if (S.db && S.db.files) tmSyncWithServer(S.db.files);
-      updateSidebarProfile();
-      updateNavVisibility();
-      renderSidebarStorage();
-      syncLiveQuota();
-      showAppShell();
-      wireEvents();
-      renderTM();
-      handleInitialHash();
-      return;
+    var ver = await apiFetch('auth/verify').catch(function(){return null;});
+    if(ver && ver.valid) {
+      var db = await apiFetchDB().catch(function(){return null;});
+      if(db && !db.error) {
+        S.db = db;
+        if (S.db && S.db.files) tmSyncWithServer(S.db.files);
+        updateSidebarProfile();
+        updateNavVisibility();
+        renderSidebarStorage();
+        syncLiveQuota();
+        showAppShell();
+        wireEvents();
+        renderTM();
+        handleInitialHash();
+        return;
+      }
     } else {
-      // Session expired
+      // Session expired or invalid on current database backend
       clearSes();
     }
   }
