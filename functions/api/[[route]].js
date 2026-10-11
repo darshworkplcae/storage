@@ -53,6 +53,16 @@ async function uSet(env,key,val,ttl){
     if(ttl) await uExp(env,key,ttl);
   }catch(e){}
 }
+async function uDel(env,key){
+  const kv=getKV(env);
+  if(kv){
+    try{await kv.delete(key);}catch(e){}
+    return;
+  }
+  try{
+    await fetch(`${gUU(env)}/del/${encodeURIComponent(key)}`,{method:'POST',headers:{Authorization:`Bearer ${gUT(env)}`}});
+  }catch(e){}
+}
 async function uExp(env,key,s){
   const kv=getKV(env);
   if(kv)return;
@@ -66,14 +76,19 @@ async function enc(t,s){const k=await iKey(s);const iv=crypto.getRandomValues(ne
 async function dec(b64,s){const k=await iKey(s);const c=Uint8Array.from(atob(b64),x=>x.charCodeAt(0));const d=await crypto.subtle.decrypt({name:'AES-GCM',iv:c.slice(0,12)},k,c.slice(12));return new TextDecoder().decode(d);}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 async function vSes(req,env,role){const tok=(req.headers.get('Authorization')||'').replace('Bearer ','').trim();if(!tok)return role?false:null;const v=await uGet(env,`td:ses:${tok}`);const c=String(v||'').replace(/^"|"$/g,'');if(role)return c===role;return c||null;}
-async function gAT(env,rt){
+async function gAT(env,rt,forceRefresh=false){
   const r=await dec(rt,gEK(env));
   const kHash=await sha256(r);
-  const cached=await uGet(env,`td:at:${kHash}`);
-  if(cached&&typeof cached==='string'&&cached.length>10) return cached;
+  if(!forceRefresh){
+    const cached=await uGet(env,`td:at:${kHash}`);
+    if(cached&&typeof cached==='string'&&cached.length>10) return cached;
+  }
   const x=await(await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:gGC(env),client_secret:gGS(env),refresh_token:r,grant_type:'refresh_token'})})).json();
-  if(!x.access_token)throw new Error(`Token: ${x.error||'fail'}`);
-  await uSet(env,`td:at:${kHash}`,x.access_token);
+  if(!x.access_token){
+    await uDel(env,`td:at:${kHash}`);
+    throw new Error(`Token: ${x.error||'fail'}`);
+  }
+  await uSet(env,`td:at:${kHash}`,x.access_token,3000);
   await uExp(env,`td:at:${kHash}`,3000);
   return x.access_token;
 }
@@ -558,20 +573,44 @@ async function hDL(req,env,gId){
   const dId=url.searchParams.get('driveId') || (fileObj ? fileObj.driveId : null);
   const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
-  const at=await gAT(env,drv.encToken);
+  let at=await gAT(env,drv.encToken);
   const range=req.headers.get('Range');
-  const gResp=await fetch(`https://www.googleapis.com/drive/v3/files/${gId}?alt=media`,{
+  let gResp=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?alt=media&supportsAllDrives=true`,{
     headers:{
       Authorization:`Bearer ${at}`,
       ...(range?{Range:range}:{})
     }
   });
+
+  // If token was expired (401), force refresh and retry immediately!
+  if(gResp.status===401){
+    try{
+      at=await gAT(env,drv.encToken,true);
+      gResp=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?alt=media&supportsAllDrives=true`,{
+        headers:{
+          Authorization:`Bearer ${at}`,
+          ...(range?{Range:range}:{})
+        }
+      });
+    }catch(e){}
+  }
+
   const fileName=encodeURIComponent(fileObj?fileObj.name:'download');
   const respHeaders=new Headers();
   respHeaders.set('Access-Control-Allow-Origin','*');
   respHeaders.set('Access-Control-Allow-Headers','Content-Type,Authorization,Range');
   respHeaders.set('Access-Control-Expose-Headers','Content-Range,Content-Length,Accept-Ranges');
-  respHeaders.set('Content-Type',gResp.headers.get('Content-Type')||'application/octet-stream');
+
+  let cType=(fileObj&&fileObj.mimeType)?fileObj.mimeType:(gResp.headers.get('Content-Type')||'application/octet-stream');
+  if(cType==='application/octet-stream'&&fileObj&&fileObj.name){
+    if(/\.(jpe?g)$/i.test(fileObj.name)) cType='image/jpeg';
+    else if(/\.png$/i.test(fileObj.name)) cType='image/png';
+    else if(/\.webp$/i.test(fileObj.name)) cType='image/webp';
+    else if(/\.gif$/i.test(fileObj.name)) cType='image/gif';
+    else if(/\.mp4$/i.test(fileObj.name)) cType='video/mp4';
+    else if(/\.mov$/i.test(fileObj.name)) cType='video/quicktime';
+  }
+  respHeaders.set('Content-Type',cType);
   if(gResp.headers.get('Content-Length')) respHeaders.set('Content-Length',gResp.headers.get('Content-Length'));
   if(gResp.headers.get('Content-Range')) respHeaders.set('Content-Range',gResp.headers.get('Content-Range'));
   respHeaders.set('Accept-Ranges','bytes');
@@ -622,36 +661,65 @@ async function hThumb(req,env,gId){
   const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
   if(!drv) return new Response('Drive not found',{status:404,headers:COR});
 
-  // Fetch thumbnail directly from Google Drive API
-  const at=await gAT(env,drv.encToken);
-  const gResp=await fetch(`https://www.googleapis.com/drive/v3/files/${gId}?fields=id,name,mimeType,thumbnailLink,hasThumbnail`,{
+  let at=await gAT(env,drv.encToken);
+  let gResp=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?fields=id,name,mimeType,thumbnailLink,hasThumbnail&supportsAllDrives=true`,{
     headers:{Authorization:`Bearer ${at}`}
   });
+  if(gResp.status === 401){
+    try {
+      at=await gAT(env,drv.encToken,true); // Force refresh token
+      gResp=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?fields=id,name,mimeType,thumbnailLink,hasThumbnail&supportsAllDrives=true`,{
+        headers:{Authorization:`Bearer ${at}`}
+      });
+    } catch(e){}
+  }
+
   if(!gResp.ok){
     return new Response('Thumbnail not available',{status:404,headers:{...COR,'Cache-Control':'no-cache, no-store, must-revalidate'}});
   }
   const gData=await gResp.json();
-  if(!gData.thumbnailLink){
-    return new Response('Thumbnail processing by Google Drive',{status:404,headers:{...COR,'Cache-Control':'no-cache, no-store, must-revalidate'}});
-  }
 
-  // Enhanced resolution =s360 for high-DPI cards (or =s2048 for full view)
-  const reqSz = url.searchParams.get('sz') || 's360';
-  const highResThumb=gData.thumbnailLink.replace(/=s\d+$/, '=' + reqSz);
-
-  const tResp=await fetch(highResThumb);
-  if(!tResp.ok){
-    return new Response('Failed to load thumbnail',{status:404,headers:COR});
-  }
-  const ct=tResp.headers.get('Content-Type')||'image/jpeg';
-  return new Response(tResp.body,{
-    status:200,
-    headers:{
-      ...COR,
-      'Content-Type':ct,
-      'Cache-Control':'public, max-age=2592000, s-maxage=2592000, immutable'
+  // Try Google Drive thumbnail link with auth header
+  if(gData.thumbnailLink){
+    const reqSz = url.searchParams.get('sz') || 's360';
+    const highResThumb = gData.thumbnailLink.replace(/=s\d+$/, '=' + reqSz);
+    const tResp = await fetch(highResThumb, {
+      headers: { Authorization: `Bearer ${at}` }
+    });
+    if(tResp.ok){
+      const ct = tResp.headers.get('Content-Type') || 'image/jpeg';
+      return new Response(tResp.body,{
+        status:200,
+        headers:{
+          ...COR,
+          'Content-Type':ct,
+          'Cache-Control':'public, max-age=2592000, s-maxage=2592000, immutable'
+        }
+      });
     }
-  });
+  }
+
+  // Fallback for images: if thumbnailLink is not ready or failed, stream directly via alt=media
+  const isImageFile = (gData.mimeType && gData.mimeType.startsWith('image/')) || (fileObj && fileObj.mimeType && fileObj.mimeType.startsWith('image/')) || (fileObj && /\.(jpe?g|png|webp|gif)$/i.test(fileObj.name));
+  if(isImageFile){
+    const imgResp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?alt=media&supportsAllDrives=true`, {
+      headers: { Authorization: `Bearer ${at}` }
+    });
+    if(imgResp.ok){
+      let ct = imgResp.headers.get('Content-Type') || (fileObj ? fileObj.mimeType : 'image/jpeg');
+      if (ct === 'application/octet-stream') ct = 'image/jpeg';
+      return new Response(imgResp.body, {
+        status: 200,
+        headers: {
+          ...COR,
+          'Content-Type': ct,
+          'Cache-Control': 'public, max-age=604800, s-maxage=604800, immutable'
+        }
+      });
+    }
+  }
+
+  return new Response('Thumbnail not available',{status:404,headers:{...COR,'Cache-Control':'no-cache, no-store, must-revalidate'}});
 }
 
 async function hRenameFile(req,env,fileId){
