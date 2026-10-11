@@ -46,7 +46,7 @@ function navTo(page, driveId, folderId) {
   });
   var fab = $('mobileFabWrap');
   if (fab) {
-    var isOpenTarget = (driveId && S.db && S.db.openDriveId && driveId === S.db.openDriveId);
+    var isOpenTarget = (driveId && S.db && isDriveOpen(driveId, S.db));
     var canUpload = !!S.ses.token || isOpenTarget;
     var showFab = canUpload && !!driveId && page === 'files';
     fab.classList.toggle('hidden', !showFab);

@@ -1,7 +1,47 @@
 var API = '/api';
 
+function getOpenDriveIds(db) {
+  if (!db) {
+    if (typeof S !== 'undefined' && S.db) db = S.db;
+    else return [];
+  }
+  var s = new Set();
+  if (db.openDriveId) s.add(db.openDriveId);
+  if (Array.isArray(db.openDriveIds)) db.openDriveIds.forEach(function(id){ if(id) s.add(id); });
+  (db.drives || []).forEach(function(d){ if(d.isOpenDrive) s.add(d.id); });
+  return Array.from(s);
+}
+
+function isDriveOpen(driveId, db) {
+  if (!driveId) return false;
+  return getOpenDriveIds(db).includes(driveId);
+}
+
+function getAllActiveDriveTokens() {
+  var tokens = [];
+  try {
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.startsWith('td_dtk_')) {
+        var raw = localStorage.getItem(k);
+        if (raw) {
+          var data = JSON.parse(raw);
+          if (data && data.token && data.expiresAt && Date.now() < data.expiresAt) {
+            tokens.push(data.token);
+          }
+        }
+      }
+    }
+  } catch(e) {}
+  return tokens;
+}
+
 function getDriveUnlockToken(driveId) {
-  if (!driveId) driveId = (typeof S !== 'undefined' && S.curDriveId) ? S.curDriveId : ((typeof S !== 'undefined' && S.db && S.db.openDriveId) ? S.db.openDriveId : null);
+  if (!driveId) driveId = (typeof S !== 'undefined' && S.curDriveId) ? S.curDriveId : null;
+  if (!driveId && typeof S !== 'undefined' && S.db) {
+    var openIds = getOpenDriveIds(S.db);
+    if (openIds.length === 1) driveId = openIds[0];
+  }
   if (!driveId) return null;
   try {
     var raw = localStorage.getItem('td_dtk_' + driveId);
@@ -36,7 +76,10 @@ function isDriveUnlocked(driveId, drive) {
 function getActiveDriveToken() {
   if (typeof S !== 'undefined') {
     if (S.curDriveId) return getDriveUnlockToken(S.curDriveId);
-    if (S.db && S.db.openDriveId) return getDriveUnlockToken(S.db.openDriveId);
+    if (S.db) {
+      var openIds = getOpenDriveIds(S.db);
+      if (openIds.length === 1) return getDriveUnlockToken(openIds[0]);
+    }
   }
   return null;
 }
@@ -46,6 +89,8 @@ function authHdr() {
   if (S.ses && S.ses.token) h['Authorization'] = 'Bearer ' + S.ses.token;
   var dTok = getActiveDriveToken();
   if (dTok) h['X-Drive-Token'] = dTok;
+  var allToks = getAllActiveDriveTokens();
+  if (allToks.length) h['X-Drive-Tokens'] = allToks.join(',');
   return h;
 }
 

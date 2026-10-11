@@ -135,7 +135,8 @@ function sDrv(d){
     encToken: undefined,
     passwordHash: undefined,
     hasPassword: !!d.passwordHash,
-    passwordHint: d.passwordHint || null
+    passwordHint: d.passwordHint || null,
+    isOpenDrive: !!d.isOpenDrive
   };
 }
 function sFold(f){
@@ -145,17 +146,34 @@ function sFold(f){
   delete o.encPassword;
   return o;
 }
+function getOpenDriveIds(db){
+  if(!db) return [];
+  const s = new Set();
+  if(db.openDriveId) s.add(db.openDriveId);
+  if(Array.isArray(db.openDriveIds)) db.openDriveIds.forEach(id => { if(id) s.add(id); });
+  (db.drives||[]).forEach(d => { if(d.isOpenDrive) s.add(d.id); });
+  return Array.from(s);
+}
+function isDriveOpen(driveId, db){
+  if(!driveId || !db) return false;
+  return getOpenDriveIds(db).includes(driveId);
+}
 async function vDriveToken(req, env, driveId){
   if(!driveId) return false;
   const url = new URL(req.url);
-  const token = req.headers.get('x-drive-token') || url.searchParams.get('driveToken');
-  if(!token) return false;
-  try{
-    const storedDriveId = await uGet(env, 'td:dtk:' + token);
-    return String(storedDriveId || '').replace(/^"|"$/g, '') === driveId;
-  }catch(e){
-    return false;
+  const singleToken = req.headers.get('x-drive-token') || url.searchParams.get('driveToken');
+  const multiTokensHeader = req.headers.get('x-drive-tokens');
+  const tokens = [];
+  if (singleToken) tokens.push(singleToken);
+  if (multiTokensHeader) multiTokensHeader.split(',').map(t=>t.trim()).filter(Boolean).forEach(t=>tokens.push(t));
+
+  for (const token of tokens) {
+    try{
+      const storedDriveId = await uGet(env, 'td:dtk:' + token);
+      if (String(storedDriveId || '').replace(/^"|"$/g, '') === driveId) return true;
+    }catch(e){}
   }
+  return false;
 }
 async function hDB(req,env){
   let db;
@@ -168,10 +186,12 @@ async function hDB(req,env){
   }
   const policy = db.policy || { allowUserDownload: true, allowUserDelete: true };
   const r=await vSes(req,env,null);
+  const openIds = getOpenDriveIds(db);
   if(r==='admin'){
     return J({
       ...db,
       policy,
+      openDriveIds: openIds,
       drives:(db.drives||[]).map(sDrv),
       folders:(db.folders||[]).map(sFold),
       activityLog:(db.activityLog||[]),
@@ -191,6 +211,7 @@ async function hDB(req,env){
     return J({
       v: db.v,
       openDriveId: db.openDriveId,
+      openDriveIds: openIds,
       policy,
       drives: userDrives,
       files: userFiles,
@@ -199,35 +220,30 @@ async function hDB(req,env){
       users: u ? [{ id: u.id, username: u.username }] : []
     });
   }
-  // Guest visitor: Strictly ONLY the open drive!
-  const openId = db.openDriveId;
-  const guestDrives = openId ? (db.drives||[]).filter(d => d.id === openId).map(sDrv) : [];
+
+  // Guest visitor: Strictly ALL open drives!
+  const guestDrives = (db.drives||[]).filter(d => openIds.includes(d.id)).map(sDrv);
   const guestDriveIds = guestDrives.map(d => d.id);
 
-  // If the guest drive has password protection, check if unlocked:
-  const openDrv = (db.drives||[]).find(d => d.id === openId);
-  const isDriveProtected = openDrv && !!openDrv.passwordHash;
-  const isUnlocked = isDriveProtected ? await vDriveToken(req, env, openId) : true;
-
-  if (isDriveProtected && !isUnlocked) {
-    return J({
-      v: db.v,
-      openDriveId: db.openDriveId,
-      policy,
-      drives: guestDrives,
-      files: [],
-      folders: [],
-      activityLog: [],
-      users: []
-    });
+  // Check which guest drives are unlocked (either have no password, or token valid)
+  const unlockedDriveIds = new Set();
+  for (const d of guestDrives) {
+    if (!d.hasPassword) {
+      unlockedDriveIds.add(d.id);
+    } else {
+      const isUnlocked = await vDriveToken(req, env, d.id);
+      if (isUnlocked) unlockedDriveIds.add(d.id);
+    }
   }
 
-  const guestFolders = (db.folders||[]).filter(f => guestDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly && (!f.allowedUsers || !f.allowedUsers.length)).map(sFold);
+  const guestFolders = (db.folders||[]).filter(f => unlockedDriveIds.has(f.driveId) && !f.destroyed && !f.adminOnly && (!f.allowedUsers || !f.allowedUsers.length)).map(sFold);
   const visibleFolderIds = new Set(guestFolders.map(f => f.id));
-  const guestFiles = (db.files||[]).filter(f => guestDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly && (!f.allowedUsers || !f.allowedUsers.length) && (!f.folderId || visibleFolderIds.has(f.folderId)));
+  const guestFiles = (db.files||[]).filter(f => unlockedDriveIds.has(f.driveId) && !f.destroyed && !f.adminOnly && (!f.allowedUsers || !f.allowedUsers.length) && (!f.folderId || visibleFolderIds.has(f.folderId)));
+
   return J({
     v: db.v,
     openDriveId: db.openDriveId,
+    openDriveIds: openIds,
     policy,
     drives: guestDrives,
     files: guestFiles,
@@ -482,7 +498,7 @@ async function hUI(req,env){
   const body=await req.json().catch(()=>({}));
   const{driveId,folderId,name,size,mimeType}=body;
   const db=await uGet(env,'td:db');
-  const isOpenTarget=(db&&db.openDriveId&&driveId===db.openDriveId);
+  const isOpenTarget=isDriveOpen(driveId,db);
   const ses=await vSes(req,env,null);
   if(!ses && !isOpenTarget) return J({error:'Sign in required'},401);
   if(isOpenTarget && !ses){
@@ -519,7 +535,7 @@ async function hUC(req,env){
   const body=await req.json().catch(()=>({}));
   const{fileLocalId,googleFileId,driveId,folderId,name,size,mimeType,thumb}=body;
   const db=await uGet(env,'td:db');
-  const isOpenTarget=(db&&db.openDriveId&&driveId===db.openDriveId);
+  const isOpenTarget=isDriveOpen(driveId,db);
   const ses=await vSes(req,env,null);
   if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
   if(!db) return J({error:'DB error'},500);
@@ -615,7 +631,7 @@ async function hDL(req,env,gId){
   }
   if(!ses){
     const dIdParam=fileObj ? fileObj.driveId : url.searchParams.get('driveId');
-    const isPublicDrive=(db&&db.openDriveId&&(dIdParam===db.openDriveId || !dIdParam));
+    const isPublicDrive=isDriveOpen(dIdParam,db) || (!dIdParam && getOpenDriveIds(db).length > 0);
     if(!isPublicDrive) return J({error:'Sign in required'},401);
   }
   const dId=url.searchParams.get('driveId') || (fileObj ? fileObj.driveId : null);
@@ -704,7 +720,7 @@ async function hThumb(req,env,gId){
 
   if(!ses){
     const dIdParam=fileObj ? fileObj.driveId : url.searchParams.get('driveId');
-    const isPublicDrive=(db&&db.openDriveId&&(dIdParam===db.openDriveId || !dIdParam));
+    const isPublicDrive=isDriveOpen(dIdParam,db) || (!dIdParam && getOpenDriveIds(db).length > 0);
     if(!isPublicDrive) return new Response('Sign in required',{status:401,headers:COR});
   }
 
@@ -783,7 +799,7 @@ async function hRenameFile(req,env,fileId){
   const file=(db.files||[]).find(f=>f.id===fileId || f.googleFileId===fileId);
   if(!file) return J({error:'File not found'},404);
 
-  const isOpenTarget=(db.openDriveId && file.driveId===db.openDriveId);
+  const isOpenTarget=isDriveOpen(file.driveId,db);
   if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
   if(db.policy && db.policy.allowUserRename === false && ses !== 'admin'){
     return J({error:'Renaming is disabled by administrator'},403);
@@ -832,7 +848,7 @@ async function hRenameFolder(req,env,folderId){
   const folder=(db.folders||[]).find(f=>f.id===folderId);
   if(!folder) return J({error:'Folder not found'},404);
 
-  const isOpenTarget=(db.openDriveId && folder.driveId===db.openDriveId);
+  const isOpenTarget=isDriveOpen(folder.driveId,db);
   if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
   if(db.policy && db.policy.allowUserRename === false && ses !== 'admin'){
     return J({error:'Renaming is disabled by administrator'},403);
@@ -870,7 +886,7 @@ async function hDF(req,env,fileId){
   if(!db) return J({error:'DB error'},500);
   const file=(db.files||[]).find(f=>f.id===fileId || f.googleFileId===fileId);
   if(!file) return J({error:'File not found'},404);
-  const isOpenTarget=(db.openDriveId && file.driveId===db.openDriveId);
+  const isOpenTarget=isDriveOpen(file.driveId,db);
   const ses=await vSes(req,env,null);
   if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
   if(db.policy && db.policy.allowUserDelete === false && ses !== 'admin'){
@@ -971,7 +987,7 @@ async function hBatchTrash(req,env){
   let count=0;
   (db.files||[]).forEach(f=>{
     if(fileIds.includes(f.id)||fileIds.includes(f.googleFileId)){
-      const isOpenTarget=(db.openDriveId&&f.driveId===db.openDriveId);
+      const isOpenTarget=isDriveOpen(f.driveId,db);
       if(ses||isOpenTarget){
         f.trashed=true;
         f.trashedAt=now;
@@ -983,7 +999,7 @@ async function hBatchTrash(req,env){
   });
   (db.folders||[]).forEach(f=>{
     if(fileIds.includes(f.id)){
-      const isOpenTarget=(db.openDriveId&&f.driveId===db.openDriveId);
+      const isOpenTarget=isDriveOpen(f.driveId,db);
       if(ses||isOpenTarget){
         f.trashed=true;
         f.trashedAt=now;
@@ -1167,7 +1183,7 @@ async function hEmptyTrash(req,env){
 async function hMF(req,env){
   const{driveId,parentFolderId,name}=await req.json().catch(()=>({}));
   const db=await uGet(env,'td:db');
-  const isOpenTarget=(db&&db.openDriveId&&driveId===db.openDriveId);
+  const isOpenTarget=isDriveOpen(driveId,db);
   const ses=await vSes(req,env,null);
   if(!ses&&!isOpenTarget) return J({error:'Unauthorized'},401);
   if(!name||!name.trim()) return J({error:'Folder name required'},400);
@@ -1209,7 +1225,7 @@ async function hRF(req,env,fId){
   const db=await uGet(env,'td:db');
   const folder=(db.folders||[]).find(f=>f.id===fId);
   if(!folder) return J({error:'Folder not found'},404);
-  const isOpenTarget=(db.openDriveId && folder.driveId===db.openDriveId);
+  const isOpenTarget=isDriveOpen(folder.driveId,db);
   const ses=await vSes(req,env,null);
   if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
   if(db.policy && db.policy.allowUserDelete === false && ses !== 'admin'){
@@ -1233,7 +1249,7 @@ async function hLockFolder(req,env,folderId){
   if(!db) return J({error:'DB error'},500);
   const folder=(db.folders||[]).find(f=>f.id===folderId);
   if(!folder) return J({error:'Folder not found'},404);
-  const isOpenTarget=(db.openDriveId&&folder.driveId===db.openDriveId);
+  const isOpenTarget=isDriveOpen(folder.driveId,db);
   const ses=await vSes(req,env,null);
   if(!ses&&!isOpenTarget) return J({error:'Unauthorized'},401);
   const{password,hint}=await req.json().catch(()=>({}));
@@ -1534,7 +1550,7 @@ async function hStar(req,env,fileId){
   const db=await uGet(env,'td:db');
   const file=(db&&db.files||[]).find(f=>f.id===fileId || f.googleFileId===fileId);
   if(!file) return J({error:'File not found'},404);
-  const isOpenTarget=(db&&db.openDriveId&&file.driveId===db.openDriveId);
+  const isOpenTarget=isDriveOpen(file.driveId,db);
   const ses=await vSes(req,env,null);
   if(!ses && !isOpenTarget) return J({error:'Sign in required'},401);
   file.starred = !file.starred;
@@ -1556,13 +1572,25 @@ async function hRenameDrive(req,env,driveId){
 
 async function hOpenDrive(req,env){
   if(!await vSes(req,env,'admin')) return J({error:'Unauthorized'},401);
-  const{openDriveId}=await req.json().catch(()=>({}));
-  const db=await uGet(env,'td:db');
+  const body = await req.json().catch(()=>({}));
+  const db = await uGet(env,'td:db');
   if(!db) return J({error:'DB error'},500);
-  db.openDriveId=openDriveId||null;
-  (db.drives||[]).forEach(d=>{ d.isOpenDrive = (d.id===openDriveId); });
+
+  const driveId = body.driveId || body.openDriveId;
+  if (!driveId) return J({error:'driveId required'}, 400);
+
+  const drv = (db.drives||[]).find(d => d.id === driveId);
+  if (!drv) return J({error:'Drive not found'}, 404);
+
+  const willBeOpen = (typeof body.isOpen === 'boolean') ? body.isOpen : !drv.isOpenDrive;
+  drv.isOpenDrive = willBeOpen;
+
+  const openIds = (db.drives||[]).filter(d => d.isOpenDrive).map(d => d.id);
+  db.openDriveIds = openIds;
+  db.openDriveId = openIds[0] || null;
+
   await uSet(env,'td:db',db);
-  return J({ok:true,openDriveId:db.openDriveId});
+  return J({ok:true, driveId, isOpenDrive: willBeOpen, openDriveIds: db.openDriveIds, openDriveId: db.openDriveId});
 }
 
 async function hSetDrivePassword(req,env){

@@ -24,7 +24,7 @@ function renderSettingsPage() {
           var cap = d.capacity || 0;
           var free = Math.max(0, cap - used);
           var usedPct = cap > 0 ? Math.min(100, Math.round(used / cap * 100)) : 0;
-          var isOpen = (db.openDriveId === d.id || d.isOpenDrive);
+          var isOpen = typeof isDriveOpen === 'function' ? isDriveOpen(d.id, db) : (d.isOpenDrive || db.openDriveId === d.id);
           return '<div class="drive-card '+(isOpen?'open-drive-card':'')+'">' +
             '<div class="dc-top">' +
               '<div class="dc-icon" style="background:'+d.color+'22;color:'+d.color+'"><i class="fas fa-hard-drive"></i></div>' +
@@ -464,16 +464,21 @@ async function changeAdminPass() {
 }
 
 async function toggleOpenDrive(id) {
-  var db = S.db || {};
-  db.openDriveId = (db.openDriveId === id) ? null : id;
-  (db.drives || []).forEach(function(d){ d.isOpenDrive = (d.id === db.openDriveId); });
-  var r = await apiFetch('admin/open-drive', { method: 'POST', body: JSON.stringify({ openDriveId: db.openDriveId }) });
-  if (r.ok) {
-    toast(db.openDriveId ? 'Open Drive enabled for friends!' : 'Open Drive disabled', 'success');
+  var d = (S.db && S.db.drives || []).find(function(x){ return x.id === id; });
+  var currentlyOpen = typeof isDriveOpen === 'function' ? isDriveOpen(id, S.db) : (d && d.isOpenDrive);
+  var willBeOpen = !currentlyOpen;
+  toast(willBeOpen ? 'Opening drive for guests…' : 'Disabling guest access…', 'info');
+  var r = await apiFetch('admin/open-drive', {
+    method: 'POST',
+    body: JSON.stringify({ driveId: id, isOpen: willBeOpen })
+  });
+  if (r && r.ok) {
+    toast(willBeOpen ? 'Open Drive enabled for guests!' : 'Drive is now private', 'success');
     S.db = await apiFetchDB();
     renderSettingsPage();
+    renderSidebarStorage();
   } else {
-    toast(r.error || 'Failed to update open drive', 'error');
+    toast(r ? (r.error || 'Failed to update open drive') : 'Network error', 'error');
   }
 }
 

@@ -164,7 +164,7 @@ function updateNavVisibility() {
 }
 
 function updateUploadBtnVisibility() {
-  var isOpenTarget = (_driveId && S.db && S.db.openDriveId && _driveId === S.db.openDriveId);
+  var isOpenTarget = (_driveId && S.db && isDriveOpen(_driveId, S.db));
   var canUpload = !!S.ses.token || isOpenTarget;
   var show = canUpload && !!_driveId;
   ['uploadBtn','folderUpBtn','newFolderBtn','syncBtn'].forEach(function(id){

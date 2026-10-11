@@ -24,7 +24,10 @@ function renderSidebarProfile(){
 
 function getAllowedDriveIds(){
   if(!S.ses||!S.ses.token){
-    return (S.db&&S.db.openDriveId)?[S.db.openDriveId]:[];
+    if (typeof getOpenDriveIds === 'function') {
+      return getOpenDriveIds(S.db);
+    }
+    return (S.db && S.db.openDriveIds && Array.isArray(S.db.openDriveIds)) ? S.db.openDriveIds : ((S.db&&S.db.openDriveId)?[S.db.openDriveId]:[]);
   }
   if(S.ses.role==='admin'||S.ses.allowedDrives==='all'){
     return (S.db&&S.db.drives||[]).map(d=>d.id);

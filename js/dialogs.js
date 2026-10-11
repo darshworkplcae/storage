@@ -78,17 +78,18 @@ function findExistingDriveFile(name, size, driveId, folderId) {
 
 async function uploadFiles(fileList, targetFolderId) {
   var files = Array.from(fileList);
-  var isOpenTarget = (_driveId && S.db && S.db.openDriveId && _driveId === S.db.openDriveId);
+  var isOpenTarget = (_driveId && S.db && isDriveOpen(_driveId, S.db));
   var isAuth = (S.ses && S.ses.token);
 
   if (!isAuth && !isOpenTarget) {
     showSignInModal();
-    toast('Please sign in or select the open drive', 'warning');
+    toast('Please sign in or select an open drive', 'warning');
     return;
   }
   if (!_driveId) {
-    if (S.db && S.db.openDriveId) {
-      _driveId = S.db.openDriveId;
+    var openIds = (typeof getOpenDriveIds === 'function') ? getOpenDriveIds(S.db) : [];
+    if (openIds.length === 1) {
+      _driveId = openIds[0];
     } else {
       toast('Open a drive first, then upload', 'warning');
       return;
@@ -197,17 +198,18 @@ async function uploadFiles(fileList, targetFolderId) {
 
 // ─── Direct Folder Upload with folder hierarchy recreation & Smart Deduplication ───
 async function uploadFolder() {
-  var isOpenTarget = (_driveId && S.db && S.db.openDriveId && _driveId === S.db.openDriveId);
+  var isOpenTarget = (_driveId && S.db && isDriveOpen(_driveId, S.db));
   var isAuth = (S.ses && S.ses.token);
 
   if (!isAuth && !isOpenTarget) {
     showSignInModal();
-    toast('Please sign in or select the open drive', 'warning');
+    toast('Please sign in or select an open drive', 'warning');
     return;
   }
   if (!_driveId) {
-    if (S.db && S.db.openDriveId) {
-      _driveId = S.db.openDriveId;
+    var openIds = (typeof getOpenDriveIds === 'function') ? getOpenDriveIds(S.db) : [];
+    if (openIds.length === 1) {
+      _driveId = openIds[0];
     } else {
       toast('Open a drive first, then upload folder', 'warning');
       return;
@@ -243,7 +245,7 @@ async function uploadFolder() {
 }
 
 async function processFolderFiles(files) {
-  var isOpenTarget = (_driveId && S.db && S.db.openDriveId && _driveId === S.db.openDriveId);
+  var isOpenTarget = (_driveId && S.db && isDriveOpen(_driveId, S.db));
   var isAuth = (S.ses && S.ses.token);
 
   if (!files.length) return;
@@ -1167,7 +1169,7 @@ async function downloadFile(fileLocalId) {
   if (!S.ses || !S.ses.token) {
     var fGuest = (S.db && S.db.files || []).find(function (x) { return x.id === fileLocalId; });
     var dGuest = fGuest ? fGuest.driveId : _driveId;
-    var isPub = (S.db && S.db.openDriveId && dGuest === S.db.openDriveId);
+    var isPub = (S.db && isDriveOpen(dGuest, S.db));
     if (!isPub) { toast('Sign in required', 'warning'); return; }
   }
   var f = (S.db && S.db.files || []).find(function (x) { return x.id === fileLocalId; });
@@ -1243,14 +1245,15 @@ function confirmDeleteFolder(folderId, name) {
 }
 
 function showNewFolderDialog() {
-  var isOpenTarget = (_driveId && S.db && S.db.openDriveId && _driveId === S.db.openDriveId);
+  var isOpenTarget = (_driveId && S.db && isDriveOpen(_driveId, S.db));
   var isAuth = (S.ses && S.ses.token);
   if (!isAuth && !isOpenTarget) {
     toast('Sign in required or open the public trip drive', 'warning');
     return;
   }
   if (!_driveId) {
-    if (S.db && S.db.openDriveId) _driveId = S.db.openDriveId;
+    var openIds = (typeof getOpenDriveIds === 'function') ? getOpenDriveIds(S.db) : [];
+    if (openIds.length === 1) _driveId = openIds[0];
     else { toast('Open a drive first', 'warning'); return; }
   }
   var name = prompt('Enter folder name:');
