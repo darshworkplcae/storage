@@ -1523,8 +1523,8 @@ export async function onRequest({request,env}){
     if(p==='upload/init'&&m==='POST')return hUI(request,env);
     if(p==='upload/chunk'&&m==='PUT')return hUChunk(request,env);
     if(p==='upload/complete'&&m==='POST')return hUC(request,env);
-    if(p.startsWith('download/')&&m==='GET')return hDL(request,env,p.replace('download/',''));
-    if(p.startsWith('thumb/')&&m==='GET')return hThumb(request,env,p.replace('thumb/',''));
+    if(p.startsWith('download/')&&(m==='GET'||m==='HEAD'))return hDL(request,env,p.replace('download/',''));
+    if(p.startsWith('thumb/')&&(m==='GET'||m==='HEAD'))return hThumb(request,env,p.replace('thumb/',''));
     if(p.startsWith('files/rename/')&&m==='POST')return hRenameFile(request,env,p.replace('files/rename/',''));
     if(p==='files/batch-trash'&&m==='POST')return hBatchTrash(request,env);
     if(p==='files/trash/empty'&&(m==='POST'||m==='DELETE'))return hEmptyTrash(request,env);
