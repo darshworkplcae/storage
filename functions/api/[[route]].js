@@ -225,89 +225,185 @@ async function hScanDrive(req,env,driveId){
   if(!db.folders)db.folders=[];
   if(!db.files)db.files=[];
 
-  // Validate or rediscover root folder ID ('TeleDrive')
-  let rootId = drv.rootFolderId;
-  let rootValid = false;
-  if(rootId){
-    try{
-      const chk = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(rootId)}?fields=id,name,trashed&supportsAllDrives=true`,{
-        headers:{Authorization:`Bearer ${at}`}
-      });
-      if(chk.ok){
-        const cData = await chk.json();
-        if(!cData.trashed) rootValid = true;
+  try {
+    // Phase 1: Fetch all folders from Google Drive in bulk (pageSize=1000 uses only 1-2 subrequests!)
+    const allGoogleFolders = [];
+    let fPageToken = '';
+    let folderFetches = 0;
+    do {
+      const u = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and trashed = false")}&fields=nextPageToken,files(id,name,parents,createdTime)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true${fPageToken ? `&pageToken=${fPageToken}` : ''}`;
+      const resp = await fetch(u, { headers: { Authorization: `Bearer ${at}` } });
+      if (!resp.ok) {
+        const err = await resp.json().catch(()=>({}));
+        throw new Error((err.error && err.error.message) || `Folder listing failed (${resp.status})`);
       }
-    }catch(e){}
-  }
+      const data = await resp.json();
+      if (data.files) allGoogleFolders.push(...data.files);
+      fPageToken = data.nextPageToken || '';
+      folderFetches++;
+    } while (fPageToken && folderFetches < 5);
 
-  if(!rootValid){
-    try{
-      const q = "name = 'TeleDrive' and mimeType = 'application/vnd.google-apps.folder' and trashed = false";
-      const u = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-      const sr = await(await fetch(u,{headers:{Authorization:`Bearer ${at}`}})).json();
-      if(sr.files && sr.files.length > 0){
-        rootId = sr.files[0].id;
+    // Phase 2: Resolve or recreate root 'TeleDrive' folder
+    let rootId = drv.rootFolderId;
+    let rootExists = rootId && allGoogleFolders.some(f => f.id === rootId);
+    if (!rootExists) {
+      const teleFolder = allGoogleFolders.find(f => f.name === 'TeleDrive');
+      if (teleFolder) {
+        rootId = teleFolder.id;
       } else {
-        rootId = await mkDir(at,'TeleDrive',null);
+        rootId = await mkDir(at, 'TeleDrive', null);
+        allGoogleFolders.push({ id: rootId, name: 'TeleDrive', parents: [] });
       }
       drv.rootFolderId = rootId;
-    }catch(e){
-      return J({error:'Failed to locate TeleDrive folder: ' + (e.message||'Drive error')},500);
     }
-  }
 
-  let addedFiles=0,addedFolders=0;
-  async function scanFolder(googleFolderId,localFolderId){
-    let pageToken='';
-    do{
-      const q=`'${googleFolderId}' in parents and trashed=false`;
-      const u=`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=nextPageToken,files(id,name,mimeType,size,createdTime)&pageSize=500&supportsAllDrives=true&includeItemsFromAllDrives=true${pageToken?`&pageToken=${pageToken}`:''}`;
-      const fResp = await fetch(u,{headers:{Authorization:`Bearer ${at}`}});
-      if(!fResp.ok){
+    // Phase 3: In-memory folder tree resolution (0 subrequests!)
+    // Find all folders that are direct or indirect descendants of rootId
+    const teleDriveGoogleFolderIds = new Set([rootId]);
+    let addedAny;
+    do {
+      addedAny = false;
+      for (const gf of allGoogleFolders) {
+        if (!teleDriveGoogleFolderIds.has(gf.id)) {
+          if (gf.parents && gf.parents.some(p => teleDriveGoogleFolderIds.has(p))) {
+            teleDriveGoogleFolderIds.add(gf.id);
+            addedAny = true;
+          }
+        }
+      }
+    } while (addedAny);
+
+    // Map googleFolderId -> local folder ID in db.folders
+    const gFolderToLocalId = new Map();
+    gFolderToLocalId.set(rootId, null);
+
+    for (const f of db.folders) {
+      if (f.driveId === driveId && f.googleFolderId) {
+        gFolderToLocalId.set(f.googleFolderId, f.id);
+      }
+    }
+
+    let addedFolders = 0;
+    for (const gf of allGoogleFolders) {
+      if (gf.id === rootId) continue;
+      if (teleDriveGoogleFolderIds.has(gf.id)) {
+        let localId = gFolderToLocalId.get(gf.id);
+        if (!localId) {
+          localId = uid();
+          const parentGoogleId = (gf.parents && gf.parents[0]) || rootId;
+          const parentLocalId = (parentGoogleId === rootId) ? null : (gFolderToLocalId.get(parentGoogleId) || null);
+          const newFold = {
+            id: localId,
+            driveId,
+            parentId: parentLocalId,
+            name: gf.name || 'Untitled Folder',
+            googleFolderId: gf.id,
+            date: gf.createdTime || new Date().toISOString(),
+            createdBy: 'admin'
+          };
+          db.folders.push(newFold);
+          gFolderToLocalId.set(gf.id, localId);
+          addedFolders++;
+        }
+      }
+    }
+
+    // Update parentId for existing folders if necessary
+    for (const gf of allGoogleFolders) {
+      if (gf.id === rootId) continue;
+      if (teleDriveGoogleFolderIds.has(gf.id)) {
+        const curLocalId = gFolderToLocalId.get(gf.id);
+        const ef = db.folders.find(f => f.id === curLocalId);
+        if (ef) {
+          const parentGoogleId = (gf.parents && gf.parents[0]) || rootId;
+          const targetParentLocalId = (parentGoogleId === rootId) ? null : (gFolderToLocalId.get(parentGoogleId) || null);
+          if (ef.parentId !== targetParentLocalId) ef.parentId = targetParentLocalId;
+        }
+      }
+    }
+
+    // Phase 4: Fetch files in bulk pages with strict subrequest safety limit
+    const url = new URL(req.url);
+    let filePageToken = url.searchParams.get('pageToken') || '';
+    let addedFiles = 0;
+    let fileFetches = 0;
+    const MAX_FILE_FETCHES = 25; // Safely below Cloudflare 50 subrequest limit!
+
+    const existingGoogleFileIds = new Map();
+    for (const f of db.files) {
+      if (f.googleFileId) {
+        existingGoogleFileIds.set(f.googleFileId, f);
+      }
+    }
+
+    do {
+      const u = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType != 'application/vnd.google-apps.folder' and trashed = false")}&fields=nextPageToken,files(id,name,mimeType,size,createdTime,parents)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true${filePageToken ? `&pageToken=${filePageToken}` : ''}`;
+      const fResp = await fetch(u, { headers: { Authorization: `Bearer ${at}` } });
+      if (!fResp.ok) {
         const errJson = await fResp.json().catch(()=>({}));
         throw new Error((errJson.error && errJson.error.message) || `Google API error ${fResp.status}`);
       }
       const res = await fResp.json();
-      if(!res.files)break;
-      for(const item of res.files){
-        if(item.mimeType==='application/vnd.google-apps.folder'){
-          let ef=db.folders.find(f=>f.googleFolderId===item.id);
-          if(!ef){
-            ef={id:uid(),driveId,parentId:localFolderId||null,name:item.name,googleFolderId:item.id,date:item.createdTime||new Date().toISOString(),createdBy:'admin'};
-            db.folders.push(ef);
-            addedFolders++;
+      if (res.files) {
+        for (const item of res.files) {
+          if (!item.parents || !item.parents.some(p => teleDriveGoogleFolderIds.has(p))) {
+            continue; // Skip non-TeleDrive files
           }
-          await scanFolder(item.id,ef.id);
-        }else{
-          let eFile=db.files.find(f=>f.googleFileId===item.id);
-          if(!eFile){
-            eFile={id:uid(),googleFileId:item.id,driveId,folderId:localFolderId||null,name:item.name,size:parseInt(item.size,10)||0,mimeType:item.mimeType||'application/octet-stream',uploadedBy:'admin',date:item.createdTime||new Date().toISOString()};
+          const parentGoogleId = item.parents.find(p => teleDriveGoogleFolderIds.has(p));
+          const parentLocalId = (parentGoogleId === rootId) ? null : (gFolderToLocalId.get(parentGoogleId) || null);
+
+          let eFile = existingGoogleFileIds.get(item.id);
+          if (!eFile) {
+            eFile = {
+              id: uid(),
+              googleFileId: item.id,
+              driveId,
+              folderId: parentLocalId,
+              name: item.name || 'Untitled',
+              size: parseInt(item.size, 10) || 0,
+              mimeType: item.mimeType || 'application/octet-stream',
+              uploadedBy: 'admin',
+              date: item.createdTime || new Date().toISOString()
+            };
             db.files.push(eFile);
+            existingGoogleFileIds.set(item.id, eFile);
             addedFiles++;
           } else {
-            if(eFile.driveId !== driveId) eFile.driveId = driveId;
-            if(localFolderId && eFile.folderId !== localFolderId) eFile.folderId = localFolderId;
-            if(typeof item.size === 'string' && !eFile.size) eFile.size = parseInt(item.size,10) || 0;
+            if (eFile.driveId !== driveId) eFile.driveId = driveId;
+            if (eFile.folderId !== parentLocalId) eFile.folderId = parentLocalId;
+            if (typeof item.size === 'string' && !eFile.size) eFile.size = parseInt(item.size, 10) || 0;
           }
         }
       }
-      pageToken=res.nextPageToken;
-    }while(pageToken);
-  }
+      filePageToken = res.nextPageToken || '';
+      fileFetches++;
+    } while (filePageToken && fileFetches < MAX_FILE_FETCHES);
 
-  try {
-    await scanFolder(rootId,null);
-    try {
-      const q=await gDQ(at);
-      if(q && q.storageQuota){
-        drv.capacity = parseInt(q.storageQuota.limit) || drv.capacity || 0;
-        drv.usedBytes = parseInt(q.storageQuota.usage) || drv.usedBytes || 0;
-      }
-    }catch(e){}
-    await uSet(env,'td:db',db);
-    return J({ok:true,addedFiles,addedFolders,totalFiles:db.files.length,totalFolders:db.folders.length});
+    const isPartial = !!filePageToken;
+
+    // Refresh quota when complete
+    if (!isPartial) {
+      try {
+        const q = await gDQ(at);
+        if (q && q.storageQuota) {
+          drv.capacity = parseInt(q.storageQuota.limit) || drv.capacity || 0;
+          drv.usedBytes = parseInt(q.storageQuota.usage) || drv.usedBytes || 0;
+        }
+      } catch(e) {}
+    }
+
+    await uSet(env, 'td:db', db);
+    return J({
+      ok: true,
+      partial: isPartial,
+      nextPageToken: filePageToken,
+      addedFiles,
+      addedFolders,
+      totalFiles: db.files.length,
+      totalFolders: db.folders.length
+    });
   } catch(err) {
-    return J({error:'Scan failed: ' + (err.message||'Unknown Google Drive API error')}, 500);
+    return J({ error: 'Scan failed: ' + (err.message || 'Google Drive API error') }, 500);
   }
 }
 async function hBackupDB(req,env){

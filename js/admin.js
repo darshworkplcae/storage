@@ -590,22 +590,44 @@ async function adminRecoverFolder(folderId, folderName) {
 }
 
 async function scanDriveFiles(driveId) {
-  toast('Scanning Google Drive for uploaded files…', 'info', 20000);
+  toast('Scanning Google Drive for uploaded files…', 'info', 25000);
+  var totalAddedFiles = 0;
+  var totalAddedFolders = 0;
+  var nextToken = '';
+  var isDone = false;
+  var batchNum = 1;
+  var finalTotalFiles = 0;
+
   try {
-    var r = await apiFetch('drives/scan/' + encodeURIComponent(driveId), { method: 'POST' });
-    if (r && r.ok) {
-      var msg = 'Sync complete! ' + (r.addedFiles || 0) + ' new file(s) and ' + (r.addedFolders || 0) + ' folder(s) synced. Total: ' + (r.totalFiles || 0) + ' files in database.';
-      toast(msg, 'success', 8000);
-      S.db = await apiFetchDB();
-      renderSettingsPage();
-      renderSidebarStorage();
-      if (typeof _curPage !== 'undefined' && _curPage === 'files') renderFilesPage(_driveId, _folderId);
-    } else {
-      var err = (r && r.error) ? r.error : (r && r.status ? ('Server error HTTP ' + r.status) : 'Scan failed');
-      toast(err, 'error', 7000);
+    while (!isDone) {
+      var query = nextToken ? ('?pageToken=' + encodeURIComponent(nextToken)) : '';
+      var r = await apiFetch('drives/scan/' + encodeURIComponent(driveId) + query, { method: 'POST' });
+      if (!r || !r.ok) {
+        var err = (r && r.error) ? r.error : (r && r.status ? ('Server error HTTP ' + r.status) : 'Scan failed');
+        toast(err, 'error', 8000);
+        return;
+      }
+      totalAddedFiles += (r.addedFiles || 0);
+      totalAddedFolders += (r.addedFolders || 0);
+      finalTotalFiles = r.totalFiles || totalAddedFiles;
+
+      if (r.partial && r.nextPageToken) {
+        nextToken = r.nextPageToken;
+        toast('Syncing batch ' + batchNum + '… Synced ' + totalAddedFiles + ' files so far.', 'info', 15000);
+        batchNum++;
+      } else {
+        isDone = true;
+      }
     }
+
+    var msg = 'Sync complete! ' + totalAddedFiles + ' new file(s) and ' + totalAddedFolders + ' folder(s) synced. Total: ' + finalTotalFiles + ' files in database.';
+    toast(msg, 'success', 8000);
+    S.db = await apiFetchDB();
+    renderSettingsPage();
+    renderSidebarStorage();
+    if (typeof _curPage !== 'undefined' && _curPage === 'files') renderFilesPage(_driveId, _folderId);
   } catch(e) {
-    toast(e.message || 'Scan error', 'error', 7000);
+    toast(e.message || 'Scan error', 'error', 8000);
   }
 }
 
