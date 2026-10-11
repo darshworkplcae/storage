@@ -224,13 +224,50 @@ async function hScanDrive(req,env,driveId){
   const at=await gAT(env,drv.encToken);
   if(!db.folders)db.folders=[];
   if(!db.files)db.files=[];
+
+  // Validate or rediscover root folder ID ('TeleDrive')
+  let rootId = drv.rootFolderId;
+  let rootValid = false;
+  if(rootId){
+    try{
+      const chk = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(rootId)}?fields=id,name,trashed&supportsAllDrives=true`,{
+        headers:{Authorization:`Bearer ${at}`}
+      });
+      if(chk.ok){
+        const cData = await chk.json();
+        if(!cData.trashed) rootValid = true;
+      }
+    }catch(e){}
+  }
+
+  if(!rootValid){
+    try{
+      const q = "name = 'TeleDrive' and mimeType = 'application/vnd.google-apps.folder' and trashed = false";
+      const u = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+      const sr = await(await fetch(u,{headers:{Authorization:`Bearer ${at}`}})).json();
+      if(sr.files && sr.files.length > 0){
+        rootId = sr.files[0].id;
+      } else {
+        rootId = await mkDir(at,'TeleDrive',null);
+      }
+      drv.rootFolderId = rootId;
+    }catch(e){
+      return J({error:'Failed to locate TeleDrive folder: ' + (e.message||'Drive error')},500);
+    }
+  }
+
   let addedFiles=0,addedFolders=0;
   async function scanFolder(googleFolderId,localFolderId){
     let pageToken='';
     do{
       const q=`'${googleFolderId}' in parents and trashed=false`;
-      const u=`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=nextPageToken,files(id,name,mimeType,size,createdTime)&pageSize=500${pageToken?`&pageToken=${pageToken}`:''}`;
-      const res=await(await fetch(u,{headers:{Authorization:`Bearer ${at}`}})).json();
+      const u=`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=nextPageToken,files(id,name,mimeType,size,createdTime)&pageSize=500&supportsAllDrives=true&includeItemsFromAllDrives=true${pageToken?`&pageToken=${pageToken}`:''}`;
+      const fResp = await fetch(u,{headers:{Authorization:`Bearer ${at}`}});
+      if(!fResp.ok){
+        const errJson = await fResp.json().catch(()=>({}));
+        throw new Error((errJson.error && errJson.error.message) || `Google API error ${fResp.status}`);
+      }
+      const res = await fResp.json();
       if(!res.files)break;
       for(const item of res.files){
         if(item.mimeType==='application/vnd.google-apps.folder'){
@@ -247,15 +284,31 @@ async function hScanDrive(req,env,driveId){
             eFile={id:uid(),googleFileId:item.id,driveId,folderId:localFolderId||null,name:item.name,size:parseInt(item.size,10)||0,mimeType:item.mimeType||'application/octet-stream',uploadedBy:'admin',date:item.createdTime||new Date().toISOString()};
             db.files.push(eFile);
             addedFiles++;
+          } else {
+            if(eFile.driveId !== driveId) eFile.driveId = driveId;
+            if(localFolderId && eFile.folderId !== localFolderId) eFile.folderId = localFolderId;
+            if(typeof item.size === 'string' && !eFile.size) eFile.size = parseInt(item.size,10) || 0;
           }
         }
       }
       pageToken=res.nextPageToken;
     }while(pageToken);
   }
-  await scanFolder(drv.rootFolderId,null);
-  await uSet(env,'td:db',db);
-  return J({ok:true,addedFiles,addedFolders,totalFiles:db.files.length,totalFolders:db.folders.length});
+
+  try {
+    await scanFolder(rootId,null);
+    try {
+      const q=await gDQ(at);
+      if(q && q.storageQuota){
+        drv.capacity = parseInt(q.storageQuota.limit) || drv.capacity || 0;
+        drv.usedBytes = parseInt(q.storageQuota.usage) || drv.usedBytes || 0;
+      }
+    }catch(e){}
+    await uSet(env,'td:db',db);
+    return J({ok:true,addedFiles,addedFolders,totalFiles:db.files.length,totalFolders:db.folders.length});
+  } catch(err) {
+    return J({error:'Scan failed: ' + (err.message||'Unknown Google Drive API error')}, 500);
+  }
 }
 async function hBackupDB(req,env){
   if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);

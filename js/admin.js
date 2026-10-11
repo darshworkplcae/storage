@@ -590,20 +590,22 @@ async function adminRecoverFolder(folderId, folderName) {
 }
 
 async function scanDriveFiles(driveId) {
-  toast('Scanning Google Drive for uploaded files…', 'info', 15000);
+  toast('Scanning Google Drive for uploaded files…', 'info', 20000);
   try {
     var r = await apiFetch('drives/scan/' + encodeURIComponent(driveId), { method: 'POST' });
     if (r && r.ok) {
-      toast('Sync complete! Added ' + r.addedFiles + ' file(s) and ' + r.addedFolders + ' folder(s) from Google Drive.', 'success', 6000);
+      var msg = 'Sync complete! ' + (r.addedFiles || 0) + ' new file(s) and ' + (r.addedFolders || 0) + ' folder(s) synced. Total: ' + (r.totalFiles || 0) + ' files in database.';
+      toast(msg, 'success', 8000);
       S.db = await apiFetchDB();
       renderSettingsPage();
       renderSidebarStorage();
       if (typeof _curPage !== 'undefined' && _curPage === 'files') renderFilesPage(_driveId, _folderId);
     } else {
-      toast(r ? (r.error || 'Scan failed') : 'Network error', 'error');
+      var err = (r && r.error) ? r.error : (r && r.status ? ('Server error HTTP ' + r.status) : 'Scan failed');
+      toast(err, 'error', 7000);
     }
   } catch(e) {
-    toast(e.message || 'Scan error', 'error');
+    toast(e.message || 'Scan error', 'error', 7000);
   }
 }
 
