@@ -515,18 +515,26 @@ async function uploadOne(file, targetFolderId, existingTid) {
       folderId: destFolder,
       name: file.name,
       size: file.size,
-      mimeType: file.type || 'application/octet-stream',
-      thumb: localThumb || undefined
+      mimeType: file.type || 'application/octet-stream'
     });
 
     tmDone(tId, true);
     toast(file.name + ' uploaded!', 'success');
 
-    // Refresh DB
-    try {
-      S.db = await apiFetchDB();
-      if (S.db && S.db.files) tmSyncWithServer(S.db.files);
-    } catch(e) {}
+    // Update DB state locally in memory (instant 0ms, 0 bytes bandwidth!)
+    if (S.db && S.db.files) {
+      S.db.files.push({
+        id: init.fileLocalId,
+        googleFileId: result.googleFileId,
+        driveId: activeDriveId,
+        folderId: destFolder || null,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || 'application/octet-stream',
+        date: new Date().toISOString()
+      });
+      tmSyncWithServer(S.db.files);
+    }
     renderSidebarStorage();
     renderFilesPage(_driveId, _folderId);
 

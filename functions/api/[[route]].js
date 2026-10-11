@@ -9,9 +9,54 @@ function gGC(e){return e.GOOGLE_CLIENT_ID||'';}
 function gGS(e){return e.GOOGLE_CLIENT_SECRET||'';}
 const COR={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST,DELETE,PUT,OPTIONS','Access-Control-Allow-Headers':'Content-Type,Authorization,Range','Access-Control-Expose-Headers':'Content-Range,Content-Length,Accept-Ranges'};
 function J(d,s){return new Response(JSON.stringify(d),{status:s||200,headers:{...COR,'Content-Type':'application/json'}});}
-async function uGet(env,key){const r=await fetch(`${gUU(env)}/get/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${gUT(env)}`}});const d=await r.json();if(d.result===null||d.result===undefined)return null;if(typeof d.result!=='string')return d.result;try{return JSON.parse(d.result);}catch(e){return d.result;}}
-async function uSet(env,key,val){await fetch(`${gUU(env)}/set/${encodeURIComponent(key)}`,{method:'POST',headers:{Authorization:`Bearer ${gUT(env)}`,'Content-Type':'application/json'},body:JSON.stringify(val)});}
-async function uExp(env,key,s){await fetch(`${gUU(env)}/expire/${encodeURIComponent(key)}/${s}`,{method:'POST',headers:{Authorization:`Bearer ${gUT(env)}`}});}
+function getKV(env){return env.TELEDRIVE_KV||env.KV||env.STORAGE||env.DB_KV||null;}
+async function uGet(env,key){
+  const kv=getKV(env);
+  if(kv){
+    try{
+      const val=await kv.get(key,'json');
+      if(val!==null&&val!==undefined)return val;
+      const raw=await kv.get(key,'text');
+      if(!raw)return null;
+      try{return JSON.parse(raw);}catch(e){return raw;}
+    }catch(e){console.error('KV get error:',e);}
+  }
+  try{
+    const r=await fetch(`${gUU(env)}/get/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${gUT(env)}`}});
+    const d=await r.json().catch(()=>({}));
+    if(d.error){
+      if(String(d.error).includes('limit')||r.status===403){
+        throw new Error('ERR_DB_SUSPENDED: '+d.error);
+      }
+      return null;
+    }
+    if(d.result===null||d.result===undefined)return null;
+    if(typeof d.result!=='string')return d.result;
+    try{return JSON.parse(d.result);}catch(e){return d.result;}
+  }catch(e){
+    if(String(e.message).includes('ERR_DB_SUSPENDED'))throw e;
+    return null;
+  }
+}
+async function uSet(env,key,val){
+  const kv=getKV(env);
+  if(kv){
+    try{
+      await kv.put(key,typeof val==='string'?val:JSON.stringify(val));
+      return;
+    }catch(e){console.error('KV put error:',e);}
+  }
+  try{
+    await fetch(`${gUU(env)}/set/${encodeURIComponent(key)}`,{method:'POST',headers:{Authorization:`Bearer ${gUT(env)}`,'Content-Type':'application/json'},body:JSON.stringify(val)});
+  }catch(e){}
+}
+async function uExp(env,key,s){
+  const kv=getKV(env);
+  if(kv)return;
+  try{
+    await fetch(`${gUU(env)}/expire/${encodeURIComponent(key)}/${s}`,{method:'POST',headers:{Authorization:`Bearer ${gUT(env)}`}});
+  }catch(e){}
+}
 async function sha256(t){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('');}
 async function iKey(s){const r=new TextEncoder().encode(s.padEnd(32,'0').slice(0,32));return crypto.subtle.importKey('raw',r,{name:'AES-GCM'},false,['encrypt','decrypt']);}
 async function enc(t,s){const k=await iKey(s);const iv=crypto.getRandomValues(new Uint8Array(12));const e=await crypto.subtle.encrypt({name:'AES-GCM',iv},k,new TextEncoder().encode(t));const c=new Uint8Array([...iv,...new Uint8Array(e)]);return btoa(String.fromCharCode(...c));}
@@ -32,8 +77,32 @@ async function gAT(env,rt){
 async function gDQ(at){return(await fetch('https://www.googleapis.com/drive/v3/about?fields=storageQuota,user',{headers:{Authorization:`Bearer ${at}`}})).json();}
 async function mkDir(at,n,pid){const q=`name='${n}' and mimeType='application/vnd.google-apps.folder' and trashed=false${pid?` and '${pid}' in parents`:''}`;const s=await(await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,{headers:{Authorization:`Bearer ${at}`}})).json();if(s.files&&s.files.length)return s.files[0].id;const c=await(await fetch('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{Authorization:`Bearer ${at}`,'Content-Type':'application/json'},body:JSON.stringify({name:n,mimeType:'application/vnd.google-apps.folder',...(pid?{parents:[pid]}:{})})})).json();return c.id;}
 
-async function hAL(req,env){const{password=''}=await req.json().catch(()=>({}));const db=await uGet(env,'td:db');if(!db)return J({error:'Not initialized. POST /api/admin/init first.'},503);if(await sha256(password)!==db.adminHash)return J({error:'Wrong password'},401);const t=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b=>b.toString(16).padStart(2,'0')).join('');await uSet(env,`td:ses:${t}`,'admin');await uExp(env,`td:ses:${t}`,604800);return J({token:t,role:'admin'});}
-async function hUL(req,env){const{username='',password=''}=await req.json().catch(()=>({}));const db=await uGet(env,'td:db');const u=(db&&db.users||[]).find(x=>x.username===username);if(!u||await sha256(password)!==u.passwordHash)return J({error:'Wrong username or password'},401);const t=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b=>b.toString(16).padStart(2,'0')).join('');await uSet(env,`td:ses:${t}`,u.id);await uExp(env,`td:ses:${t}`,604800);return J({token:t,role:'user',userId:u.id,username:u.username,allowedDrives:u.allowedDrives||'all'});}
+async function hAL(req,env){
+  const{password=''}=await req.json().catch(()=>({}));
+  let db;
+  try{ db=await uGet(env,'td:db'); }catch(e){
+    if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash due to monthly bandwidth limit. Please un-suspend or upgrade in Upstash Console.', isDatabaseSuspended:true},503);
+  }
+  if(!db)return J({error:'Not initialized. POST /api/admin/init first.'},503);
+  if(await sha256(password)!==db.adminHash)return J({error:'Wrong password'},401);
+  const t=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b=>b.toString(16).padStart(2,'0')).join('');
+  await uSet(env,`td:ses:${t}`,'admin');
+  await uExp(env,`td:ses:${t}`,604800);
+  return J({token:t,role:'admin'});
+}
+async function hUL(req,env){
+  const{username='',password=''}=await req.json().catch(()=>({}));
+  let db;
+  try{ db=await uGet(env,'td:db'); }catch(e){
+    if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash. Please un-suspend in Upstash Console.', isDatabaseSuspended:true},503);
+  }
+  const u=(db&&db.users||[]).find(x=>x.username===username);
+  if(!u||await sha256(password)!==u.passwordHash)return J({error:'Wrong username or password'},401);
+  const t=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b=>b.toString(16).padStart(2,'0')).join('');
+  await uSet(env,`td:ses:${t}`,u.id);
+  await uExp(env,`td:ses:${t}`,604800);
+  return J({token:t,role:'user',userId:u.id,username:u.username,allowedDrives:u.allowedDrives||'all'});
+}
 async function hAG(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const cid=gGC(env);if(!cid)return J({error:'GOOGLE_CLIENT_ID not set in Cloudflare Pages env vars'},400);const o=new URL(req.url).origin;const u=new URL('https://accounts.google.com/o/oauth2/v2/auth');u.searchParams.set('client_id',cid);u.searchParams.set('redirect_uri',`${o}/api/auth/callback`);u.searchParams.set('response_type','code');u.searchParams.set('scope','https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile');u.searchParams.set('access_type','offline');u.searchParams.set('prompt','consent');return J({url:u.toString()});}
 async function hCB(req,env){const url=new URL(req.url),code=url.searchParams.get('code');if(!code)return new Response('Missing code',{status:400});const toks=await(await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({code,client_id:gGC(env),client_secret:gGS(env),redirect_uri:`${url.origin}/api/auth/callback`,grant_type:'authorization_code'})})).json();if(!toks.refresh_token)return new Response(`<html><body style="background:#0d0d12;color:#eee;font:16px sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center"><div><h2 style="color:#ff453a">No refresh token</h2><p>Revoke TeleDrive from <a href="https://myaccount.google.com/permissions" style="color:#4e86f5" target="_blank">Google Account permissions</a> then retry.</p><a href="/#/settings" style="color:#4e86f5">Back</a></div></body></html>`,{status:400,headers:{'Content-Type':'text/html'}});const user=await(await fetch('https://www.googleapis.com/oauth2/v2/userinfo',{headers:{Authorization:`Bearer ${toks.access_token}`}})).json();const quota=await gDQ(toks.access_token);const rfId=await mkDir(toks.access_token,'TeleDrive',null);const eT=await enc(toks.refresh_token,gEK(env));let db=await uGet(env,'td:db');if(!db)db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};if(!db.drives)db.drives=[];const cols=['#4e86f5','#30d158','#bf5af2','#ff9f0a','#ff453a','#64d2ff'];db.drives.push({id:uid(),email:user.email,name:user.name||user.email,picture:user.picture||'',color:cols[db.drives.length%cols.length],capacity:parseInt(quota.storageQuota&&quota.storageQuota.limit)||0,usedBytes:parseInt(quota.storageQuota&&quota.storageQuota.usage)||0,rootFolderId:rfId,encToken:eT,createdAt:new Date().toISOString()});await uSet(env,'td:db',db);return new Response(`<html><head><script>window.opener&&window.opener.postMessage('drive-connected','*');setTimeout(function(){window.close();},1500);<\/script></head><body style="background:#0d0d12;color:#eee;font:16px sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center"><div><h2 style="color:#30d158">Drive Connected!</h2><p>${user.email}</p><p style="opacity:.6">Closing…</p></div></body></html>`,{headers:{'Content-Type':'text/html'}});}
 function syncDriveUsage(db){
@@ -47,7 +116,10 @@ function sFold(f){
   return o;
 }
 async function hDB(req,env){
-  const db=await uGet(env,'td:db');
+  let db;
+  try{ db=await uGet(env,'td:db'); }catch(e){
+    if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash due to monthly bandwidth limit. Please un-suspend in Upstash Console or bind Cloudflare KV.', isDatabaseSuspended:true},503);
+  }
   if(!db)return J(null);
   const policy = db.policy || { allowUserDownload: true, allowUserDelete: true };
   const r=await vSes(req,env,null);
@@ -201,12 +273,6 @@ async function hUC(req,env){
   db.activityLog.unshift({id:uid(),type:'upload',name,size,driveId,driveLetter:drv?drv.email:'?',ts:new Date().toISOString()});
   if(db.activityLog.length>500) db.activityLog=db.activityLog.slice(0,500);
   await uSet(env,'td:db',db);
-  if(thumb && typeof thumb === 'string' && thumb.startsWith('data:image/')){
-    try{
-      await uSet(env, `td:th:${googleFileId}`, thumb);
-      await uExp(env, `td:th:${googleFileId}`, 2592000);
-    }catch(e){}
-  }
   return J({ok:true});
 }
 function isFolderAccessDenied(folderId, db, ses) {
@@ -341,46 +407,7 @@ async function hThumb(req,env,gId){
   const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
   if(!drv) return new Response('Drive not found',{status:404,headers:COR});
 
-  // Check Upstash KV cache for thumbnail link or data URI
-  let cachedThumbUrl=await uGet(env,`td:th:${gId}`);
-  if(cachedThumbUrl && typeof cachedThumbUrl==='string'){
-    if(cachedThumbUrl.startsWith('data:image/')){
-      try{
-        const commaIdx = cachedThumbUrl.indexOf(',');
-        const meta = cachedThumbUrl.slice(0, commaIdx);
-        const b64 = cachedThumbUrl.slice(commaIdx + 1);
-        const ct = meta.split(';')[0].replace('data:', '') || 'image/jpeg';
-        const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-        return new Response(bin, {
-          status: 200,
-          headers: {
-            ...COR,
-            'Content-Type': ct,
-            'Cache-Control': 'public, max-age=2592000, s-maxage=2592000, immutable'
-          }
-        });
-      }catch(e){}
-    } else if(cachedThumbUrl.startsWith('http')){
-      const reqSz = url.searchParams.get('sz') || 's360';
-      const fetchUrl = (reqSz !== 's360') ? cachedThumbUrl.replace(/=s\d+$/, '=' + reqSz) : cachedThumbUrl;
-      try{
-        const tResp=await fetch(fetchUrl);
-        if(tResp.ok){
-          const ct=tResp.headers.get('Content-Type')||'image/jpeg';
-          return new Response(tResp.body,{
-            status:200,
-            headers:{
-              ...COR,
-              'Content-Type':ct,
-              'Cache-Control':'public, max-age=2592000, s-maxage=2592000, immutable'
-            }
-          });
-        }
-      }catch(e){}
-    }
-  }
-
-  // Fetch thumbnail info from Google Drive API
+  // Fetch thumbnail directly from Google Drive API
   const at=await gAT(env,drv.encToken);
   const gResp=await fetch(`https://www.googleapis.com/drive/v3/files/${gId}?fields=id,name,mimeType,thumbnailLink,hasThumbnail`,{
     headers:{Authorization:`Bearer ${at}`}
@@ -396,12 +423,6 @@ async function hThumb(req,env,gId){
   // Enhanced resolution =s360 for high-DPI cards (or =s2048 for full view)
   const reqSz = url.searchParams.get('sz') || 's360';
   const highResThumb=gData.thumbnailLink.replace(/=s\d+$/, '=' + reqSz);
-
-  // Cache thumbnail in Upstash for 14 days
-  if (reqSz === 's360') {
-    await uSet(env,`td:th:${gId}`,highResThumb);
-    await uExp(env,`td:th:${gId}`,1209600);
-  }
 
   const tResp=await fetch(highResThumb);
   if(!tResp.ok){
