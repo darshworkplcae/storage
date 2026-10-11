@@ -1,8 +1,51 @@
 var API = '/api';
 
+function getDriveUnlockToken(driveId) {
+  if (!driveId) driveId = (typeof S !== 'undefined' && S.curDriveId) ? S.curDriveId : ((typeof S !== 'undefined' && S.db && S.db.openDriveId) ? S.db.openDriveId : null);
+  if (!driveId) return null;
+  try {
+    var raw = localStorage.getItem('td_dtk_' + driveId);
+    if (!raw) return null;
+    var data = JSON.parse(raw);
+    if (data && data.token && data.expiresAt && Date.now() < data.expiresAt) {
+      return data.token;
+    }
+    localStorage.removeItem('td_dtk_' + driveId);
+  } catch(e) {}
+  return null;
+}
+
+function saveDriveUnlockToken(driveId, token, expiresInSec) {
+  try {
+    var expiresAt = Date.now() + ((expiresInSec || 18000) * 1000);
+    localStorage.setItem('td_dtk_' + driveId, JSON.stringify({ token: token, expiresAt: expiresAt }));
+  } catch(e) {}
+}
+
+function isDriveUnlocked(driveId, drive) {
+  if (typeof S !== 'undefined' && S.ses && (S.ses.role === 'admin' || S.ses.role === 'user')) return true;
+  if (!drive) {
+    if (typeof S !== 'undefined' && S.db && S.db.drives) {
+      drive = S.db.drives.find(function(d){ return d.id === driveId; });
+    }
+  }
+  if (!drive || !drive.hasPassword) return true;
+  return !!getDriveUnlockToken(driveId || (drive ? drive.id : null));
+}
+
+function getActiveDriveToken() {
+  if (typeof S !== 'undefined') {
+    if (S.curDriveId) return getDriveUnlockToken(S.curDriveId);
+    if (S.db && S.db.openDriveId) return getDriveUnlockToken(S.db.openDriveId);
+  }
+  return null;
+}
+
 function authHdr() {
   var h = { 'Content-Type': 'application/json' };
   if (S.ses && S.ses.token) h['Authorization'] = 'Bearer ' + S.ses.token;
+  var dTok = getActiveDriveToken();
+  if (dTok) h['X-Drive-Token'] = dTok;
   return h;
 }
 
@@ -26,11 +69,13 @@ function apiDisconnect(id)        { return apiFetch('drives/'+id,       { method
 function apiDownload(gId, dId)    { return apiFetch('download/'+gId+'?driveId='+dId); }
 function getFileDownloadUrl(gId, dId, inline) {
   var tok = (S.ses && S.ses.token) ? S.ses.token : '';
-  return API + '/download/' + encodeURIComponent(gId) + '?driveId=' + encodeURIComponent(dId||'') + (inline ? '&inline=1' : '') + (tok ? '&token=' + encodeURIComponent(tok) : '');
+  var dTok = getDriveUnlockToken(dId);
+  return API + '/download/' + encodeURIComponent(gId) + '?driveId=' + encodeURIComponent(dId||'') + (inline ? '&inline=1' : '') + (tok ? '&token=' + encodeURIComponent(tok) : '') + (dTok ? '&driveToken=' + encodeURIComponent(dTok) : '');
 }
 function getFileThumbUrl(gId, dId) {
   var tok = (S.ses && S.ses.token) ? S.ses.token : '';
-  return API + '/thumb/' + encodeURIComponent(gId) + '?driveId=' + encodeURIComponent(dId||'') + (tok ? '&token=' + encodeURIComponent(tok) : '');
+  var dTok = getDriveUnlockToken(dId);
+  return API + '/thumb/' + encodeURIComponent(gId) + '?driveId=' + encodeURIComponent(dId||'') + (tok ? '&token=' + encodeURIComponent(tok) : '') + (dTok ? '&driveToken=' + encodeURIComponent(dTok) : '');
 }
 function apiRenameFile(fileId, newName) {
   return apiFetch('files/rename/' + encodeURIComponent(fileId), { method: 'POST', body: JSON.stringify({ name: newName }) });
@@ -266,9 +311,11 @@ function apiBatchRequestRestore(fileIds) { return apiFetch('files/trash/batch-re
 function apiBatchApproveRestore(fileIds) { return apiFetch('files/trash/batch-approve-restore', { method: 'POST', body: JSON.stringify({ fileIds: fileIds }) }); }
 function apiBatchPermanentDelete(fileIds) { return apiFetch('files/trash/batch-permanent-delete', { method: 'POST', body: JSON.stringify({ fileIds: fileIds }) }); }
 function apiEmptyTrash() { return apiFetch('files/trash/empty', { method: 'POST' }); }
-function apiLockFolder(folderId, password) { return apiFetch('folders/lock/' + encodeURIComponent(folderId), { method: 'POST', body: JSON.stringify({ password: password }) }); }
+function apiLockFolder(folderId, password, hint) { return apiFetch('folders/lock/' + encodeURIComponent(folderId), { method: 'POST', body: JSON.stringify({ password: password, hint: hint || '' }) }); }
 function apiUnlockFolder(folderId, password) { return apiFetch('folders/unlock/' + encodeURIComponent(folderId), { method: 'POST', body: JSON.stringify({ password: password }) }); }
 function apiRemoveFolderLock(folderId, password) { return apiFetch('folders/remove-lock/' + encodeURIComponent(folderId), { method: 'POST', body: JSON.stringify({ password: password }) }); }
+function apiSetDrivePassword(driveId, password, hint) { return apiFetch('admin/drive-password', { method: 'POST', body: JSON.stringify({ driveId: driveId, password: password, hint: hint || '' }) }); }
+function apiUnlockDrive(driveId, password) { return apiFetch('drives/unlock-drive', { method: 'POST', body: JSON.stringify({ driveId: driveId, password: password }) }); }
 function apiGetAdminLockedFolders() { return apiFetch('admin/locked-folders'); }
 function apiGetDestroyedFolders() { return apiFetch('admin/destroyed-folders'); }
 function apiRecoverFolder(folderId) { return apiFetch('admin/recover-folder/' + encodeURIComponent(folderId), { method: 'POST' }); }

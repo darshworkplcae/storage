@@ -30,7 +30,7 @@ function renderSettingsPage() {
               '<div class="dc-icon" style="background:'+d.color+'22;color:'+d.color+'"><i class="fas fa-hard-drive"></i></div>' +
               '<div class="dc-info">' +
                 '<div class="dc-name" style="display:flex;align-items:center;gap:6px">' +
-                  esc(d.name) + (isOpen?'<span class="badge-open">Open Drive</span>':'') +
+                  esc(d.name) + (isOpen?'<span class="badge-open">Open Drive</span>':'') + (d.hasPassword?'<span class="badge-open" style="background:rgba(255,159,10,0.15);color:#ff9f0a;border-color:rgba(255,159,10,0.35)"><i class="fas fa-lock"></i> Protected</span>':'') +
                 '</div>' +
                 '<div class="dc-email">'+esc(d.email)+'</div>' +
               '</div>' +
@@ -43,6 +43,7 @@ function renderSettingsPage() {
             '<div style="margin-top:.6rem;display:flex;gap:6px;flex-wrap:wrap">' +
               '<button class="btn-ghost xs" style="flex:1" onclick="promptRenameDrive(\''+d.id+'\',\''+esc(d.name).replace(/'/g,"\\'")+'\')"><i class="fas fa-pen"></i> Rename</button>' +
               '<button class="btn-ghost xs" style="flex:1" onclick="toggleOpenDrive(\''+d.id+'\')"><i class="fas fa-users"></i> '+(isOpen?'Disable Open':'Make Open')+'</button>' +
+              '<button class="btn-ghost xs '+(d.hasPassword?'active-lock':'')+'" style="flex:1;'+(d.hasPassword?'color:#ff9f0a;border-color:rgba(255,159,10,0.4);background:rgba(255,159,10,0.1)':'')+'" onclick="showSetDrivePasswordDialog(\''+d.id+'\','+(d.hasPassword?true:false)+',\''+esc(d.name).replace(/'/g,"\\'")+'\',\''+esc(d.passwordHint||'').replace(/'/g,"\\'")+'\')" title="Set Password for Drive Access"><i class="fas '+(d.hasPassword?'fa-lock':'fa-key')+'"></i> '+(d.hasPassword?'Pass Set':'Drive Pass')+'</button>' +
               '<button class="btn-ghost xs" style="flex:1" onclick="scanDriveFiles(\''+d.id+'\')" title="Scan Google Drive to detect and restore all uploaded files"><i class="fas fa-rotate"></i> Sync Files</button>' +
             '</div>' +
           '</div>';
@@ -350,7 +351,7 @@ async function loadAdminLockedFolders() {
   function renderTable(list, typeLabel) {
     if(!list.length) return '<div style="padding:1rem;color:var(--text3);font-size:.82rem;font-style:italic">No '+typeLabel+' locked folders.</div>';
     return '<table class="users-table" style="margin-bottom:1rem">' +
-      '<thead><tr><th>Folder</th><th>Drive</th><th>Locked By</th><th>Locked Date</th><th>Plain Password</th><th>Action</th></tr></thead>' +
+      '<thead><tr><th>Folder</th><th>Drive</th><th>Locked By</th><th>Locked Date</th><th>Password Hint</th><th>Plain Password</th><th>Action</th></tr></thead>' +
       '<tbody>' + list.map(function(f, idx){
         var inputId = 'lfp_' + f.id + '_' + idx;
         return '<tr>' +
@@ -358,6 +359,7 @@ async function loadAdminLockedFolders() {
           '<td>' + esc(f.driveName) + '</td>' +
           '<td><span class="badge ' + (f.lockedRole==='guest'?'badge-guest':'badge-user') + '">' + esc(f.lockedBy) + '</span></td>' +
           '<td>' + fmtDate(f.lockedAt) + '</td>' +
+          '<td>' + (f.passwordHint ? '<span style="color:#0a84ff;font-size:.78rem;background:rgba(10,132,255,0.1);padding:3px 7px;border-radius:4px;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-lightbulb" style="color:#ffd60a"></i> ' + esc(f.passwordHint) + '</span>' : '<span style="color:var(--text3);font-size:.78rem">—</span>') + '</td>' +
           '<td>' +
             '<div style="display:flex;align-items:center;gap:6px">' +
               '<input type="password" id="' + inputId + '" value="' + esc(f.plainPassword) + '" readonly class="inp xs" style="width:110px;font-family:monospace;background:rgba(255,255,255,0.06);border-color:transparent">' +
@@ -551,7 +553,7 @@ async function loadAdminDestroyedFolders() {
   }
 
   el.innerHTML = '<table class="users-table" style="margin-bottom:1rem">' +
-    '<thead><tr><th>Destroyed Folder</th><th>Drive</th><th>Locked By</th><th>Destroyed Date</th><th>Plain Password</th><th>Action</th></tr></thead>' +
+    '<thead><tr><th>Destroyed Folder</th><th>Drive</th><th>Locked By</th><th>Destroyed Date</th><th>Password Hint</th><th>Plain Password</th><th>Action</th></tr></thead>' +
     '<tbody>' + res.folders.map(function(f, idx){
       var inputId = 'dfp_' + f.id + '_' + idx;
       return '<tr>' +
@@ -559,9 +561,10 @@ async function loadAdminDestroyedFolders() {
         '<td>' + esc(f.driveName) + '</td>' +
         '<td><span class="badge badge-guest">' + esc(f.lockedBy) + '</span></td>' +
         '<td>' + fmtDate(f.destroyedAt) + '</td>' +
+        '<td>' + (f.passwordHint ? '<span style="color:#0a84ff;font-size:.78rem;background:rgba(10,132,255,0.1);padding:3px 7px;border-radius:4px;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-lightbulb" style="color:#ffd60a"></i> ' + esc(f.passwordHint) + '</span>' : '<span style="color:var(--text3);font-size:.78rem">—</span>') + '</td>' +
         '<td>' +
           '<div style="display:flex;align-items:center;gap:6px">' +
-            '<input type="password" id="' + inputId + '" value="' + esc(f.plainPassword) + '" readonly class="inp xs" style="width:110px;font-family:monospace;background:rgba(255,255,255,0.06);border-color:transparent">' +
+            '<input type="password" id="' + inputId + '" value="' + esc(f.plainPassword) + '" readonly class="inp xs" style="width:110px;font-family:monospace;background:rgba(255,255,200,0.06);border-color:transparent">' +
             '<button class="icon-btn xs" onclick="var el=document.getElementById(\'' + inputId + '\');el.type=el.type===\'password\'?\'text\':\'password\';this.innerHTML=\'<i class=\\\'fas fa-\'+(el.type===\'password\'?\'eye\':\'eye-slash\')+\'\\\'></i>\';" title="Reveal Password"><i class="fas fa-eye"></i></button>' +
             '<button class="icon-btn xs" onclick="navigator.clipboard.writeText(\'' + esc(f.plainPassword).replace(/'/g,"\\'") + '\');toast(\'Password copied!\',\'success\');" title="Copy Password"><i class="fas fa-copy"></i></button>' +
           '</div>' +

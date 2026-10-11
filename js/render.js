@@ -196,6 +196,92 @@ function renderFilesPage(driveId, folderId){
   }
 
   // Inside a drive
+  const drive=drives.find(d=>d.id===driveId);
+
+  // Check 5-hour drive lock for guests
+  if (drive && drive.hasPassword && !isDriveUnlocked(driveId, drive)) {
+    $('uploadBtn')?.classList.add('hidden');
+    $('folderUpBtn')?.classList.add('hidden');
+    $('newFolderBtn')?.classList.add('hidden');
+    document.querySelector('.view-size-btns')?.classList.add('hidden');
+
+    pc.innerHTML = `
+      <div class="inner-page" style="display:flex;align-items:center;justify-content:center;min-height:500px;padding:2rem 1rem">
+        <div class="modal" style="max-width:440px;width:100%;text-align:center;padding:2.4rem 2rem;box-shadow:0 30px 80px rgba(0,0,0,0.85);border:1px solid rgba(0,229,255,0.3);border-radius:18px">
+          <div class="vault-shield-badge gold-glow" style="margin:0 auto 1.2rem;width:72px;height:72px;font-size:2rem">
+            <i class="fas fa-lock"></i>
+          </div>
+          <h2 style="font-size:1.35rem;font-weight:700;margin-bottom:.4rem;color:var(--text1)">${esc(drive.name)}</h2>
+          <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,229,255,0.12);border:1px solid rgba(0,229,255,0.3);color:#00e5ff;border-radius:20px;padding:3px 14px;font-size:.76rem;font-weight:700;margin-bottom:1.1rem">
+            <i class="fas fa-shield-halved"></i> Protected Drive Access
+          </div>
+          <p style="font-size:.84rem;color:var(--text3);margin-bottom:1.2rem;line-height:1.5">
+            This drive is protected with a password. Enter the password below to gain access for <strong>5 hours</strong>.
+          </p>
+
+          ${drive.passwordHint ? `
+            <div style="background:rgba(255,214,10,0.08);border:1px solid rgba(255,214,10,0.28);border-radius:10px;padding:.65rem .85rem;font-size:.8rem;color:#ffd60a;margin-bottom:1.2rem;line-height:1.4;text-align:left;display:flex;align-items:flex-start;gap:9px">
+              <i class="fas fa-lightbulb" style="margin-top:2px;font-size:1rem;color:#ffd60a"></i>
+              <div>
+                <div style="font-weight:700;font-size:.72rem;text-transform:uppercase;letter-spacing:.6px;color:rgba(255,214,10,0.8)">Password Hint</div>
+                <div style="color:var(--text1);font-weight:600;margin-top:2px;word-break:break-word">${esc(drive.passwordHint)}</div>
+              </div>
+            </div>
+          ` : ''}
+
+          <form id="driveUnlockForm" onsubmit="return false;" style="text-align:left">
+            <div style="margin-bottom:1.2rem">
+              <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem;color:var(--text2)">Drive Password</label>
+              <div style="position:relative">
+                <input type="password" id="driveUnlockPasswordInput" class="inp" placeholder="Enter drive password" required style="width:100%;padding-right:42px;height:42px;font-size:.95rem">
+                <button type="button" class="icon-btn xs" style="position:absolute;right:10px;top:50%;transform:translateY(-50%)" onclick="var p=document.getElementById('driveUnlockPasswordInput');p.type=p.type==='password'?'text':'password';this.innerHTML='<i class=\\'fas fa-'+(p.type==='password'?'eye':'eye-slash')+'\\'></i>';"><i class="fas fa-eye"></i></button>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:.75rem;justify-content:center">
+              <button type="button" class="btn-ghost sm" onclick="navTo('files')" style="flex:1"><i class="fas fa-arrow-left"></i> Back</button>
+              <button type="submit" class="btn-primary sm" id="submitDriveUnlockBtn" style="flex:2;background:linear-gradient(135deg,#007aff,#5856d6);font-weight:600">
+                <i class="fas fa-lock-open"></i> Unlock (5 Hours)
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+
+    var pwInput = pc.querySelector('#driveUnlockPasswordInput');
+    if (pwInput) pwInput.focus();
+
+    var unlockForm = pc.querySelector('#driveUnlockForm');
+    if (unlockForm) {
+      unlockForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        var val = (pwInput ? pwInput.value : '').trim();
+        if (!val) { toast('Please enter password', 'warning'); return; }
+        var btn = pc.querySelector('#submitDriveUnlockBtn');
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Unlocking…';
+        }
+        var res = await apiUnlockDrive(driveId, val);
+        if (res && res.ok) {
+          saveDriveUnlockToken(driveId, res.token, res.expiresIn || 18000);
+          toast('Drive unlocked! 5-hour access granted.', 'success');
+          S.db = await apiFetchDB();
+          renderFilesPage(driveId, folderId);
+        } else {
+          toast(res ? (res.error || 'Incorrect drive password') : 'Network error', 'error');
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-lock-open"></i> Unlock (5 Hours)';
+          }
+          if (pwInput) pwInput.focus();
+        }
+      });
+    }
+    return;
+  }
+
   $('uploadBtn')?.classList.remove('hidden');
   $('folderUpBtn')?.classList.remove('hidden');
   $('newFolderBtn')?.classList.remove('hidden');
@@ -228,7 +314,6 @@ function renderFilesPage(driveId, folderId){
     return;
   }
 
-  const drive=drives.find(d=>d.id===driveId);
   const search=($('globalSearch')?.value||'').toLowerCase();
   let folders=(db.folders||[]).filter(f=>f.driveId===driveId&&f.parentId===(folderId||null)&&!f.trashed);
   let files=(db.files||[]).filter(f=>f.driveId===driveId&&f.folderId===(folderId||null)&&!f.trashed);
@@ -356,7 +441,14 @@ function driveCard(d){
   const isAdmin = S.ses.role === 'admin';
   const isAuth = !!(S.ses && S.ses.token && S.ses.role);
   const canRename = isAdmin || (S.ses.role === 'user' && isDriveAllowed(d.id));
-  return `<div class="fg-card drive-card-item" onclick="navTo('files','${esc(d.id)}')" title="${esc(d.email)}">
+  const hasPass = !!d.hasPassword;
+  const unlocked = isDriveUnlocked(d.id, d);
+  return `<div class="fg-card drive-card-item" onclick="navTo('files','${esc(d.id)}')" title="${esc(d.email)}" style="position:relative">
+    ${hasPass ? `
+      <div style="position:absolute;top:10px;right:10px;display:flex;align-items:center;gap:4px;background:${unlocked?'rgba(48,209,88,0.14)':'rgba(255,159,10,0.18)'};border:1px solid ${unlocked?'rgba(48,209,88,0.4)':'rgba(255,159,10,0.4)'};border-radius:12px;padding:2px 8px;font-size:.68rem;font-weight:700;color:${unlocked?'#30d158':'#ff9f0a'}" title="${unlocked?'Unlocked for 5 hours':'Password Protected Drive'}">
+        <i class="fas ${unlocked?'fa-lock-open':'fa-lock'}"></i> ${unlocked?'Unlocked (5h)':'Protected'}
+      </div>
+    ` : ''}
     <div class="fg-icon xl" style="display:flex;align-items:center;justify-content:center;margin-top:2px">
       <img src="favicon.svg?v=obito" alt="TeleDrive" style="width:52px;height:52px;display:block;filter:drop-shadow(0 0 14px ${esc(d.color||'#ff6a00')}66)">
     </div>

@@ -575,12 +575,17 @@ function showLockFolderDialog(folderId, folderName) {
             <button type="button" class="icon-btn xs" style="position:absolute;right:8px;top:50%;transform:translateY(-50%)" onclick="var p=document.getElementById('lockFolderPass');p.type=p.type==='password'?'text':'password';this.innerHTML='<i class=\\'fas fa-'+(p.type==='password'?'eye':'eye-slash')+'\\'></i>';"><i class="fas fa-eye"></i></button>
           </div>
         </div>
-        <div style="margin-bottom:1rem">
+        <div style="margin-bottom:.85rem">
           <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem;color:var(--text2)">Confirm Password</label>
           <div style="position:relative">
             <input type="password" id="lockFolderPassConfirm" class="inp" placeholder="Re-type password" required style="width:100%;padding-right:40px">
             <button type="button" class="icon-btn xs" style="position:absolute;right:8px;top:50%;transform:translateY(-50%)" onclick="var p=document.getElementById('lockFolderPassConfirm');p.type=p.type==='password'?'text':'password';this.innerHTML='<i class=\\'fas fa-'+(p.type==='password'?'eye':'eye-slash')+'\\'></i>';"><i class="fas fa-eye"></i></button>
           </div>
+        </div>
+        <div style="margin-bottom:1rem">
+          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem;color:var(--text2)">Password Hint <span style="font-weight:400;color:var(--text3)">(Optional)</span></label>
+          <input type="text" id="lockFolderHint" class="inp" placeholder="e.g. My favorite pet or childhood street" maxlength="100" style="width:100%">
+          <div style="font-size:.72rem;color:var(--text3);margin-top:3px">Displayed when unlocking to help you remember your password.</div>
         </div>
         <div style="background:rgba(255,159,10,0.08);border:1px solid rgba(255,159,10,0.22);border-radius:8px;padding:.65rem .8rem;font-size:.76rem;color:#ff9f0a;margin-bottom:1.2rem;line-height:1.4">
           <i class="fas fa-shield-alt" style="margin-right:4px"></i>
@@ -596,12 +601,14 @@ function showLockFolderDialog(folderId, folderName) {
   document.body.appendChild(ov);
   var passInp = ov.querySelector('#lockFolderPass');
   var passConf = ov.querySelector('#lockFolderPassConfirm');
+  var hintInp = ov.querySelector('#lockFolderHint');
   if (passInp) passInp.focus();
 
   ov.querySelector('#lockFolderForm').addEventListener('submit', async function (e) {
     e.preventDefault();
     var val = passInp.value.trim();
     var conf = passConf.value.trim();
+    var hint = hintInp ? hintInp.value.trim() : '';
     if (!val) { toast('Password cannot be empty', 'warning'); return; }
     if (val !== conf) {
       toast('Passwords do not match! Please verify.', 'error');
@@ -611,7 +618,7 @@ function showLockFolderDialog(folderId, folderName) {
     var btn = ov.querySelector('#submitLockBtn');
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Protecting…';
-    var res = await apiLockFolder(folderId, val);
+    var res = await apiLockFolder(folderId, val, hint);
     if (res && res.ok) {
       toast('Folder protected with password!', 'success');
       ov.remove();
@@ -641,6 +648,16 @@ function showUnlockFolderDialog(folder, onUnlocked) {
       <p style="font-size:.84rem;color:var(--text3);margin-bottom:.8rem">
         <strong style="color:var(--text1)">${esc(folder.name)}</strong> is encrypted.<br>Enter the password to access files inside.
       </p>
+
+      ${folder.passwordHint ? `
+        <div style="background:rgba(10,132,255,0.08);border:1px solid rgba(10,132,255,0.25);border-radius:8px;padding:.55rem .75rem;font-size:.78rem;color:#0a84ff;margin-bottom:1rem;line-height:1.4;text-align:left;display:flex;align-items:flex-start;gap:8px">
+          <i class="fas fa-lightbulb" style="margin-top:2px;font-size:.9rem;color:#ffd60a"></i>
+          <div>
+            <div style="font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:var(--text3)">Password Hint</div>
+            <div style="color:var(--text1);font-weight:600;margin-top:2px;word-break:break-word">${esc(folder.passwordHint)}</div>
+          </div>
+        </div>
+      ` : ''}
 
       <div style="background:rgba(255,69,58,0.1);border:1px solid rgba(255,69,58,0.3);border-radius:8px;padding:.55rem .75rem;font-size:.76rem;color:#ff453a;margin-bottom:1.1rem;line-height:1.4;text-align:left">
         <div style="font-weight:700;display:flex;align-items:center;gap:6px">
@@ -729,6 +746,124 @@ function showUnlockFolderDialog(folder, onUnlocked) {
       toast('Failed to unlock: ' + (err.message || err), 'error');
       btn.disabled = false;
       btn.innerHTML = '<i class="fas fa-lock-open"></i> Unlock & Open';
+    }
+  });
+}
+
+function showSetDrivePasswordDialog(driveId, hasPassword, driveName, currentHint) {
+  var ov = document.createElement('div');
+  ov.className = 'modal-backdrop';
+  ov.innerHTML = `
+    <div class="modal" style="max-width:440px;text-align:center">
+      <div class="modal-hd" style="justify-content:center;position:relative">
+        <div class="vault-shield-badge gold-glow">
+          <i class="fas fa-key"></i>
+        </div>
+        <button class="icon-btn xs" style="position:absolute;right:1rem;top:1rem" onclick="this.closest('.modal-backdrop').remove()"><i class="fas fa-times"></i></button>
+      </div>
+      <h3 style="margin-bottom:.3rem">${hasPassword ? 'Edit Drive Password' : 'Set Drive Password'}</h3>
+      <p style="font-size:.84rem;color:var(--text3);margin-bottom:1.1rem">
+        Guest password protection for <strong style="color:var(--text1)">${esc(driveName)}</strong>.<br>
+        Guests must enter this password to open the drive. Once unlocked, access stays active for <strong>5 hours</strong>.
+      </p>
+
+      <form id="drivePassForm" onsubmit="return false;" style="text-align:left">
+        <div style="margin-bottom:.85rem">
+          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem;color:var(--text2)">
+            ${hasPassword ? 'New Password' : 'Drive Password'}
+          </label>
+          <div style="position:relative">
+            <input type="password" id="drivePasswordInput" class="inp" placeholder="Enter drive password" required style="width:100%;padding-right:40px">
+            <button type="button" class="icon-btn xs" style="position:absolute;right:8px;top:50%;transform:translateY(-50%)" onclick="var p=document.getElementById('drivePasswordInput');p.type=p.type==='password'?'text':'password';this.innerHTML='<i class=\\'fas fa-'+(p.type==='password'?'eye':'eye-slash')+'\\'></i>';"><i class="fas fa-eye"></i></button>
+          </div>
+        </div>
+
+        <div style="margin-bottom:.85rem">
+          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem;color:var(--text2)">Confirm Password</label>
+          <div style="position:relative">
+            <input type="password" id="drivePasswordConfirm" class="inp" placeholder="Re-type password" required style="width:100%;padding-right:40px">
+            <button type="button" class="icon-btn xs" style="position:absolute;right:8px;top:50%;transform:translateY(-50%)" onclick="var p=document.getElementById('drivePasswordConfirm');p.type=p.type==='password'?'text':'password';this.innerHTML='<i class=\\'fas fa-'+(p.type==='password'?'eye':'eye-slash')+'\\'></i>';"><i class="fas fa-eye"></i></button>
+          </div>
+        </div>
+
+        <div style="margin-bottom:1rem">
+          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:.35rem;color:var(--text2)">Password Hint <span style="font-weight:400;color:var(--text3)">(Optional)</span></label>
+          <input type="text" id="drivePasswordHint" class="inp" placeholder="e.g. Secret trip password for friends" maxlength="100" value="${esc(currentHint || '')}" style="width:100%">
+          <div style="font-size:.72rem;color:var(--text3);margin-top:3px">Displayed to guests on the drive unlock screen to help them remember.</div>
+        </div>
+
+        <div style="background:rgba(0,229,255,0.08);border:1px solid rgba(0,229,255,0.22);border-radius:8px;padding:.65rem .8rem;font-size:.76rem;color:#00e5ff;margin-bottom:1.2rem;line-height:1.4">
+          <i class="fas fa-clock" style="margin-right:4px"></i>
+          Unlocking grants <strong>5-hour persistent access</strong> per visitor browser. Individual folder passwords remain separately protected.
+        </div>
+
+        <div style="display:flex;gap:.6rem;justify-content:space-between;align-items:center">
+          ${hasPassword ? `
+            <button type="button" class="btn-ghost sm danger" id="removeDrivePassBtn" style="color:#ff453a;border-color:rgba(255,69,58,0.4)">
+              <i class="fas fa-lock-open"></i> Remove Password
+            </button>
+          ` : `<div></div>`}
+          <div style="display:flex;gap:.6rem">
+            <button type="button" class="btn-ghost sm" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
+            <button type="submit" class="btn-primary sm" id="saveDrivePassBtn" style="background:linear-gradient(135deg,#007aff,#5856d6)">
+              <i class="fas fa-shield-halved"></i> Save Password
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(ov);
+  var passInp = ov.querySelector('#drivePasswordInput');
+  var confInp = ov.querySelector('#drivePasswordConfirm');
+  var hintInp = ov.querySelector('#drivePasswordHint');
+  if (passInp) passInp.focus();
+
+  if (hasPassword) {
+    var remBtn = ov.querySelector('#removeDrivePassBtn');
+    if (remBtn) {
+      remBtn.addEventListener('click', async function() {
+        if (!confirm('Are you sure you want to remove the password from this drive? Guests will be able to browse without a password.')) return;
+        remBtn.disabled = true;
+        remBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Removing…';
+        var res = await apiSetDrivePassword(driveId, '', '');
+        if (res && res.ok) {
+          toast('Drive password removed! Drive is now open without password.', 'success');
+          ov.remove();
+          S.db = await apiFetchDB();
+          if (typeof renderSettingsPage === 'function') renderSettingsPage();
+          if (typeof renderSidebarStorage === 'function') renderSidebarStorage();
+        } else {
+          toast(res ? (res.error || 'Failed to remove password') : 'Network error', 'error');
+          remBtn.disabled = false;
+          remBtn.innerHTML = '<i class="fas fa-lock-open"></i> Remove Password';
+        }
+      });
+    }
+  }
+
+  ov.querySelector('#drivePassForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    var p = passInp.value.trim();
+    var c = confInp.value.trim();
+    var h = hintInp ? hintInp.value.trim() : '';
+    if (!p) { toast('Please enter a password', 'warning'); return; }
+    if (p !== c) { toast('Passwords do not match! Please check.', 'error'); confInp.focus(); return; }
+
+    var saveBtn = ov.querySelector('#saveDrivePassBtn');
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+    var res = await apiSetDrivePassword(driveId, p, h);
+    if (res && res.ok) {
+      toast('Drive password saved! Guests now need this password to open the drive.', 'success');
+      ov.remove();
+      S.db = await apiFetchDB();
+      if (typeof renderSettingsPage === 'function') renderSettingsPage();
+      if (typeof renderSidebarStorage === 'function') renderSidebarStorage();
+    } else {
+      toast(res ? (res.error || 'Failed to save drive password') : 'Network error', 'error');
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i class="fas fa-shield-halved"></i> Save Password';
     }
   });
 }

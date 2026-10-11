@@ -128,12 +128,34 @@ async function hVerifySes(req,env){const r=await vSes(req,env,null);if(!r)return
 function syncDriveUsage(db){
   // Preserve real Google Drive quota (do not overwrite with only TeleDrive-uploaded files)
 }
+function sDrv(d){
+  if(!d) return d;
+  return {
+    ...d,
+    encToken: undefined,
+    passwordHash: undefined,
+    hasPassword: !!d.passwordHash,
+    passwordHint: d.passwordHint || null
+  };
+}
 function sFold(f){
   if(!f) return f;
   const o = {...f};
   delete o.passwordHash;
   delete o.encPassword;
   return o;
+}
+async function vDriveToken(req, env, driveId){
+  if(!driveId) return false;
+  const url = new URL(req.url);
+  const token = req.headers.get('x-drive-token') || url.searchParams.get('driveToken');
+  if(!token) return false;
+  try{
+    const storedDriveId = await uGet(env, 'td:dtk:' + token);
+    return String(storedDriveId || '').replace(/^"|"$/g, '') === driveId;
+  }catch(e){
+    return false;
+  }
 }
 async function hDB(req,env){
   let db;
@@ -150,7 +172,7 @@ async function hDB(req,env){
     return J({
       ...db,
       policy,
-      drives:(db.drives||[]).map(d=>({...d,encToken:undefined})),
+      drives:(db.drives||[]).map(sDrv),
       folders:(db.folders||[]).map(sFold),
       activityLog:(db.activityLog||[]),
       users:(db.users||[])
@@ -160,7 +182,7 @@ async function hDB(req,env){
     const u=(db.users||[]).find(x=>x.id===r);
     const allowed = u ? u.allowedDrives : null;
     const allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
-    const userDrives = (db.drives||[]).filter(d => !allowedList || allowedList.includes(d.id)).map(d=>({...d,encToken:undefined}));
+    const userDrives = (db.drives||[]).filter(d => !allowedList || allowedList.includes(d.id)).map(sDrv);
     const userDriveIds = userDrives.map(d => d.id);
     const userFolders = (db.folders||[]).filter(f => userDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly && (!f.allowedUsers || !f.allowedUsers.length || f.allowedUsers.includes(r))).map(sFold);
     const visibleFolderIds = new Set(userFolders.map(f => f.id));
@@ -179,8 +201,27 @@ async function hDB(req,env){
   }
   // Guest visitor: Strictly ONLY the open drive!
   const openId = db.openDriveId;
-  const guestDrives = openId ? (db.drives||[]).filter(d => d.id === openId).map(d=>({...d,encToken:undefined})) : [];
+  const guestDrives = openId ? (db.drives||[]).filter(d => d.id === openId).map(sDrv) : [];
   const guestDriveIds = guestDrives.map(d => d.id);
+
+  // If the guest drive has password protection, check if unlocked:
+  const openDrv = (db.drives||[]).find(d => d.id === openId);
+  const isDriveProtected = openDrv && !!openDrv.passwordHash;
+  const isUnlocked = isDriveProtected ? await vDriveToken(req, env, openId) : true;
+
+  if (isDriveProtected && !isUnlocked) {
+    return J({
+      v: db.v,
+      openDriveId: db.openDriveId,
+      policy,
+      drives: guestDrives,
+      files: [],
+      folders: [],
+      activityLog: [],
+      users: []
+    });
+  }
+
   const guestFolders = (db.folders||[]).filter(f => guestDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly && (!f.allowedUsers || !f.allowedUsers.length)).map(sFold);
   const visibleFolderIds = new Set(guestFolders.map(f => f.id));
   const guestFiles = (db.files||[]).filter(f => guestDriveIds.includes(f.driveId) && !f.destroyed && !f.adminOnly && (!f.allowedUsers || !f.allowedUsers.length) && (!f.folderId || visibleFolderIds.has(f.folderId)));
@@ -450,6 +491,9 @@ async function hUI(req,env){
   }
   const drv=(db&&db.drives||[]).find(d=>d.id===driveId);
   if(!drv) return J({error:'Drive not found'},404);
+  if(!ses && drv.passwordHash && !await vDriveToken(req, env, driveId)){
+    return J({error:'Drive is locked by password'},403);
+  }
   const at=await gAT(env,drv.encToken);
   let pid=drv.rootFolderId;
   if(folderId){
@@ -479,6 +523,11 @@ async function hUC(req,env){
   const ses=await vSes(req,env,null);
   if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
   if(!db) return J({error:'DB error'},500);
+  const drv=(db.drives||[]).find(d=>d.id===driveId);
+  if(!drv) return J({error:'Drive not found'},404);
+  if(!ses && drv.passwordHash && !await vDriveToken(req, env, driveId)){
+    return J({error:'Drive is locked by password'},403);
+  }
   if(!db.files) db.files=[];
   const parentFolder = folderId ? (db.folders||[]).find(x=>x.id===folderId) : null;
   const isAdmOnly = parentFolder ? !!parentFolder.adminOnly : false;
@@ -497,7 +546,6 @@ async function hUC(req,env){
   };
   if(fAllowedUsers) newFile.allowedUsers = fAllowedUsers;
   db.files.push(newFile);
-  const drv=(db.drives||[]).find(d=>d.id===driveId);
   if(drv && typeof size === 'number') drv.usedBytes = (drv.usedBytes || 0) + size;
   if(!db.activityLog) db.activityLog=[];
   db.activityLog.unshift({id:uid(),type:'upload',name,size,driveId,driveLetter:drv?drv.email:'?',ts:new Date().toISOString()});
@@ -573,6 +621,9 @@ async function hDL(req,env,gId){
   const dId=url.searchParams.get('driveId') || (fileObj ? fileObj.driveId : null);
   const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
+  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
+    return J({error:'Drive is locked by password'}, 403);
+  }
   let at=await gAT(env,drv.encToken);
   const range=req.headers.get('Range');
   let gResp=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?alt=media&supportsAllDrives=true`,{
@@ -660,6 +711,9 @@ async function hThumb(req,env,gId){
   const dId=url.searchParams.get('driveId') || (fileObj ? fileObj.driveId : null);
   const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
   if(!drv) return new Response('Drive not found',{status:404,headers:COR});
+  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
+    return new Response('Drive is locked by password',{status:403,headers:COR});
+  }
 
   let at=await gAT(env,drv.encToken);
   let gResp=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?fields=id,name,mimeType,thumbnailLink,hasThumbnail&supportsAllDrives=true`,{
@@ -1119,6 +1173,9 @@ async function hMF(req,env){
   if(!name||!name.trim()) return J({error:'Folder name required'},400);
   const drv=(db&&db.drives||[]).find(d=>d.id===driveId);
   if(!drv) return J({error:'Drive not found'},404);
+  if(!ses && drv.passwordHash && !await vDriveToken(req, env, driveId)){
+    return J({error:'Drive is locked by password'},403);
+  }
   const at=await gAT(env,drv.encToken);
   let gPid=drv.rootFolderId;
   let parentAdminOnly = false;
@@ -1179,7 +1236,7 @@ async function hLockFolder(req,env,folderId){
   const isOpenTarget=(db.openDriveId&&folder.driveId===db.openDriveId);
   const ses=await vSes(req,env,null);
   if(!ses&&!isOpenTarget) return J({error:'Unauthorized'},401);
-  const{password}=await req.json().catch(()=>({}));
+  const{password,hint}=await req.json().catch(()=>({}));
   if(!password||!password.trim()) return J({error:'Password required'},400);
 
   let userName='Guest';
@@ -1195,6 +1252,7 @@ async function hLockFolder(req,env,folderId){
 
   folder.isLocked=true;
   folder.passwordHash=await sha256(password.trim());
+  folder.passwordHint=hint ? String(hint).trim().slice(0, 100) : null;
   folder.encPassword=await enc(password.trim(),gEK(env));
   folder.lockedBy=userName;
   folder.lockedRole=role;
@@ -1284,6 +1342,7 @@ async function hRemoveFolderLock(req,env,folderId){
 
   folder.isLocked=false;
   folder.passwordHash=null;
+  folder.passwordHint=null;
   folder.encPassword=null;
   folder.lockedBy=null;
   folder.lockedRole=null;
@@ -1319,6 +1378,7 @@ async function hGetAdminLockedFolders(req,env){
       lockedBy:f.lockedBy||'Unknown',
       lockedRole:f.lockedRole||(f.lockedBy==='Guest'?'guest':'user'),
       lockedAt:f.lockedAt||null,
+      passwordHint:f.passwordHint||null,
       plainPassword:plainPassword
     });
   }
@@ -1347,6 +1407,7 @@ async function hGetDestroyedFolders(req,env){
       destroyedReason:f.destroyedReason||'Exceeded 5 failed password attempts',
       failedAttempts:f.failedAttempts||5,
       lockedBy:f.lockedBy||'Unknown',
+      passwordHint:f.passwordHint||null,
       plainPassword:plainPassword
     });
   }
@@ -1504,6 +1565,52 @@ async function hOpenDrive(req,env){
   return J({ok:true,openDriveId:db.openDriveId});
 }
 
+async function hSetDrivePassword(req,env){
+  if(!await vSes(req,env,'admin')) return J({error:'Unauthorized'},401);
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const body=await req.json().catch(()=>({}));
+  const {driveId, password, hint}=body;
+  if(!driveId) return J({error:'driveId required'},400);
+  const drv=(db.drives||[]).find(d=>d.id===driveId);
+  if(!drv) return J({error:'Drive not found'},404);
+
+  if(password && password.trim()){
+    drv.passwordHash = await sha256(password.trim());
+    drv.encPassword = await enc(password.trim(), gEK(env));
+    drv.passwordHint = hint ? String(hint).trim().slice(0, 100) : null;
+  } else {
+    drv.passwordHash = null;
+    drv.encPassword = null;
+    drv.passwordHint = null;
+  }
+
+  await uSet(env,'td:db',db);
+  return J({ok:true, hasPassword: !!drv.passwordHash, passwordHint: drv.passwordHint});
+}
+
+async function hUnlockDrive(req,env){
+  const db=await uGet(env,'td:db');
+  if(!db) return J({error:'DB error'},500);
+  const body=await req.json().catch(()=>({}));
+  const {driveId, password}=body;
+  if(!driveId) return J({error:'driveId required'},400);
+  const drv=(db.drives||[]).find(d=>d.id===driveId);
+  if(!drv) return J({error:'Drive not found'},404);
+  if(!drv.passwordHash) return J({ok:true, unlocked:true});
+
+  if(!password) return J({error:'Password required'},400);
+  const testHash = await sha256(password.trim());
+  if(testHash !== drv.passwordHash){
+    return J({error:'Incorrect drive password', ok:false}, 403);
+  }
+
+  // Generate 5-hour access token (18,000s)
+  const token = uid() + uid();
+  await uSet(env, 'td:dtk:' + token, driveId, 18000);
+  return J({ok:true, unlocked:true, token, expiresIn:18000});
+}
+
 async function hCP(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const{newPassword}=await req.json().catch(()=>({}));if(!newPassword||newPassword.length<4)return J({error:'Min 4 chars'},400);let db=await uGet(env,'td:db');if(!db)db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};db.adminHash=await sha256(newPassword);await uSet(env,'td:db',db);return J({ok:true});}
 async function hInit(req,env){const url=new URL(req.url),ex=await uGet(env,'td:db');if(ex&&ex.adminHash&&url.searchParams.get('reset')!=='yes')return J({error:'Already initialized. Add ?reset=yes to force.'},409);const{adminPassword='admin123'}=await req.json().catch(()=>({}));await uSet(env,'td:db',{v:3,adminHash:await sha256(adminPassword),drives:[],files:[],folders:[],activityLog:[],users:[]});return J({ok:true,message:`Password set: ${adminPassword}`});}
 
@@ -1551,6 +1658,8 @@ export async function onRequest({request,env}){
     if(p==='admin/policy'&&(m==='GET'||m==='POST'))return m==='GET'?hGetPolicy(request,env):hSetPolicy(request,env);
     if(p==='admin/change-password'&&m==='POST')return hCP(request,env);
     if(p==='admin/open-drive'&&m==='POST')return hOpenDrive(request,env);
+    if(p==='admin/drive-password'&&m==='POST')return hSetDrivePassword(request,env);
+    if(p==='drives/unlock-drive'&&m==='POST')return hUnlockDrive(request,env);
     if(p.startsWith('drives/rename/')&&m==='POST')return hRenameDrive(request,env,p.replace('drives/rename/',''));
     if(p==='admin/backup'&&m==='GET')return hBackupDB(request,env);
     if(p==='admin/restore'&&m==='POST')return hRestoreDB(request,env);
