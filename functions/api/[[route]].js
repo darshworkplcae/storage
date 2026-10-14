@@ -9,6 +9,7 @@ function gGC(e){return e.GOOGLE_CLIENT_ID||'';}
 function gGS(e){return e.GOOGLE_CLIENT_SECRET||'';}
 const COR={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST,DELETE,PUT,OPTIONS','Access-Control-Allow-Headers':'Content-Type,Authorization,Range','Access-Control-Expose-Headers':'Content-Range,Content-Length,Accept-Ranges'};
 function J(d,s){return new Response(JSON.stringify(d),{status:s||200,headers:{...COR,'Content-Type':'application/json'}});}
+let _memDBCache = null;
 function getKV(env){return env.TELEDRIVE_KV||env.KV||env.STORAGE||env.DB_KV||null;}
 async function uGet(env,key){
   const kv=getKV(env);
@@ -16,30 +17,43 @@ async function uGet(env,key){
     try{
       const raw=await kv.get(key,'text');
       if(raw!==null&&raw!==undefined){
-        try{return JSON.parse(raw);}catch(e){return raw;}
+        try{
+          const p = JSON.parse(raw);
+          if (key==='td:db') _memDBCache = p;
+          return p;
+        }catch(e){return raw;}
       }
     }catch(e){console.error('KV get error:',e);}
-    // If KV is bound, do not fail with Upstash suspension error
-    return null;
+    return (key==='td:db'&&_memDBCache) ? _memDBCache : null;
   }
   try{
     const r=await fetch(`${gUU(env)}/get/${encodeURIComponent(key)}`,{headers:{Authorization:`Bearer ${gUT(env)}`}});
     const d=await r.json().catch(()=>({}));
     if(d.error){
       if(String(d.error).includes('limit')||r.status===403){
+        if(key==='td:db'&&_memDBCache) return _memDBCache;
         throw new Error('ERR_DB_SUSPENDED: '+d.error);
       }
-      return null;
+      return (key==='td:db'&&_memDBCache) ? _memDBCache : null;
     }
-    if(d.result===null||d.result===undefined)return null;
-    if(typeof d.result!=='string')return d.result;
-    try{return JSON.parse(d.result);}catch(e){return d.result;}
+    if(d.result===null||d.result===undefined) return (key==='td:db'&&_memDBCache) ? _memDBCache : null;
+    if(typeof d.result!=='string'){
+      if(key==='td:db') _memDBCache = d.result;
+      return d.result;
+    }
+    try{
+      const p = JSON.parse(d.result);
+      if(key==='td:db') _memDBCache = p;
+      return p;
+    }catch(e){return d.result;}
   }catch(e){
+    if(key==='td:db'&&_memDBCache) return _memDBCache;
     if(String(e.message).includes('ERR_DB_SUSPENDED'))throw e;
     return null;
   }
 }
 async function uSet(env,key,val,ttl){
+  if(key==='td:db') _memDBCache = val;
   const kv=getKV(env);
   if(kv){
     try{
@@ -1322,10 +1336,14 @@ async function hUnlockFolder(req,env,folderId){
   const{password}=await req.json().catch(()=>({}));
   if(!password) return J({error:'Password required'},400);
 
+  const lockoutEnabled = !(db && db.policy && db.policy.folderLockoutEnabled === false);
   folder.failedAttempts = folder.failedAttempts || 0;
 
   const testHash=await sha256(password.trim());
   if(testHash!==folder.passwordHash){
+    if (!lockoutEnabled) {
+      return J({error:'Incorrect password. Please try again.', ok:false, lockoutDisabled:true}, 403);
+    }
     folder.failedAttempts += 1;
     const remaining = 5 - folder.failedAttempts;
 
@@ -1368,7 +1386,7 @@ async function hUnlockFolder(req,env,folderId){
   // Password correct: reset failed attempts back to 0 (5 attempts fresh)
   folder.failedAttempts = 0;
   await uSet(env,'td:db',db);
-  return J({ok:true, unlocked:true, remainingAttempts:5});
+  return J({ok:true, unlocked:true, remainingAttempts: lockoutEnabled ? 5 : null, lockoutDisabled: !lockoutEnabled});
 }
 
 async function hRemoveFolderLock(req,env,folderId){
@@ -1557,8 +1575,9 @@ async function hSetFolderVisibility(req,env){
 
 async function hGetPolicy(req,env){
   const db=await uGet(env,'td:db');
-  const policy=(db&&db.policy)||{allowUserDownload:true,allowUserDelete:true,allowUserRename:true};
+  const policy=(db&&db.policy)||{allowUserDownload:true,allowUserDelete:true,allowUserRename:true,folderLockoutEnabled:true};
   if(policy.allowUserRename === undefined) policy.allowUserRename = true;
+  if(policy.folderLockoutEnabled === undefined) policy.folderLockoutEnabled = true;
   return J({ok:true,policy});
 }
 
@@ -1570,7 +1589,8 @@ async function hSetPolicy(req,env){
   db.policy={
     allowUserDownload: body.allowUserDownload !== false,
     allowUserDelete: body.allowUserDelete !== false,
-    allowUserRename: body.allowUserRename !== false
+    allowUserRename: body.allowUserRename !== false,
+    folderLockoutEnabled: body.folderLockoutEnabled !== false
   };
   await uSet(env,'td:db',db);
   return J({ok:true,policy:db.policy});
@@ -1672,6 +1692,141 @@ async function hUnlockDrive(req,env){
   return J({ok:true, unlocked:true, token, expiresIn:18000});
 }
 
+async function hCopyFiles(req, env) {
+  const ses = await vSes(req, env, null);
+  if (!ses) return J({ error: 'Unauthorized' }, 401);
+  const body = await req.json().catch(() => ({}));
+  const { fileIds, targetFolderId, targetDriveId } = body;
+  if (!Array.isArray(fileIds) || fileIds.length === 0) {
+    return J({ error: 'No files specified to copy' }, 400);
+  }
+  const db = await uGet(env, 'td:db');
+  if (!db) return J({ error: 'Database not found' }, 500);
+
+  const destDriveId = targetDriveId || (targetFolderId ? (db.folders||[]).find(f=>f.id===targetFolderId)?.driveId : null) || (db.drives||[])[0]?.id;
+  const drv = (db.drives||[]).find(d => d.id === destDriveId);
+  if (!drv) return J({ error: 'Target drive not found' }, 404);
+
+  let targetParentGoogleId = drv.rootFolderId;
+  let isAdmOnly = false;
+  let targetAllowedUsers = undefined;
+  if (targetFolderId) {
+    const tf = (db.folders||[]).find(f => f.id === targetFolderId);
+    if (tf && tf.googleFolderId) targetParentGoogleId = tf.googleFolderId;
+    if (tf && tf.adminOnly) isAdmOnly = true;
+    if (tf && Array.isArray(tf.allowedUsers) && tf.allowedUsers.length) targetAllowedUsers = [...tf.allowedUsers];
+  }
+
+  let at;
+  try {
+    at = await gAT(env, drv.encToken);
+  } catch(e) {
+    at = await gAT(env, drv.encToken, true);
+  }
+
+  let copiedFiles = [];
+  for (const fId of fileIds) {
+    const f = (db.files||[]).find(x => x.id === fId || x.googleFileId === fId);
+    if (!f || !f.googleFileId) continue;
+
+    try {
+      let copyResp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.googleFileId)}/copy?supportsAllDrives=true`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${at}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: f.name,
+          parents: [targetParentGoogleId]
+        })
+      });
+
+      if (!copyResp.ok && copyResp.status === 401) {
+        at = await gAT(env, drv.encToken, true);
+        copyResp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.googleFileId)}/copy?supportsAllDrives=true`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${at}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: f.name, parents: [targetParentGoogleId] })
+        });
+      }
+
+      if (copyResp.ok) {
+        const data = await copyResp.json();
+        const newFile = {
+          id: uid(),
+          googleFileId: data.id,
+          driveId: destDriveId,
+          folderId: targetFolderId || null,
+          name: f.name,
+          size: f.size,
+          mimeType: f.mimeType || 'application/octet-stream',
+          uploadedBy: ses || 'admin',
+          date: new Date().toISOString(),
+          adminOnly: isAdmOnly
+        };
+        if (targetAllowedUsers) newFile.allowedUsers = targetAllowedUsers;
+        if (!db.files) db.files = [];
+        db.files.push(newFile);
+        copiedFiles.push(newFile);
+      }
+    } catch(e) {
+      console.error('File copy error:', e);
+    }
+  }
+
+  if (copiedFiles.length > 0) {
+    if (!db.activityLog) db.activityLog = [];
+    db.activityLog.unshift({
+      id: uid(),
+      type: 'copy',
+      name: `${copiedFiles.length} file(s) copied`,
+      driveId: destDriveId,
+      ts: new Date().toISOString()
+    });
+    if (db.activityLog.length > 500) db.activityLog = db.activityLog.slice(0, 500);
+    await uSet(env, 'td:db', db);
+  }
+
+  return J({ ok: true, copiedCount: copiedFiles.length, files: copiedFiles });
+}
+
+async function hUBC(req, env) {
+  const body = await req.json().catch(() => ({}));
+  const { files } = body;
+  if (!Array.isArray(files) || !files.length) return J({ ok: true });
+  const db = await uGet(env, 'td:db');
+  if (!db) return J({ error: 'DB error' }, 500);
+  const ses = await vSes(req, env, null);
+  if (!db.files) db.files = [];
+
+  const added = [];
+  for (const item of files) {
+    const { fileLocalId, googleFileId, driveId, folderId, name, size, mimeType } = item;
+    const parentFolder = folderId ? (db.folders||[]).find(x => x.id === folderId) : null;
+    const isAdmOnly = parentFolder ? !!parentFolder.adminOnly : false;
+    const fAllowedUsers = (parentFolder && Array.isArray(parentFolder.allowedUsers) && parentFolder.allowedUsers.length) ? [...parentFolder.allowedUsers] : undefined;
+    const newFile = {
+      id: fileLocalId,
+      googleFileId,
+      driveId,
+      folderId: folderId || null,
+      name,
+      size,
+      mimeType: mimeType || 'application/octet-stream',
+      uploadedBy: ses || 'guest',
+      date: new Date().toISOString(),
+      adminOnly: isAdmOnly
+    };
+    if (fAllowedUsers) newFile.allowedUsers = fAllowedUsers;
+    db.files.push(newFile);
+    added.push(newFile);
+  }
+
+  await uSet(env, 'td:db', db);
+  return J({ ok: true, addedCount: added.length });
+}
+
 async function hCP(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const{newPassword}=await req.json().catch(()=>({}));if(!newPassword||newPassword.length<4)return J({error:'Min 4 chars'},400);let db=await uGet(env,'td:db');if(!db)db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};db.adminHash=await sha256(newPassword);await uSet(env,'td:db',db);return J({ok:true});}
 async function hInit(req,env){const url=new URL(req.url),ex=await uGet(env,'td:db');if(ex&&ex.adminHash&&url.searchParams.get('reset')!=='yes')return J({error:'Already initialized. Add ?reset=yes to force.'},409);const{adminPassword='admin123'}=await req.json().catch(()=>({}));await uSet(env,'td:db',{v:3,adminHash:await sha256(adminPassword),drives:[],files:[],folders:[],activityLog:[],users:[]});return J({ok:true,message:`Password set: ${adminPassword}`});}
 
@@ -1691,9 +1846,11 @@ export async function onRequest({request,env}){
     if(p==='upload/init'&&m==='POST')return hUI(request,env);
     if(p==='upload/chunk'&&m==='PUT')return hUChunk(request,env);
     if(p==='upload/complete'&&m==='POST')return hUC(request,env);
+    if(p==='upload/batch-complete'&&m==='POST')return hUBC(request,env);
     if(p.startsWith('download/')&&(m==='GET'||m==='HEAD'))return hDL(request,env,p.replace('download/',''));
     if(p.startsWith('thumb/')&&(m==='GET'||m==='HEAD'))return hThumb(request,env,p.replace('thumb/',''));
     if(p.startsWith('files/rename/')&&m==='POST')return hRenameFile(request,env,p.replace('files/rename/',''));
+    if(p==='files/copy'&&m==='POST')return hCopyFiles(request,env);
     if(p==='files/batch-trash'&&m==='POST')return hBatchTrash(request,env);
     if(p==='files/trash/empty'&&(m==='POST'||m==='DELETE'))return hEmptyTrash(request,env);
     if(p==='files/trash/batch-request-restore'&&m==='POST')return hBatchRequestRestore(request,env);

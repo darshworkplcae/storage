@@ -761,6 +761,7 @@ function fileCard(f){
     <div class="fg-acts">
       <button class="icon-btn xs star-btn ${f.starred?'starred':''}" data-star-id="${esc(f.id)}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ffcc00':''}"></i></button>
       ${canRename ? `<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameFile('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Rename File"><i class="fas fa-pen"></i></button>` : ''}
+      <button class="icon-btn xs" onclick="event.stopPropagation();showCopyDialog(['${esc(f.id)}'])" title="Copy to Folder"><i class="fas fa-copy"></i></button>
       ${isMedia ? `<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')" title="Preview Media"><i class="fas fa-eye"></i></button>` :
         isPdf ? `<button class="icon-btn xs" onclick="event.stopPropagation();openPdfViewer('${esc(f.id)}')" title="View PDF"><i class="fas fa-eye"></i></button>` :
         isDoc ? `<button class="icon-btn xs" onclick="event.stopPropagation();openDocViewer('${esc(f.id)}')" title="View Document"><i class="fas fa-eye"></i></button>` :
@@ -830,6 +831,7 @@ function fileRow(f){
     <span style="display:flex;gap:.2rem">
       <button class="icon-btn xs star-btn ${f.starred?'starred':''}" data-star-id="${esc(f.id)}" onclick="event.stopPropagation();toggleStar('${esc(f.id)}')" title="${f.starred?'Unstar':'Star'}"><i class="fas fa-star" style="${f.starred?'color:#ffcc00':''}"></i></button>
       ${canRename ? `<button class="icon-btn xs" onclick="event.stopPropagation();promptRenameFile('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Rename File"><i class="fas fa-pen"></i></button>` : ''}
+      <button class="icon-btn xs" onclick="event.stopPropagation();showCopyDialog(['${esc(f.id)}'])" title="Copy to Folder"><i class="fas fa-copy"></i></button>
       ${isMedia ? `<button class="icon-btn xs" onclick="event.stopPropagation();openMedia('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
         isPdf ? `<button class="icon-btn xs" onclick="event.stopPropagation();openPdfViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :
         isDoc ? `<button class="icon-btn xs" onclick="event.stopPropagation();openDocViewer('${esc(f.id)}')"><i class="fas fa-eye"></i></button>` :

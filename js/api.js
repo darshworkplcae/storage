@@ -135,7 +135,11 @@ function apiDeleteFolder(id)      { return apiFetch('folders/'+id,      { method
 function apiCreateUser(u, p, d)   { return apiFetch('admin/users',      { method:'POST', body:JSON.stringify({username:u,password:p,allowedDrives:d}) }); }
 function apiDeleteUser(id)        { return apiFetch('admin/users/'+id,  { method:'DELETE' }); }
 function apiChangeAdminPass(p)    { return apiFetch('admin/change-password', { method:'POST', body:JSON.stringify({newPassword:p}) }); }
-function apiUploadComplete(body)  { return apiFetch('upload/complete',  { method:'POST', body:JSON.stringify(body) }); }
+function apiUploadComplete(body)      { return apiFetch('upload/complete',  { method:'POST', body:JSON.stringify(body) }); }
+function apiBatchUploadComplete(files){ return apiFetch('upload/batch-complete', { method:'POST', body:JSON.stringify({ files: files }) }); }
+function apiCopyFiles(fileIds, targetFolderId, targetDriveId) {
+  return apiFetch('files/copy', { method:'POST', body: JSON.stringify({ fileIds: fileIds, targetFolderId: targetFolderId || null, targetDriveId: targetDriveId || null }) });
+}
 
 async function apiConnectDrive() {
   var r = await apiFetch('auth/google');

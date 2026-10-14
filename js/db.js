@@ -109,6 +109,32 @@ function tmSyncWithServer(dbFiles) {
   } catch(e) {}
 }
 
+function cacheDBLocally(db) {
+  if (!db || typeof db !== 'object') return;
+  try {
+    localStorage.setItem('td_cached_db', JSON.stringify({
+      v: db.v,
+      openDriveId: db.openDriveId,
+      openDriveIds: db.openDriveIds,
+      policy: db.policy,
+      drives: db.drives,
+      folders: db.folders,
+      files: (db.files || []).slice(0, 15000),
+      time: Date.now()
+    }));
+  } catch(e) {}
+}
+
+function getCachedLocalDB() {
+  try {
+    var raw = localStorage.getItem('td_cached_db');
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch(e) {
+    return null;
+  }
+}
+
 function tmAdd(id, name, size) {
   var l = tmLoad();
   var existing = l.find(function(x){ return x.id === id || (x.name === name && x.size === size); });

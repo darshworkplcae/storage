@@ -105,6 +105,13 @@ function renderSettingsPage() {
         '</div>',
         '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyAllowRename" '+(db.policy&&db.policy.allowUserRename===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
       '</div>',
+      '<div class="policy-card" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:1.1rem;display:flex;align-items:center;justify-content:space-between">',
+        '<div>',
+          '<div style="font-weight:600;font-size:.9rem;color:var(--text1);display:flex;align-items:center;gap:8px"><i class="fas fa-shield-halved" style="color:#ffd700"></i> Folder 5-Attempt Lockout & Self-Destruct</div>',
+          '<div style="font-size:.78rem;color:var(--text3);margin-top:3px">When enabled, folders self-destruct after 5 wrong password attempts. Turn OFF to keep folder password protection without any attempt limit.</div>',
+        '</div>',
+        '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyFolderLockout" '+(db.policy&&db.policy.folderLockoutEnabled===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
+      '</div>',
     '</div>',
     '</div>',
 
@@ -501,16 +508,19 @@ async function updateAdminPolicy() {
   var dlCh = $('policyAllowDownload');
   var delCh = $('policyAllowDelete');
   var renCh = $('policyAllowRename');
+  var lockCh = $('policyFolderLockout');
   var policy = {
     allowUserDownload: dlCh ? dlCh.checked : true,
     allowUserDelete: delCh ? delCh.checked : true,
-    allowUserRename: renCh ? renCh.checked : true
+    allowUserRename: renCh ? renCh.checked : true,
+    folderLockoutEnabled: lockCh ? lockCh.checked : true
   };
   toast('Updating permissions policy…', 'info');
   var res = await apiSetPolicy(policy);
   if (res && res.ok) {
     if (!S.db) S.db = {};
     S.db.policy = res.policy;
+    if (typeof cacheDBLocally === 'function') cacheDBLocally(S.db);
     toast('Permissions policy updated successfully!', 'success');
   } else {
     toast(res ? (res.error || 'Failed to update policy') : 'Network error', 'error');

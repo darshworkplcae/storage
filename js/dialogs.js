@@ -355,8 +355,65 @@ async function processFolderFiles(files) {
     });
   }
 
-  // Build directory tree in Google Drive
+  // ─── Phase 1: Pre-create ALL folder structures upfront in seconds ───
   var folderMap = {}; // relative path -> folderId
+  var uniquePaths = new Set();
+
+  files.forEach(function (f) {
+    var relPath = f.webkitRelativePath || f.name;
+    var parts = relPath.split('/');
+    if (parts.length > 1) {
+      var pathAcc = '';
+      for (var p = 0; p < parts.length - 1; p++) {
+        pathAcc += (pathAcc ? '/' : '') + parts[p];
+        uniquePaths.add(pathAcc);
+      }
+    }
+  });
+
+  // Sort paths by depth (shallowest first, e.g. "tera", then "tera/Act Class")
+  var sortedPaths = Array.from(uniquePaths).sort(function (a, b) {
+    return a.split('/').length - b.split('/').length;
+  });
+
+  if (sortedPaths.length > 0) {
+    var upStatus = $('upStatus');
+    if (upStatus) upStatus.textContent = 'Pre-creating ' + sortedPaths.length + ' folder(s) on Google Drive…';
+    for (var sp = 0; sp < sortedPaths.length; sp++) {
+      if (_cancelSignal && _cancelSignal.cancelled) break;
+      var currentPath = sortedPaths[sp];
+      var pParts = currentPath.split('/');
+      var parentAcc = pParts.slice(0, -1).join('/');
+      var fName = pParts[pParts.length - 1];
+      var curParentId = parentAcc ? folderMap[parentAcc] : (_folderId || null);
+
+      var existing = (S.db && S.db.folders || []).find(function (f) {
+        return f.driveId === _driveId && f.parentId === curParentId && f.name.toLowerCase() === fName.toLowerCase() && !f.trashed;
+      });
+
+      if (existing) {
+        folderMap[currentPath] = existing.id;
+      } else {
+        try {
+          var created = await apiCreateFolder({ driveId: _driveId, parentFolderId: curParentId, name: fName });
+          if (created && created.folderId) {
+            folderMap[currentPath] = created.folderId;
+            if (!S.db.folders) S.db.folders = [];
+            S.db.folders.push({ id: created.folderId, driveId: _driveId, parentId: curParentId, name: fName });
+          }
+        } catch (e) {
+          console.warn('Folder pre-creation error:', fName, e);
+        }
+      }
+    }
+
+    // Instantly refresh files grid so ALL folders appear immediately in the UI!
+    if (typeof cacheDBLocally === 'function' && S.db) cacheDBLocally(S.db);
+    renderSidebarStorage();
+    renderFilesPage(_driveId, _folderId);
+  }
+
+  // ─── Phase 2: Upload files into pre-created folders ───
   var skippedCount = 0;
   var uploadedCount = 0;
   var skippedIds = [];
@@ -372,37 +429,8 @@ async function processFolderFiles(files) {
       var file = item.file;
       var relPath = file.webkitRelativePath || file.name;
       var parts = relPath.split('/');
-      var parentId = _folderId || null;
-
-      // If file is inside subfolders, create/find them
-      if (parts.length > 1) {
-        var pathAcc = '';
-        for (var p = 0; p < parts.length - 1; p++) {
-          var folderName = parts[p];
-          pathAcc += (pathAcc ? '/' : '') + folderName;
-          if (!folderMap[pathAcc]) {
-            // Find existing or create new folder
-            var currentParentId = parentId;
-            var existingFolder = (S.db && S.db.folders || []).find(function (f) {
-              return f.driveId === _driveId && f.parentId === currentParentId && f.name.toLowerCase() === folderName.toLowerCase() && !f.trashed;
-            });
-            if (existingFolder) {
-              folderMap[pathAcc] = existingFolder.id;
-              parentId = existingFolder.id;
-            } else {
-              var created = await apiCreateFolder({ driveId: _driveId, parentFolderId: currentParentId, name: folderName });
-              if (created && created.folderId) {
-                folderMap[pathAcc] = created.folderId;
-                if (!S.db.folders) S.db.folders = [];
-                S.db.folders.push({ id: created.folderId, driveId: _driveId, parentId: currentParentId, name: folderName });
-                parentId = created.folderId;
-              }
-            }
-          } else {
-            parentId = folderMap[pathAcc];
-          }
-        }
-      }
+      var parentAcc = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+      var parentId = (parentAcc && folderMap[parentAcc]) ? folderMap[parentAcc] : (_folderId || null);
 
       // Smart Resume & Deduplication in O(1) time
       var isAlreadyUploaded = existingFileSet.has((parentId || '') + '::' + file.name + '::' + file.size);
@@ -2803,4 +2831,129 @@ function showCloudflareKVGuideModal() {
     </div>
   `;
   document.body.appendChild(ov);
+}
+
+// ─── File Copy Modal (Single or Multi-select) ─────────────────────────────
+async function showCopyDialog(fileIds) {
+  if (!fileIds || !fileIds.length) {
+    toast('No files selected to copy', 'warning');
+    return;
+  }
+  var isAuth = S.ses && S.ses.token;
+  if (!isAuth) {
+    showSignInModal();
+    toast('Sign in required to copy files', 'warning');
+    return;
+  }
+
+  var db = S.db || {};
+  var drives = db.drives || [];
+  if (!drives.length) {
+    toast('No connected drives found', 'warning');
+    return;
+  }
+
+  var activeDrive = drives.find(function(d){ return d.id === _driveId; }) || drives[0];
+  var selectedDriveId = activeDrive.id;
+  var selectedTargetFolderId = null;
+
+  var filesToCopy = (db.files || []).filter(function(f){ return fileIds.includes(f.id); });
+  var count = filesToCopy.length || fileIds.length;
+
+  var ov = document.createElement('div');
+  ov.className = 'modal-backdrop';
+  ov.id = 'copyFileModalBackdrop';
+
+  function renderFolderSelector() {
+    var folders = (db.folders || []).filter(function(f){ return f.driveId === selectedDriveId && !f.trashed && !f.destroyed; });
+
+    var html = '<div class="copy-folder-item ' + (selectedTargetFolderId === null ? 'selected' : '') + '" data-fid="root" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;border-radius:6px;margin:2px 4px">' +
+      '<i class="fas fa-hard-drive" style="color:var(--primary);margin-right:8px"></i> <strong>Drive Root</strong>' +
+    '</div>';
+
+    function buildTree(parentId, depth) {
+      var children = folders.filter(function(f){ return (f.parentId || null) === parentId; });
+      children.forEach(function(f) {
+        var indent = depth * 14;
+        var isSel = selectedTargetFolderId === f.id;
+        html += '<div class="copy-folder-item ' + (isSel ? 'selected' : '') + '" data-fid="' + f.id + '" style="padding:7px 12px 7px ' + (12 + indent) + 'px;cursor:pointer;display:flex;align-items:center;border-radius:6px;margin:2px 4px">' +
+          '<i class="fas fa-folder" style="color:#ffcc00;margin-right:8px"></i> ' + esc(f.name) +
+        '</div>';
+        buildTree(f.id, depth + 1);
+      });
+    }
+    buildTree(null, 1);
+    return html;
+  }
+
+  ov.innerHTML = `
+    <div class="modal" style="max-width:460px;text-align:left">
+      <div class="modal-hd">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="vault-shield-badge" style="background:rgba(78,134,245,0.18);color:#4e86f5;width:38px;height:38px;font-size:1.1rem;margin:0">
+            <i class="fas fa-copy"></i>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:1.05rem">Copy ${count} Item${count > 1 ? 's' : ''}</h3>
+            <p style="margin:0;font-size:.78rem;color:var(--text3)">Duplicate to another folder on Google Drive</p>
+          </div>
+        </div>
+        <button class="icon-btn xs" onclick="this.closest('.modal-backdrop').remove()"><i class="fas fa-times"></i></button>
+      </div>
+
+      <div style="margin:1rem 0 .5rem">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.4rem;display:block">Select Destination Folder:</label>
+        <div id="copyFolderTreeList" style="max-height:220px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:rgba(255,255,255,0.02);padding:6px 0">
+          ${renderFolderSelector()}
+        </div>
+      </div>
+
+      <div class="modal-ft" style="display:flex;justify-content:flex-end;gap:8px;margin-top:1.2rem">
+        <button class="btn-ghost sm" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
+        <button class="btn-primary sm" id="confirmCopyBtn"><i class="fas fa-copy"></i> Copy Here</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(ov);
+
+  var listEl = ov.querySelector('#copyFolderTreeList');
+  listEl.addEventListener('click', function(e) {
+    var item = e.target.closest('.copy-folder-item');
+    if (!item) return;
+    listEl.querySelectorAll('.copy-folder-item').forEach(function(el){ el.classList.remove('selected'); });
+    item.classList.add('selected');
+    var fid = item.getAttribute('data-fid');
+    selectedTargetFolderId = (fid === 'root') ? null : fid;
+  });
+
+  var btn = ov.querySelector('#confirmCopyBtn');
+  btn.onclick = async function() {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Copying…';
+    try {
+      var r = await apiCopyFiles(fileIds, selectedTargetFolderId, selectedDriveId);
+      if (r && r.ok) {
+        toast('Successfully copied ' + (r.copiedCount || count) + ' file(s)!', 'success');
+        ov.remove();
+        if (typeof clearFileSelection === 'function') clearFileSelection();
+        try {
+          S.db = await apiFetchDB();
+          if (S.db && S.db.files) {
+            if (typeof cacheDBLocally === 'function') cacheDBLocally(S.db);
+            tmSyncWithServer(S.db.files);
+          }
+        } catch(e){}
+        renderSidebarStorage();
+        renderFilesPage(_driveId, _folderId);
+      } else {
+        toast('Copy failed: ' + (r ? (r.error || 'Server error') : 'Network error'), 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-copy"></i> Copy Here';
+      }
+    } catch(err) {
+      toast('Error copying files: ' + (err.message || err), 'error');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-copy"></i> Copy Here';
+    }
+  };
 }

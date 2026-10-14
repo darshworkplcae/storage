@@ -341,6 +341,7 @@ async function init() {
       var db = await apiFetchDB().catch(function(){return null;});
       if(db && !db.error) {
         S.db = db;
+        if (typeof cacheDBLocally === 'function') cacheDBLocally(db);
         if (S.db && S.db.files) tmSyncWithServer(S.db.files);
         updateSidebarProfile();
         updateNavVisibility();
@@ -351,6 +352,19 @@ async function init() {
         renderTM();
         handleInitialHash();
         return;
+      } else {
+        var localCached = (typeof getCachedLocalDB === 'function') ? getCachedLocalDB() : null;
+        if (localCached) {
+          S.db = localCached;
+          updateSidebarProfile();
+          updateNavVisibility();
+          renderSidebarStorage();
+          showAppShell();
+          wireEvents();
+          renderTM();
+          handleInitialHash();
+          return;
+        }
       }
     } else {
       // Session expired or invalid on current database backend
@@ -360,6 +374,12 @@ async function init() {
 
   // Not logged in: show Open Drive view (friends photo/video drive) with Sign In button on top!
   S.db = await apiFetchDB().catch(function(){return null;});
+  if (!S.db || S.db.error) {
+    var localCached = (typeof getCachedLocalDB === 'function') ? getCachedLocalDB() : null;
+    if (localCached) S.db = localCached;
+  } else if (S.db && typeof cacheDBLocally === 'function') {
+    cacheDBLocally(S.db);
+  }
   if(S.db && S.db.files) tmSyncWithServer(S.db.files);
   showAppShell();
   updateSidebarProfile();
