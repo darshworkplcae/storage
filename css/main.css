@@ -1855,6 +1855,109 @@ body.has-active-upload .mobile-fab-wrap {
   gap: 0.45rem;
   justify-content: flex-end;
 }
+
+/* Transfers Summary Chips */
+.tm-summary-chips {
+  display: flex;
+  gap: 6px;
+  padding: 0.45rem 0.9rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.tm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
+}
+.tm-chip.done {
+  background: rgba(48, 209, 88, 0.12);
+  color: #30d158;
+  border: 1px solid rgba(48, 209, 88, 0.25);
+}
+.tm-chip.failed {
+  background: rgba(255, 69, 58, 0.15);
+  color: #ff453a;
+  border: 1px solid rgba(255, 69, 58, 0.35);
+}
+.tm-chip.active {
+  background: rgba(0, 229, 255, 0.12);
+  color: #00e5ff;
+  border: 1px solid rgba(0, 229, 255, 0.25);
+}
+
+/* Failed Transfers Banner Box */
+.tm-failed-box {
+  background: linear-gradient(135deg, rgba(255, 69, 58, 0.15), rgba(255, 159, 10, 0.08));
+  border: 1px solid rgba(255, 69, 58, 0.38);
+  border-radius: 12px;
+  padding: 0.75rem 0.9rem;
+  margin: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  box-shadow: 0 4px 18px rgba(255, 69, 58, 0.14);
+  animation: modalPopIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.tm-failed-info {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.tm-failed-icon {
+  font-size: 1.35rem;
+  color: #ff453a;
+  flex-shrink: 0;
+}
+.tm-failed-title {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tm-failed-desc {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+.tm-failed-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  align-items: center;
+}
+.tm-item-failed {
+  background: rgba(255, 69, 58, 0.05);
+}
+.tm-item-failed:hover {
+  background: rgba(255, 69, 58, 0.09) !important;
+}
+.tm-retry-btn {
+  color: #4e86f5 !important;
+  background: rgba(78, 134, 245, 0.15) !important;
+  border: 1px solid rgba(78, 134, 245, 0.35) !important;
+  transition: all 0.2s ease !important;
+}
+.tm-retry-btn:hover {
+  background: #4e86f5 !important;
+  color: #ffffff !important;
+  transform: rotate(45deg) scale(1.1);
+  box-shadow: 0 0 12px rgba(78, 134, 245, 0.5);
+}
+.tm-badge.has-failed {
+  background: #ff453a !important;
+  color: #fff !important;
+  box-shadow: 0 0 10px rgba(255, 69, 58, 0.6) !important;
+}
+
 .tm-sheet-handle {
   display: none;
   width: 40px;

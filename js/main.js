@@ -262,8 +262,8 @@ function wireEvents() {
       }
     });
   }
-  var tmClear=$('tmClear');
-  if(tmClear) tmClear.onclick=function(){tmSave([]);renderTM();};
+  var tmClearBtn=$('tmClear');
+  if(tmClearBtn) tmClearBtn.onclick=function(){ if(typeof tmClear==='function') tmClear(); else { tmSave([]); renderTM(); } };
   // Close mobile FAB when tapping elsewhere
   document.addEventListener('click',function(e){
     var fabWrap=$('mobileFabWrap');

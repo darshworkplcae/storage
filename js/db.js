@@ -173,23 +173,57 @@ function tmUpdate(id, pct, speed, uploaded) {
   tmScheduleRender();
 }
 
-function tmDone(id, ok) {
+function tmDone(id, ok, errorMsg) {
   ok = (ok!==false);
   var l = tmLoad(), item = l.find(function(x){return x.id===id;});
   if(item){
     item.status=ok?'done':'failed';
     item.pct=ok?100:item.pct;
-    if(ok) item.uploaded = item.size;
+    if(ok) {
+      item.uploaded = item.size;
+      delete item.error;
+    } else if (errorMsg) {
+      item.error = String(errorMsg);
+    }
     item.speed=0;
   }
   tmSave(l, true);
   if (typeof renderTM === 'function') renderTM();
 }
 
+function tmDismissSingle(id) {
+  var l = tmLoad();
+  var remaining = l.filter(function(x){ return x.id !== id; });
+  tmSave(remaining, true);
+  if (typeof renderTM === 'function') renderTM();
+}
+
+function tmClearFailed() {
+  var l = tmLoad();
+  var remaining = l.filter(function(x){ return x.status !== 'failed'; });
+  tmSave(remaining, true);
+  if (typeof renderTM === 'function') renderTM();
+}
+
+function tmClearDone() {
+  var l = tmLoad();
+  var remaining = l.filter(function(x){ return x.status !== 'done'; });
+  tmSave(remaining, true);
+  if (typeof renderTM === 'function') renderTM();
+}
+
 function tmClear() {
   var l = tmLoad();
-  var remaining = l.filter(function(x){ return x.status === 'uploading'; });
-  tmSave(remaining, true);
+  var hasDone = l.some(function(x){ return x.status === 'done'; });
+  var hasFailed = l.some(function(x){ return x.status === 'failed'; });
+  if (hasDone && hasFailed) {
+    var remaining = l.filter(function(x){ return x.status !== 'done'; });
+    tmSave(remaining, true);
+    if (typeof toast === 'function') toast('Cleared completed transfers (failed items kept for retry)', 'info');
+  } else {
+    var remaining = l.filter(function(x){ return x.status === 'uploading'; });
+    tmSave(remaining, true);
+  }
   if (typeof renderTM === 'function') renderTM();
 }
 

@@ -1055,11 +1055,30 @@ function renderTM(){
 
   const active=transfers.filter(t=>t.status==='uploading'||t.status==='queued');
   const uploading=transfers.filter(t=>t.status==='uploading');
+  const failed=transfers.filter(t=>t.status==='failed');
+  const interrupted=transfers.filter(t=>t.status==='interrupted');
+  const done=transfers.filter(t=>t.status==='done');
   const totalSpeed=uploading.reduce((sum, t) => sum + (t.speed || 0), 0);
 
   if(badge){
-    badge.textContent=active.length||'';
-    badge.classList.toggle('show', active.length>0);
+    if (active.length > 0) {
+      badge.textContent = active.length;
+      badge.classList.add('show');
+      badge.classList.remove('has-failed');
+    } else if (failed.length > 0) {
+      badge.textContent = failed.length;
+      badge.classList.add('show', 'has-failed');
+    } else {
+      badge.textContent = '';
+      badge.classList.remove('show', 'has-failed');
+    }
+  }
+
+  // Header retry button
+  const retryAllHdr = $('tmRetryAllHdr');
+  if (retryAllHdr) {
+    retryAllHdr.classList.toggle('hidden', failed.length === 0);
+    retryAllHdr.innerHTML = `<i class="fas fa-rotate-right"></i> Retry (${failed.length})`;
   }
 
   // Update live speed in topbar network meter
@@ -1073,6 +1092,9 @@ function renderTM(){
     } else if(active.length > 0){
       speedEl.textContent = `${active.length} queued`;
       speedEl.classList.remove('active');
+    } else if(failed.length > 0){
+      speedEl.textContent = `${failed.length} failed`;
+      speedEl.classList.remove('active');
     } else {
       speedEl.textContent = '';
       speedEl.classList.remove('active');
@@ -1082,6 +1104,7 @@ function renderTM(){
   if(hdSpeed){
     if(totalSpeed > 0) hdSpeed.textContent = `(${fmtSpeed(totalSpeed)})`;
     else if(uploading.length > 0) hdSpeed.textContent = `(${uploading.length} active)`;
+    else if(failed.length > 0) hdSpeed.textContent = `(${failed.length} failed)`;
     else hdSpeed.textContent = '';
   }
 
@@ -1091,7 +1114,32 @@ function renderTM(){
     return;
   }
 
-  const interrupted = transfers.filter(t => t.status === 'interrupted');
+  let summaryChips = '';
+  if (transfers.length > 0) {
+    summaryChips = `<div class="tm-summary-chips">
+      ${done.length ? `<span class="tm-chip done"><i class="fas fa-check"></i> ${done.length} Done</span>` : ''}
+      ${failed.length ? `<span class="tm-chip failed"><i class="fas fa-circle-exclamation"></i> ${failed.length} Failed</span>` : ''}
+      ${active.length ? `<span class="tm-chip active"><i class="fas fa-spinner fa-spin"></i> ${active.length} Active</span>` : ''}
+    </div>`;
+  }
+
+  let failedBanner = '';
+  if (failed.length > 0) {
+    failedBanner = `<div class="tm-failed-box">
+      <div class="tm-failed-info">
+        <i class="fas fa-circle-exclamation tm-failed-icon"></i>
+        <div style="min-width:0;flex:1">
+          <div class="tm-failed-title">${failed.length} upload${failed.length > 1 ? 's' : ''} failed</div>
+          <div class="tm-failed-desc">Connection or rate limit hiccup · Click Retry below</div>
+        </div>
+      </div>
+      <div class="tm-failed-actions">
+        <button class="btn-primary xs" onclick="retryAllFailedUploads()" title="Retry all failed uploads"><i class="fas fa-rotate-right"></i> Retry All (${failed.length})</button>
+        <button class="btn-ghost xs" onclick="tmClearFailed()" title="Dismiss failed items">Dismiss</button>
+      </div>
+    </div>`;
+  }
+
   let resumeBanner = '';
   if (interrupted.length > 0) {
     resumeBanner = `<div class="tm-resume-box">
@@ -1109,7 +1157,7 @@ function renderTM(){
     </div>`;
   }
 
-  list.innerHTML = resumeBanner + transfers.map(t=>{
+  list.innerHTML = summaryChips + failedBanner + resumeBanner + transfers.map(t=>{
     const isPaused = t.status === 'uploading' && (typeof _cancelSignal !== 'undefined' && _cancelSignal && _cancelSignal.paused);
     const isInterrupted = t.status === 'interrupted';
     const isQueued = t.status === 'queued';
@@ -1124,21 +1172,26 @@ function renderTM(){
     const uMB=(t.uploaded/1048576||0).toFixed(1), tMB=(t.size/1048576||0).toFixed(1), spd=t.speed?` · ${fmtSpeed(t.speed)}`:'';
     const sub = isQueued ? `Queued · ${fmt(t.size||0)}` :
                 isInterrupted ? `Interrupted (Browser closed)` :
-                isFailed ? `Failed` :
+                isFailed ? (`Failed${t.error ? ' · ' + esc(t.error) : ' · Click to retry'}`) :
                 isDone ? `Done · ${fmt(t.size||0)}` :
                 (isPaused ? `Paused · ${uMB}/${tMB} MB` : `${uMB}/${tMB} MB${spd}${etaStr}`);
 
-    return `<div class="tm-item">
+    return `<div class="tm-item ${isFailed ? 'tm-item-failed' : ''}">
       <div class="tm-ico" style="color:${col}"><i class="fas ${ico}"></i></div>
       <div class="tm-info">
         <div class="tm-name" title="${esc(t.name)}">${esc(t.name)}</div>
-        <div class="tm-sub">${sub}</div>
+        <div class="tm-sub" title="${isFailed && t.error ? esc(t.error) : ''}">${sub}</div>
         ${t.status==='uploading' ? `<div class="tm-bar"><div class="tm-fill" style="width:${t.pct||0}%"></div></div>` : ''}
       </div>
       ${t.status==='uploading' ? `
         <div style="display:flex;gap:4px">
           <button class="icon-btn xs" onclick="toggleUploadPause()" title="Pause / Resume"><i class="fas ${isPaused?'fa-play':'fa-pause'}"></i></button>
           <button class="icon-btn xs danger" onclick="_cancelSignal.cancelled=true;if(_cancelSignal.xhr)_cancelSignal.xhr.abort();if(_cancelSignal.resumeResolve)_cancelSignal.resumeResolve();S.cancelUpload=true;" title="Cancel"><i class="fas fa-times"></i></button>
+        </div>
+      ` : isFailed ? `
+        <div style="display:flex;gap:5px;align-items:center">
+          <button class="icon-btn xs tm-retry-btn" onclick="retrySingleUpload('${esc(t.id)}')" title="Retry upload"><i class="fas fa-rotate-right"></i></button>
+          <button class="icon-btn xs danger" onclick="tmDismissSingle('${esc(t.id)}')" title="Dismiss item"><i class="fas fa-times"></i></button>
         </div>
       ` : ''}
     </div>`;

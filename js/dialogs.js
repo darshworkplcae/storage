@@ -1,5 +1,35 @@
 var _cancelSignal = { cancelled: false, paused: false, resumeResolve: null };
 window._isUploading = false;
+window._uploadFilePool = window._uploadFilePool || new Map();
+
+function poolUploadFiles(items, targetDrive, targetFolder) {
+  if (!window._uploadFilePool) window._uploadFilePool = new Map();
+  if (!Array.isArray(items)) return;
+  items.forEach(function(item) {
+    var file = item.file || item;
+    var tId = item.tId || item.id;
+    var info = {
+      file: file,
+      tId: tId,
+      driveId: targetDrive || _driveId,
+      folderId: targetFolder || _folderId || null,
+      name: file.name,
+      size: file.size,
+      time: Date.now()
+    };
+    if (tId) window._uploadFilePool.set(tId, info);
+    var key = (file.name || '') + '::' + (file.size || 0);
+    window._uploadFilePool.set(key, info);
+  });
+}
+
+function getPooledUploadFile(tId, name, size) {
+  if (!window._uploadFilePool) return null;
+  if (tId && window._uploadFilePool.has(tId)) return window._uploadFilePool.get(tId);
+  var key = (name || '') + '::' + (size || 0);
+  if (window._uploadFilePool.has(key)) return window._uploadFilePool.get(key);
+  return null;
+}
 
 // Screen Wake Lock API - keeps phone screen & CPU active during uploads so OS doesn't sleep/freeze
 var _wakeLock = null;
@@ -168,6 +198,7 @@ async function uploadFiles(fileList, targetFolderId) {
   var fileItems = toUpload.map(function (f) {
     return { file: f, tId: uid(), name: f.name, size: f.size };
   });
+  poolUploadFiles(fileItems, targetDrive, destFolder);
   tmAddBatchQueued(fileItems.map(function (x) { return { id: x.tId, name: x.name, size: x.size }; }));
   renderTM();
 
@@ -178,11 +209,17 @@ async function uploadFiles(fileList, targetFolderId) {
   try {
     for (var j = 0; j < fileItems.length; j++) {
       if (_cancelSignal.cancelled) break;
-      await uploadOne(fileItems[j].file, destFolder, fileItems[j].tId);
-      uploadedCount++;
+      var res = await uploadOne(fileItems[j].file, destFolder, fileItems[j].tId);
+      if (res && res.ok) uploadedCount++;
     }
     if (uploadedCount === fileItems.length) {
       try { localStorage.removeItem('td_active_batch'); } catch (e) { }
+    } else {
+      var failedCount = fileItems.length - uploadedCount;
+      if (failedCount > 0 && !_cancelSignal.cancelled) {
+        toast(failedCount + ' file' + (failedCount > 1 ? 's' : '') + ' failed to upload. Check Transfers to retry!', 'warning', 7000);
+        toggleTMPanel(true);
+      }
     }
   } finally {
     window._isUploading = false;
@@ -286,6 +323,7 @@ async function processFolderFiles(files) {
   var fileItems = files.map(function (f) {
     return { file: f, tId: uid(), name: f.name, size: f.size };
   });
+  poolUploadFiles(fileItems, _driveId, null);
   tmAddBatchQueued(fileItems.map(function (x) { return { id: x.tId, name: x.name, size: x.size }; }));
   renderTM();
 
@@ -343,11 +381,15 @@ async function processFolderFiles(files) {
         continue;
       }
 
-      await uploadOne(file, parentId, item.tId);
-      uploadedCount++;
+      var res = await uploadOne(file, parentId, item.tId);
+      if (res && res.ok) uploadedCount++;
     }
 
-    if (skippedCount > 0) {
+    var failedCount = fileItems.length - skippedCount - uploadedCount;
+    if (failedCount > 0 && !_cancelSignal.cancelled) {
+      toast(failedCount + ' folder file' + (failedCount > 1 ? 's' : '') + ' failed to upload. Check Transfers to retry!', 'warning', 7000);
+      toggleTMPanel(true);
+    } else if (skippedCount > 0) {
       toast('Folder upload complete! ' + uploadedCount + ' uploaded, ' + skippedCount + ' existing skipped.', 'success');
     } else {
       toast('Folder upload complete (' + uploadedCount + ' files)', 'success');
@@ -472,84 +514,290 @@ async function uploadOne(file, targetFolderId, existingTid) {
   if (upName) upName.textContent = file.name;
   if (upStatus) upStatus.textContent = 'Initializing…';
   tmAdd(tId, file.name, file.size);
+  poolUploadFiles([{ file: file, tId: tId }], _driveId, targetFolderId);
+
+  var maxRetries = 2;
+  var lastErr = null;
 
   try {
-    var destFolder = targetFolderId || _folderId || null;
-    var isVid = (file.type && file.type.startsWith('video/')) || /\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(file.name);
-    var isImg = (file.type && file.type.startsWith('image/')) || /\.(jpg|jpeg|png|webp|gif|bmp|heic|heif|avif)$/i.test(file.name);
-    var localThumbPromise = isVid ? generateLocalVideoThumbnail(file) : isImg ? generateLocalImageThumbnail(file) : Promise.resolve(null);
-
-    // Step 1: Get Google Drive resumable upload URL from backend
-    if (upStatus) upStatus.textContent = 'Connecting…';
-    var init = await apiUploadInit(_driveId, destFolder, file.name, file.size, file.type || 'application/octet-stream');
-
-    if (!init.uploadUrl) {
-      throw new Error(init.error || 'Upload init failed — check that drive is connected');
-    }
-
-    // Step 2: Upload directly to Google Drive (with Pause & Resume capability!)
-    if (upStatus) upStatus.textContent = 'Uploading…';
-    var result = await uploadToGoogleResumable(init.uploadUrl, file, function (loaded, total, speed) {
-      var pct = total > 0 ? Math.round(loaded / total * 100) : 0;
-      if (upFill) upFill.style.width = pct + '%';
-      if (upPct) upPct.textContent = pct + '%';
-      var eta = (speed > 0 && total > loaded) ? fmtEta(total - loaded, speed) : '';
-      if (upStatus && !_cancelSignal.paused) upStatus.textContent = fmt(loaded) + ' / ' + fmt(total) + (speed > 0 ? ' · ' + fmtSpeed(speed) : '') + (eta ? ' · ' + eta : '');
-      tmUpdate(tId, pct, speed, loaded);
-    }, _cancelSignal);
-
-    var localThumb = await localThumbPromise;
-    if (localThumb) {
+    for (var attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        var prefix = isVid ? 'td_vthumb_' : 'td_ithumb_';
-        localStorage.setItem(prefix + result.googleFileId, localThumb);
-        localStorage.setItem(prefix + init.fileLocalId, localThumb);
-      } catch(e) {}
+        if (_cancelSignal && _cancelSignal.cancelled) throw new Error('Cancelled');
+        var destFolder = targetFolderId || _folderId || null;
+        var isVid = (file.type && file.type.startsWith('video/')) || /\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(file.name);
+        var isImg = (file.type && file.type.startsWith('image/')) || /\.(jpg|jpeg|png|webp|gif|bmp|heic|heif|avif)$/i.test(file.name);
+        var localThumbPromise = isVid ? generateLocalVideoThumbnail(file) : isImg ? generateLocalImageThumbnail(file) : Promise.resolve(null);
+
+        // Step 1: Get Google Drive resumable upload URL from backend
+        if (upStatus) upStatus.textContent = (attempt > 1 ? 'Auto-retrying (' + attempt + '/' + maxRetries + ')… ' : '') + 'Connecting…';
+        var init = await apiUploadInit(_driveId, destFolder, file.name, file.size, file.type || 'application/octet-stream');
+
+        if (!init || !init.uploadUrl) {
+          throw new Error(init ? (init.error || 'Upload init failed — check that drive is connected') : 'Upload init response empty');
+        }
+
+        // Step 2: Upload directly to Google Drive (with Pause & Resume capability!)
+        if (upStatus) upStatus.textContent = (attempt > 1 ? 'Auto-retrying (' + attempt + '/' + maxRetries + ')… ' : '') + 'Uploading…';
+        var result = await uploadToGoogleResumable(init.uploadUrl, file, function (loaded, total, speed) {
+          var pct = total > 0 ? Math.round(loaded / total * 100) : 0;
+          if (upFill) upFill.style.width = pct + '%';
+          if (upPct) upPct.textContent = pct + '%';
+          var eta = (speed > 0 && total > loaded) ? fmtEta(total - loaded, speed) : '';
+          if (upStatus && !_cancelSignal.paused) upStatus.textContent = fmt(loaded) + ' / ' + fmt(total) + (speed > 0 ? ' · ' + fmtSpeed(speed) : '') + (eta ? ' · ' + eta : '');
+          tmUpdate(tId, pct, speed, loaded);
+        }, _cancelSignal);
+
+        var localThumb = await localThumbPromise;
+        if (localThumb) {
+          try {
+            var prefix = isVid ? 'td_vthumb_' : 'td_ithumb_';
+            localStorage.setItem(prefix + result.googleFileId, localThumb);
+            localStorage.setItem(prefix + init.fileLocalId, localThumb);
+          } catch(e) {}
+        }
+
+        // Step 3: Save metadata to our DB
+        if (upStatus) upStatus.textContent = 'Saving…';
+        var activeDriveId = _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : null);
+        await apiUploadComplete({
+          fileLocalId: init.fileLocalId,
+          googleFileId: result.googleFileId,
+          driveId: activeDriveId,
+          folderId: destFolder,
+          name: file.name,
+          size: file.size,
+          mimeType: file.type || 'application/octet-stream'
+        });
+
+        tmDone(tId, true);
+        toast(file.name + ' uploaded!', 'success');
+
+        // Update DB state locally in memory (instant 0ms, 0 bytes bandwidth!)
+        if (S.db && S.db.files) {
+          S.db.files.push({
+            id: init.fileLocalId,
+            googleFileId: result.googleFileId,
+            driveId: activeDriveId,
+            folderId: destFolder || null,
+            name: file.name,
+            size: file.size,
+            mimeType: file.type || 'application/octet-stream',
+            date: new Date().toISOString()
+          });
+          tmSyncWithServer(S.db.files);
+        }
+        renderSidebarStorage();
+        renderFilesPage(_driveId, _folderId);
+        lastErr = null;
+        return { ok: true };
+
+      } catch (e) {
+        lastErr = e;
+        if (_cancelSignal && _cancelSignal.cancelled || e.message === 'Cancelled') break;
+        if (attempt < maxRetries) {
+          if (upStatus) upStatus.textContent = 'Connection glitch · Auto-retrying (' + attempt + '/' + maxRetries + ') in 1.5s…';
+          await new Promise(function(r){ setTimeout(r, 1500); });
+        }
+      }
     }
-
-    // Step 3: Save metadata to our DB
-    if (upStatus) upStatus.textContent = 'Saving…';
-    var activeDriveId = _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : null);
-    await apiUploadComplete({
-      fileLocalId: init.fileLocalId,
-      googleFileId: result.googleFileId,
-      driveId: activeDriveId,
-      folderId: destFolder,
-      name: file.name,
-      size: file.size,
-      mimeType: file.type || 'application/octet-stream'
-    });
-
-    tmDone(tId, true);
-    toast(file.name + ' uploaded!', 'success');
-
-    // Update DB state locally in memory (instant 0ms, 0 bytes bandwidth!)
-    if (S.db && S.db.files) {
-      S.db.files.push({
-        id: init.fileLocalId,
-        googleFileId: result.googleFileId,
-        driveId: activeDriveId,
-        folderId: destFolder || null,
-        name: file.name,
-        size: file.size,
-        mimeType: file.type || 'application/octet-stream',
-        date: new Date().toISOString()
-      });
-      tmSyncWithServer(S.db.files);
-    }
-    renderSidebarStorage();
-    renderFilesPage(_driveId, _folderId);
-
-  } catch (e) {
-    if (e.message === 'Cancelled') toast('Upload cancelled', 'warning');
-    else toast('Upload failed: ' + e.message, 'error');
-    tmDone(tId, false);
   } finally {
     if (upBar) upBar.classList.add('hidden');
     document.body.classList.remove('has-active-upload');
     if (upFill) upFill.style.width = '0%';
     if (upPct) upPct.textContent = '0%';
   }
+
+  if (lastErr) {
+    if (lastErr.message === 'Cancelled') toast('Upload cancelled', 'warning');
+    else toast('Upload failed: ' + lastErr.message, 'error');
+    tmDone(tId, false, lastErr.message);
+    return { ok: false, error: lastErr.message };
+  }
+  return { ok: false, error: 'Upload interrupted' };
+}
+
+// ─── Failed Upload Retry Handlers ──────────────────────────────────────────
+async function retrySingleUpload(tId) {
+  var transfers = tmLoad();
+  var item = transfers.find(function(x) { return x.id === tId; });
+  if (!item) {
+    item = transfers.find(function(x) { return (x.name + '::' + x.size) === tId; });
+  }
+  if (!item) {
+    toast('Transfer item not found', 'warning');
+    return;
+  }
+
+  if (window._isUploading) {
+    toast('Another upload is currently in progress. Please wait for it to complete.', 'warning');
+    return;
+  }
+
+  var pooled = getPooledUploadFile(item.id, item.name, item.size);
+  if (!pooled || !pooled.file) {
+    promptFileForRetry(item);
+    return;
+  }
+
+  toast('Retrying upload for "' + item.name + '"…', 'info');
+  item.status = 'queued';
+  item.pct = 0;
+  item.uploaded = 0;
+  item.speed = 0;
+  delete item.error;
+  tmSave(transfers, true);
+  renderTM();
+
+  window._isUploading = true;
+  await requestWakeLock();
+  var prevDrive = _driveId;
+
+  try {
+    var destFolder = pooled.folderId || _folderId || null;
+    if (pooled.driveId) _driveId = pooled.driveId;
+    var res = await uploadOne(pooled.file, destFolder, item.id);
+    if (res && res.ok) {
+      toast('"' + item.name + '" uploaded successfully!', 'success');
+    }
+  } finally {
+    _driveId = prevDrive;
+    window._isUploading = false;
+    releaseWakeLock();
+    try {
+      S.db = await apiFetchDB();
+      if (S.db && S.db.files) tmSyncWithServer(S.db.files);
+    } catch(e) {}
+    renderSidebarStorage();
+    renderFilesPage(_driveId, _folderId);
+    renderTM();
+  }
+}
+
+async function retryAllFailedUploads() {
+  var transfers = tmLoad();
+  var failedItems = transfers.filter(function(x) { return x.status === 'failed'; });
+  if (failedItems.length === 0) {
+    toast('No failed uploads found', 'info');
+    return;
+  }
+
+  if (window._isUploading) {
+    toast('Another upload is in progress. Please wait for it to complete.', 'warning');
+    return;
+  }
+
+  var canRetry = [];
+  var missingFiles = [];
+
+  failedItems.forEach(function(item) {
+    var pooled = getPooledUploadFile(item.id, item.name, item.size);
+    if (pooled && pooled.file) {
+      canRetry.push({ item: item, pooled: pooled });
+    } else {
+      missingFiles.push(item);
+    }
+  });
+
+  if (canRetry.length === 0 && missingFiles.length > 0) {
+    promptResumeFailedUploads(missingFiles);
+    return;
+  }
+
+  toast('Retrying ' + canRetry.length + ' failed upload' + (canRetry.length > 1 ? 's' : '') + '…', 'info');
+
+  canRetry.forEach(function(pair) {
+    pair.item.status = 'queued';
+    pair.item.pct = 0;
+    pair.item.uploaded = 0;
+    pair.item.speed = 0;
+    delete pair.item.error;
+  });
+  tmSave(transfers, true);
+  renderTM();
+
+  window._isUploading = true;
+  await requestWakeLock();
+  var prevDrive = _driveId;
+  var successCount = 0;
+
+  try {
+    for (var i = 0; i < canRetry.length; i++) {
+      if (_cancelSignal && _cancelSignal.cancelled) break;
+      var pair = canRetry[i];
+      var destFolder = pair.pooled.folderId || _folderId || null;
+      if (pair.pooled.driveId) _driveId = pair.pooled.driveId;
+      var res = await uploadOne(pair.pooled.file, destFolder, pair.item.id);
+      if (res && res.ok) successCount++;
+    }
+  } finally {
+    _driveId = prevDrive;
+    window._isUploading = false;
+    releaseWakeLock();
+    try {
+      S.db = await apiFetchDB();
+      if (S.db && S.db.files) tmSyncWithServer(S.db.files);
+    } catch(e) {}
+    renderSidebarStorage();
+    renderFilesPage(_driveId, _folderId);
+    renderTM();
+  }
+
+  if (successCount > 0) {
+    toast('Successfully uploaded ' + successCount + ' retry file' + (successCount > 1 ? 's' : '') + '!', 'success');
+  }
+  if (missingFiles.length > 0) {
+    toast(missingFiles.length + ' file(s) require re-selecting because browser was refreshed.', 'warning', 6000);
+  }
+}
+
+function promptFileForRetry(item) {
+  var inp = document.createElement('input');
+  inp.type = 'file';
+  inp.style.display = 'none';
+  document.body.appendChild(inp);
+  inp.onchange = function() {
+    if (inp.files && inp.files.length) {
+      var f = inp.files[0];
+      poolUploadFiles([{ file: f, tId: item.id }], _driveId, _folderId);
+      retrySingleUpload(item.id);
+    }
+    inp.remove();
+  };
+  inp.click();
+  toast('Page was reloaded. Select "' + item.name + '" to retry', 'info', 6000);
+}
+
+function promptResumeFailedUploads(missingItems) {
+  var ov = document.createElement('div');
+  ov.className = 'modal-backdrop';
+  ov.innerHTML = '<div class="modal" style="max-width:440px;text-align:center;padding:2rem 1.6rem">' +
+    '<div class="modal-ico" style="background:rgba(255,69,58,0.15);color:#ff453a;font-size:2rem;width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 1.2rem"><i class="fas fa-rotate-right"></i></div>' +
+    '<h3 style="margin-bottom:.5rem">Retry ' + missingItems.length + ' Failed File' + (missingItems.length > 1 ? 's' : '') + '</h3>' +
+    '<p style="color:var(--text2);font-size:.85rem;line-height:1.5;margin-bottom:1.5rem">The browser was reloaded, so file access needs to be granted. Select your folder or files to grant access. Already uploaded files will be skipped automatically with Smart Deduplication!</p>' +
+    '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">' +
+      '<button class="btn-primary sm" id="retrySelFilesBtn"><i class="fas fa-file-arrow-up"></i> Select Files</button>' +
+      '<button class="btn-primary sm" id="retrySelFolderBtn" style="background:linear-gradient(135deg,#ff9f0a,#ff6a00)"><i class="fas fa-folder-arrow-up"></i> Select Folder</button>' +
+      '<button class="btn-ghost sm" id="retryCancelBtn">Cancel</button>' +
+    '</div>' +
+  '</div>';
+  document.body.appendChild(ov);
+
+  ov.querySelector('#retryCancelBtn').onclick = function() { ov.remove(); };
+  ov.querySelector('#retrySelFilesBtn').onclick = function() {
+    ov.remove();
+    var fi = $('fileInput');
+    if (fi) fi.click();
+    else {
+      var inp = document.createElement('input'); inp.type = 'file'; inp.multiple = true; inp.style.display = 'none';
+      document.body.appendChild(inp);
+      inp.onchange = function() { if (inp.files.length) uploadFiles(inp.files); inp.remove(); };
+      inp.click();
+    }
+  };
+  ov.querySelector('#retrySelFolderBtn').onclick = function() {
+    ov.remove();
+    uploadFolder();
+  };
 }
 
 // ─── Folder Security & Lock Dialogs ──────────────────────
