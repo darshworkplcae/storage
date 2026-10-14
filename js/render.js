@@ -1157,7 +1157,30 @@ function renderTM(){
     </div>`;
   }
 
-  list.innerHTML = summaryChips + failedBanner + resumeBanner + transfers.map(t=>{
+  // High-performance display limiting:
+  // Render active items, all failed items (so user can retry), interrupted items, and recent queued/done items.
+  const activeItems = transfers.filter(t => t.status === 'uploading');
+  const failedItems = transfers.filter(t => t.status === 'failed');
+  const interruptedItems = transfers.filter(t => t.status === 'interrupted');
+  const queuedItems = transfers.filter(t => t.status === 'queued');
+  const doneItems = transfers.filter(t => t.status === 'done');
+
+  const displayList = [];
+  displayList.push(...activeItems);
+  displayList.push(...failedItems);
+  displayList.push(...interruptedItems);
+  displayList.push(...queuedItems.slice(0, 20));
+  displayList.push(...doneItems.slice(0, 20));
+
+  const hiddenCount = transfers.length - displayList.length;
+  let hiddenNotice = '';
+  if (hiddenCount > 0) {
+    hiddenNotice = `<div style="text-align:center;padding:.65rem;font-size:.72rem;color:var(--text3);border-top:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02)">
+      <i class="fas fa-ellipsis"></i> +${hiddenCount} more items (${doneItems.length} completed) · Click Clear to dismiss finished
+    </div>`;
+  }
+
+  list.innerHTML = summaryChips + failedBanner + resumeBanner + displayList.map(t=>{
     const isPaused = t.status === 'uploading' && (typeof _cancelSignal !== 'undefined' && _cancelSignal && _cancelSignal.paused);
     const isInterrupted = t.status === 'interrupted';
     const isQueued = t.status === 'queued';
@@ -1195,7 +1218,7 @@ function renderTM(){
         </div>
       ` : ''}
     </div>`;
-  }).join('');
+  }).join('') + hiddenNotice;
 }
 
 function renderStarredPage() {

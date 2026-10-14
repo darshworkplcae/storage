@@ -160,37 +160,50 @@ async function uploadFiles(fileList, targetFolderId) {
     }));
   } catch (e) { }
 
-  // Smart Deduplication Check:
+  // Smart Deduplication Check in O(1) time
   var toUpload = [];
   var skippedCount = 0;
+  var existingFileSet = new Set();
+  if (S.db && Array.isArray(S.db.files)) {
+    S.db.files.forEach(function(f) {
+      if (!f.trashed && f.driveId === targetDrive && (f.folderId || null) === destFolder) {
+        existingFileSet.add(f.name + '::' + f.size);
+      }
+    });
+  }
+
+  var tmList = tmLoad();
+  var tmKeyMap = new Map();
+  tmList.forEach(function(item) {
+    tmKeyMap.set((item.name || '') + '::' + (item.size || 0), item);
+  });
+  var markedDoneIds = [];
 
   for (var i = 0; i < files.length; i++) {
     var f = files[i];
-    var existing = findExistingDriveFile(f.name, f.size, targetDrive, destFolder);
-    if (existing) {
+    var isExisting = existingFileSet.has(f.name + '::' + f.size);
+    if (isExisting) {
       skippedCount++;
-      // Mark or add in Transfer Manager as done (100%)
-      var matchTm = tmLoad().find(function(x){ return x.name === f.name && x.size === f.size; });
+      var matchTm = tmKeyMap.get(f.name + '::' + f.size);
       if (matchTm) {
-        tmDone(matchTm.id, true);
-      } else {
-        var dummyId = uid();
-        tmAdd(dummyId, f.name, f.size);
-        tmDone(dummyId, true);
+        markedDoneIds.push(matchTm.id);
       }
     } else {
       toUpload.push(f);
     }
   }
 
+  if (markedDoneIds.length > 0) {
+    tmBatchDone(markedDoneIds);
+  }
+
   if (skippedCount > 0) {
-    toast('Smart Deduplication: ' + skippedCount + ' already uploaded (skipped). ' + toUpload.length + ' remaining.', 'info', 6000);
+    toast('Smart Deduplication: ' + skippedCount + ' already uploaded (skipped). ' + toUpload.length + ' remaining.', 'info', 5000);
   }
 
   if (toUpload.length === 0) {
     toast('All ' + files.length + ' files are already uploaded in this folder!', 'success');
     try { localStorage.removeItem('td_active_batch'); } catch(e){}
-    renderTM();
     return;
   }
 
@@ -200,7 +213,6 @@ async function uploadFiles(fileList, targetFolderId) {
   });
   poolUploadFiles(fileItems, targetDrive, destFolder);
   tmAddBatchQueued(fileItems.map(function (x) { return { id: x.tId, name: x.name, size: x.size }; }));
-  renderTM();
 
   window._isUploading = true;
   await requestWakeLock();
@@ -209,6 +221,9 @@ async function uploadFiles(fileList, targetFolderId) {
   try {
     for (var j = 0; j < fileItems.length; j++) {
       if (_cancelSignal.cancelled) break;
+      if (j > 0 && j % 15 === 0) {
+        await new Promise(function(r) { setTimeout(r, 0); });
+      }
       var res = await uploadOne(fileItems[j].file, destFolder, fileItems[j].tId);
       if (res && res.ok) uploadedCount++;
     }
@@ -327,14 +342,29 @@ async function processFolderFiles(files) {
   tmAddBatchQueued(fileItems.map(function (x) { return { id: x.tId, name: x.name, size: x.size }; }));
   renderTM();
 
+  // Build fast O(1) lookup set for existing files
+  var existingFileSet = new Set();
+  if (S.db && Array.isArray(S.db.files)) {
+    S.db.files.forEach(function(f) {
+      if (!f.trashed && f.driveId === _driveId) {
+        existingFileSet.add((f.folderId || '') + '::' + f.name + '::' + f.size);
+      }
+    });
+  }
+
   // Build directory tree in Google Drive
   var folderMap = {}; // relative path -> folderId
   var skippedCount = 0;
   var uploadedCount = 0;
+  var skippedIds = [];
 
   try {
     for (var i = 0; i < fileItems.length; i++) {
       if (_cancelSignal.cancelled) break;
+      if (i > 0 && i % 15 === 0) {
+        // Yield to browser event loop so UI stays completely fluid
+        await new Promise(function(r) { setTimeout(r, 0); });
+      }
       var item = fileItems[i];
       var file = item.file;
       var relPath = file.webkitRelativePath || file.name;
@@ -360,8 +390,8 @@ async function processFolderFiles(files) {
               if (created && created.folderId) {
                 folderMap[pathAcc] = created.folderId;
                 parentId = created.folderId;
-                S.db = await apiFetchDB();
-                if (S.db && S.db.files) tmSyncWithServer(S.db.files);
+                if (!S.db.folders) S.db.folders = [];
+                S.db.folders.push({ id: created.folderId, driveId: _driveId, parentId: parentId, name: folderName });
               }
             }
           } else {
@@ -370,19 +400,34 @@ async function processFolderFiles(files) {
         }
       }
 
-      // Smart Resume & Deduplication:
-      var alreadyUploaded = findExistingDriveFile(file.name, file.size, _driveId, parentId);
+      // Smart Resume & Deduplication in O(1) time
+      var isAlreadyUploaded = existingFileSet.has((parentId || '') + '::' + file.name + '::' + file.size);
 
-      if (alreadyUploaded) {
+      if (isAlreadyUploaded) {
         skippedCount++;
-        tmDone(item.tId, true);
-        var st = $('upStatus');
-        if (st) st.textContent = 'Skipping already uploaded (' + skippedCount + ' skipped): ' + file.name;
+        skippedIds.push(item.tId);
+        if (skippedIds.length >= 25) {
+          tmBatchDone(skippedIds);
+          skippedIds = [];
+          var st = $('upStatus');
+          if (st) st.textContent = 'Skipping already uploaded (' + skippedCount + ' skipped)…';
+          await new Promise(function(r) { setTimeout(r, 0); });
+        }
         continue;
+      }
+
+      if (skippedIds.length > 0) {
+        tmBatchDone(skippedIds);
+        skippedIds = [];
       }
 
       var res = await uploadOne(file, parentId, item.tId);
       if (res && res.ok) uploadedCount++;
+    }
+
+    if (skippedIds.length > 0) {
+      tmBatchDone(skippedIds);
+      skippedIds = [];
     }
 
     var failedCount = fileItems.length - skippedCount - uploadedCount;
@@ -1402,6 +1447,7 @@ function promptResumeUpload() {
       <div style="display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap">
         <button class="btn-primary sm" onclick="this.closest('.modal-backdrop').remove();uploadFolder();"><i class="fas fa-folder-arrow-up"></i> Resume Folder</button>
         <button class="btn-ghost sm" onclick="this.closest('.modal-backdrop').remove();var fi=document.getElementById('fileInput');if(fi)fi.click();"><i class="fas fa-file-arrow-up"></i> Resume Files</button>
+        <button class="btn-ghost sm danger" onclick="this.closest('.modal-backdrop').remove();tmClearInterrupted();" style="color:var(--danger)"><i class="fas fa-trash"></i> Dismiss</button>
       </div>
     </div>
   `;

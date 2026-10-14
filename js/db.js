@@ -52,14 +52,14 @@ function tmSave(l, immediate) {
   _tmCache = l;
   if (immediate) {
     if (_tmSaveTimer) { clearTimeout(_tmSaveTimer); _tmSaveTimer = null; }
-    try { localStorage.setItem(TM_KEY, JSON.stringify(l.slice(0, 1500))); } catch(e) {}
+    try { localStorage.setItem(TM_KEY, JSON.stringify(l.slice(0, 400))); } catch(e) {}
     return;
   }
   if (!_tmSaveTimer) {
     _tmSaveTimer = setTimeout(function() {
       _tmSaveTimer = null;
-      try { localStorage.setItem(TM_KEY, JSON.stringify((_tmCache || []).slice(0, 1500))); } catch(e) {}
-    }, 350);
+      try { localStorage.setItem(TM_KEY, JSON.stringify((_tmCache || []).slice(0, 400))); } catch(e) {}
+    }, 400);
   }
 }
 
@@ -74,7 +74,7 @@ function tmSanitizeOnStartup() {
         changed = true;
       }
     });
-    if (changed) tmSave(l, true);
+    if (changed) tmSave(l, false);
   } catch(e) {}
 }
 
@@ -103,8 +103,8 @@ function tmSyncWithServer(dbFiles) {
     });
 
     if (changed) {
-      tmSave(l, true);
-      if (typeof renderTM === 'function') renderTM();
+      tmSave(l, false);
+      tmScheduleRender();
     }
   } catch(e) {}
 }
@@ -119,7 +119,7 @@ function tmAdd(id, name, size) {
   } else {
     l.unshift({id:id,name:name,size:size,status:'uploading',pct:0,speed:0,uploaded:0,ts:new Date().toISOString()});
   }
-  tmSave(l, true);
+  tmSave(l, false);
   tmScheduleRender();
 }
 
@@ -133,9 +133,16 @@ function tmAddQueued(id, name, size) {
 }
 
 function tmAddBatchQueued(items) {
+  if (!items || !items.length) return;
   var l = tmLoad();
+  var map = new Map();
+  l.forEach(function(x) {
+    if (x.id) map.set(x.id, x);
+    map.set((x.name || '') + '::' + (x.size || 0), x);
+  });
   items.forEach(function(item) {
-    var existing = l.find(function(x){ return x.id === item.id || (x.name === item.name && x.size === item.size); });
+    var key = (item.name || '') + '::' + (item.size || 0);
+    var existing = map.get(item.id) || map.get(key);
     if (existing) {
       if (existing.status !== 'done') {
         existing.id = item.id;
@@ -145,7 +152,7 @@ function tmAddBatchQueued(items) {
         existing.speed = 0;
       }
     } else {
-      l.push({
+      var newItem = {
         id: item.id,
         name: item.name,
         size: item.size,
@@ -154,10 +161,14 @@ function tmAddBatchQueued(items) {
         speed: 0,
         uploaded: 0,
         ts: new Date().toISOString()
-      });
+      };
+      l.push(newItem);
+      map.set(item.id, newItem);
+      map.set(key, newItem);
     }
   });
-  tmSave(l, true);
+  tmSave(l, false);
+  tmScheduleRender();
 }
 
 function tmUpdate(id, pct, speed, uploaded) {
@@ -187,29 +198,50 @@ function tmDone(id, ok, errorMsg) {
     }
     item.speed=0;
   }
-  tmSave(l, true);
-  if (typeof renderTM === 'function') renderTM();
+  tmSave(l, false);
+  tmScheduleRender();
+}
+
+function tmBatchDone(doneIds) {
+  if (!doneIds || !doneIds.length) return;
+  var l = tmLoad();
+  var set = new Set(doneIds);
+  var changed = false;
+  l.forEach(function(item) {
+    if (set.has(item.id)) {
+      item.status = 'done';
+      item.pct = 100;
+      item.uploaded = item.size;
+      item.speed = 0;
+      delete item.error;
+      changed = true;
+    }
+  });
+  if (changed) {
+    tmSave(l, false);
+    tmScheduleRender();
+  }
 }
 
 function tmDismissSingle(id) {
   var l = tmLoad();
   var remaining = l.filter(function(x){ return x.id !== id; });
-  tmSave(remaining, true);
-  if (typeof renderTM === 'function') renderTM();
+  tmSave(remaining, false);
+  tmScheduleRender();
 }
 
 function tmClearFailed() {
   var l = tmLoad();
   var remaining = l.filter(function(x){ return x.status !== 'failed'; });
-  tmSave(remaining, true);
-  if (typeof renderTM === 'function') renderTM();
+  tmSave(remaining, false);
+  tmScheduleRender();
 }
 
 function tmClearDone() {
   var l = tmLoad();
   var remaining = l.filter(function(x){ return x.status !== 'done'; });
-  tmSave(remaining, true);
-  if (typeof renderTM === 'function') renderTM();
+  tmSave(remaining, false);
+  tmScheduleRender();
 }
 
 function tmClear() {
@@ -222,16 +254,18 @@ function tmClear() {
     if (typeof toast === 'function') toast('Cleared completed transfers (failed items kept for retry)', 'info');
   } else {
     var remaining = l.filter(function(x){ return x.status === 'uploading'; });
-    tmSave(remaining, true);
+    tmSave(remaining, false);
   }
-  if (typeof renderTM === 'function') renderTM();
+  tmScheduleRender();
 }
 
 function tmClearInterrupted() {
   var l = tmLoad();
   var remaining = l.filter(function(x){ return x.status !== 'interrupted'; });
-  tmSave(remaining, true);
-  if (typeof renderTM === 'function') renderTM();
+  tmSave(remaining, false);
+  try { localStorage.removeItem('td_active_batch'); } catch(e){}
+  tmScheduleRender();
+  if (typeof toast === 'function') toast('Dismissed interrupted transfers', 'info');
 }
 
 // Sanitize stale transfers immediately on script evaluation
