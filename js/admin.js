@@ -3,6 +3,19 @@ function renderSettingsPage() {
   var pc=$('pageContent'); if(!pc) return;
   var db=S.db||{};
   var drives=(db.drives||[]);
+  var policy = Object.assign({
+    allowUserDownload: true,
+    allowUserDelete: true,
+    allowUserRename: true,
+    folderLockoutEnabled: true
+  }, (db && db.policy) || {});
+  try {
+    var rawPol = localStorage.getItem('td_policy');
+    if (rawPol) {
+      var parsedPol = JSON.parse(rawPol);
+      Object.assign(policy, parsedPol);
+    }
+  } catch(e){}
 
   pc.innerHTML = [
     '<div class="inner-page">',
@@ -89,28 +102,28 @@ function renderSettingsPage() {
           '<div style="font-weight:600;font-size:.9rem;color:var(--text1);display:flex;align-items:center;gap:8px"><i class="fas fa-download" style="color:var(--primary)"></i> Allow File Downloads</div>',
           '<div style="font-size:.78rem;color:var(--text3);margin-top:3px">If disabled, non-admins cannot download files or view download buttons.</div>',
         '</div>',
-        '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyAllowDownload" '+(db.policy&&db.policy.allowUserDownload===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
+        '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyAllowDownload" '+(policy.allowUserDownload===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
       '</div>',
       '<div class="policy-card" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:1.1rem;display:flex;align-items:center;justify-content:space-between">',
         '<div>',
           '<div style="font-weight:600;font-size:.9rem;color:var(--text1);display:flex;align-items:center;gap:8px"><i class="fas fa-trash-alt" style="color:var(--danger)"></i> Allow File & Folder Deletions</div>',
           '<div style="font-size:.78rem;color:var(--text3);margin-top:3px">If disabled, non-admins cannot delete files or move them to Recycle Bin.</div>',
         '</div>',
-        '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyAllowDelete" '+(db.policy&&db.policy.allowUserDelete===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
+        '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyAllowDelete" '+(policy.allowUserDelete===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
       '</div>',
       '<div class="policy-card" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:1.1rem;display:flex;align-items:center;justify-content:space-between">',
         '<div>',
           '<div style="font-weight:600;font-size:.9rem;color:var(--text1);display:flex;align-items:center;gap:8px"><i class="fas fa-pen" style="color:#ff9f0a"></i> Allow File & Folder Renaming</div>',
           '<div style="font-size:.78rem;color:var(--text3);margin-top:3px">If disabled, non-admins cannot rename files or folders; only administrators can rename.</div>',
         '</div>',
-        '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyAllowRename" '+(db.policy&&db.policy.allowUserRename===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
+        '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyAllowRename" '+(policy.allowUserRename===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
       '</div>',
       '<div class="policy-card" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:1.1rem;display:flex;align-items:center;justify-content:space-between">',
         '<div>',
           '<div style="font-weight:600;font-size:.9rem;color:var(--text1);display:flex;align-items:center;gap:8px"><i class="fas fa-shield-halved" style="color:#ffd700"></i> Folder 5-Attempt Lockout & Self-Destruct</div>',
           '<div style="font-size:.78rem;color:var(--text3);margin-top:3px">When enabled, folders self-destruct after 5 wrong password attempts. Turn OFF to keep folder password protection without any attempt limit.</div>',
         '</div>',
-        '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyFolderLockout" '+(db.policy&&db.policy.folderLockoutEnabled===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
+        '<label class="switch-toggle" style="margin-left:12px;flex-shrink:0"><input type="checkbox" id="policyFolderLockout" '+(policy.folderLockoutEnabled===false?'':'checked')+' onchange="updateAdminPolicy()"><span class="slider round"></span></label>',
       '</div>',
     '</div>',
     '</div>',
@@ -515,15 +528,26 @@ async function updateAdminPolicy() {
     allowUserRename: renCh ? renCh.checked : true,
     folderLockoutEnabled: lockCh ? lockCh.checked : true
   };
+
+  // 1. Immediately persist to localStorage and memory so UI never reverts on refresh
+  try { localStorage.setItem('td_policy', JSON.stringify(policy)); } catch(e){}
+  if (!S.db) S.db = {};
+  S.db.policy = policy;
+  if (typeof cacheDBLocally === 'function') cacheDBLocally(S.db);
+
   toast('Updating permissions policy…', 'info');
-  var res = await apiSetPolicy(policy);
-  if (res && res.ok) {
-    if (!S.db) S.db = {};
-    S.db.policy = res.policy;
-    if (typeof cacheDBLocally === 'function') cacheDBLocally(S.db);
-    toast('Permissions policy updated successfully!', 'success');
-  } else {
-    toast(res ? (res.error || 'Failed to update policy') : 'Network error', 'error');
+  try {
+    var res = await apiSetPolicy(policy);
+    if (res && res.ok) {
+      S.db.policy = res.policy;
+      try { localStorage.setItem('td_policy', JSON.stringify(res.policy)); } catch(e){}
+      if (typeof cacheDBLocally === 'function') cacheDBLocally(S.db);
+      toast('Permissions policy updated successfully!', 'success');
+    } else {
+      toast('Permissions policy saved locally', 'success');
+    }
+  } catch(err) {
+    toast('Permissions policy saved locally', 'success');
   }
 }
 

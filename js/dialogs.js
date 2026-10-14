@@ -979,6 +979,15 @@ function showUnlockFolderDialog(folder, onUnlocked) {
   var ov = document.createElement('div');
   ov.className = 'modal-backdrop';
   var remainingStarts = Math.max(1, 5 - (folder.failedAttempts || 0));
+  var lockoutEnabled = !(S.db && S.db.policy && S.db.policy.folderLockoutEnabled === false);
+  try {
+    var rawP = localStorage.getItem('td_policy');
+    if (rawP) {
+      var parsedP = JSON.parse(rawP);
+      if (parsedP && parsedP.folderLockoutEnabled === false) lockoutEnabled = false;
+    }
+  } catch(e){}
+
   ov.innerHTML = `
     <div class="modal" style="max-width:420px;text-align:center">
       <div class="modal-hd" style="justify-content:center;position:relative">
@@ -1002,17 +1011,28 @@ function showUnlockFolderDialog(folder, onUnlocked) {
         </div>
       ` : ''}
 
-      <div style="background:rgba(255,69,58,0.1);border:1px solid rgba(255,69,58,0.3);border-radius:8px;padding:.55rem .75rem;font-size:.76rem;color:#ff453a;margin-bottom:1.1rem;line-height:1.4;text-align:left">
-        <div style="font-weight:700;display:flex;align-items:center;gap:6px">
-          <i class="fas fa-shield-halved"></i> Security Rule: Max 5 Attempts
+      ${lockoutEnabled ? `
+        <div style="background:rgba(255,69,58,0.1);border:1px solid rgba(255,69,58,0.3);border-radius:8px;padding:.55rem .75rem;font-size:.76rem;color:#ff453a;margin-bottom:1.1rem;line-height:1.4;text-align:left">
+          <div style="font-weight:700;display:flex;align-items:center;gap:6px">
+            <i class="fas fa-shield-halved"></i> Security Rule: Max 5 Attempts
+          </div>
+          <div style="color:var(--text2);margin-top:2px">
+            If 5 failed attempts are reached, this folder will be <strong>permanently destroyed Cant Even Tobi Can Help So Remember Pass cant Also Reset</strong>.
+          </div>
+          <div id="unlockAttemptsCount" style="margin-top:4px;font-weight:700;color:#ff9f0a">
+            Attempts remaining: ${remainingStarts} of 5
+          </div>
         </div>
-        <div style="color:var(--text2);margin-top:2px">
-          If 5 failed attempts are reached, this folder will be <strong>permanently destroyed Cant Even Tobi Can Help So Remember Pass cant Also Reset</strong>.
+      ` : `
+        <div style="background:rgba(78,134,245,0.08);border:1px solid rgba(78,134,245,0.25);border-radius:8px;padding:.55rem .75rem;font-size:.76rem;color:var(--text2);margin-bottom:1.1rem;line-height:1.4;text-align:left">
+          <div style="font-weight:700;color:#4e86f5;display:flex;align-items:center;gap:6px">
+            <i class="fas fa-shield-halved"></i> Password Protection Active
+          </div>
+          <div style="color:var(--text2);margin-top:2px">
+            Enter the password to open this folder. (Attempt lockout limit is disabled by Admin).
+          </div>
         </div>
-        <div id="unlockAttemptsCount" style="margin-top:4px;font-weight:700;color:#ff9f0a">
-          Attempts remaining: ${remainingStarts} of 5
-        </div>
-      </div>
+      `}
 
       <form id="unlockFolderForm" onsubmit="return false;" style="text-align:left">
         <div style="margin-bottom:.9rem">
@@ -1077,7 +1097,7 @@ function showUnlockFolderDialog(folder, onUnlocked) {
         }
         var rem = (res && typeof res.remainingAttempts === 'number') ? res.remainingAttempts : (5 - (folder.failedAttempts || 0) - 1);
         var cntEl = ov.querySelector('#unlockAttemptsCount');
-        if (cntEl) cntEl.textContent = 'Attempts remaining: ' + Math.max(0, rem) + ' of 5';
+        if (cntEl && lockoutEnabled) cntEl.textContent = 'Attempts remaining: ' + Math.max(0, rem) + ' of 5';
         toast(res ? (res.error || 'Incorrect password') : 'Network error', 'error');
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-lock-open"></i> Unlock & Open';

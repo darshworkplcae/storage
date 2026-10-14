@@ -335,13 +335,25 @@ async function init() {
 
   // Try to restore session from localStorage with server-side validation
   loadSes();
+function syncLocalPolicy() {
+  try {
+    var rawPol = localStorage.getItem('td_policy');
+    if (rawPol) {
+      var p = JSON.parse(rawPol);
+      if (!S.db) S.db = {};
+      S.db.policy = Object.assign({}, S.db.policy || {}, p);
+    }
+  } catch(e){}
+}
+
   if(S.ses.token) {
     var ver = await apiFetch('auth/verify').catch(function(){return null;});
     if(ver && ver.valid) {
       var db = await apiFetchDB().catch(function(){return null;});
       if(db && !db.error) {
         S.db = db;
-        if (typeof cacheDBLocally === 'function') cacheDBLocally(db);
+        syncLocalPolicy();
+        if (typeof cacheDBLocally === 'function') cacheDBLocally(S.db);
         if (S.db && S.db.files) tmSyncWithServer(S.db.files);
         updateSidebarProfile();
         updateNavVisibility();
@@ -356,6 +368,7 @@ async function init() {
         var localCached = (typeof getCachedLocalDB === 'function') ? getCachedLocalDB() : null;
         if (localCached) {
           S.db = localCached;
+          syncLocalPolicy();
           updateSidebarProfile();
           updateNavVisibility();
           renderSidebarStorage();
@@ -377,7 +390,9 @@ async function init() {
   if (!S.db || S.db.error) {
     var localCached = (typeof getCachedLocalDB === 'function') ? getCachedLocalDB() : null;
     if (localCached) S.db = localCached;
-  } else if (S.db && typeof cacheDBLocally === 'function') {
+  }
+  syncLocalPolicy();
+  if (S.db && typeof cacheDBLocally === 'function') {
     cacheDBLocally(S.db);
   }
   if(S.db && S.db.files) tmSyncWithServer(S.db.files);

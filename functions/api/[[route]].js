@@ -10,6 +10,7 @@ function gGS(e){return e.GOOGLE_CLIENT_SECRET||'';}
 const COR={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST,DELETE,PUT,OPTIONS','Access-Control-Allow-Headers':'Content-Type,Authorization,Range','Access-Control-Expose-Headers':'Content-Range,Content-Length,Accept-Ranges'};
 function J(d,s){return new Response(JSON.stringify(d),{status:s||200,headers:{...COR,'Content-Type':'application/json'}});}
 let _memDBCache = null;
+const _memSesCache = new Map();
 function getKV(env){return env.TELEDRIVE_KV||env.KV||env.STORAGE||env.DB_KV||null;}
 async function uGet(env,key){
   const kv=getKV(env);
@@ -89,7 +90,21 @@ async function iKey(s){const r=new TextEncoder().encode(s.padEnd(32,'0').slice(0
 async function enc(t,s){const k=await iKey(s);const iv=crypto.getRandomValues(new Uint8Array(12));const e=await crypto.subtle.encrypt({name:'AES-GCM',iv},k,new TextEncoder().encode(t));const c=new Uint8Array([...iv,...new Uint8Array(e)]);return btoa(String.fromCharCode(...c));}
 async function dec(b64,s){const k=await iKey(s);const c=Uint8Array.from(atob(b64),x=>x.charCodeAt(0));const d=await crypto.subtle.decrypt({name:'AES-GCM',iv:c.slice(0,12)},k,c.slice(12));return new TextDecoder().decode(d);}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
-async function vSes(req,env,role){const tok=(req.headers.get('Authorization')||'').replace('Bearer ','').trim();if(!tok)return role?false:null;const v=await uGet(env,`td:ses:${tok}`);const c=String(v||'').replace(/^"|"$/g,'');if(role)return c===role;return c||null;}
+async function vSes(req,env,role){
+  const tok=(req.headers.get('Authorization')||'').replace('Bearer ','').trim();
+  if(!tok)return role?false:null;
+  if(_memSesCache.has(tok)){
+    const c=_memSesCache.get(tok);
+    if(role) return c===role;
+    return c||null;
+  }
+  let v=null;
+  try{ v=await uGet(env,`td:ses:${tok}`); }catch(e){}
+  const c=String(v||'').replace(/^"|"$/g,'');
+  if(c) _memSesCache.set(tok,c);
+  if(role)return c===role;
+  return c||null;
+}
 async function gAT(env,rt,forceRefresh=false){
   const r=await dec(rt,gEK(env));
   const kHash=await sha256(r);
@@ -113,27 +128,34 @@ async function hAL(req,env){
   const{password=''}=await req.json().catch(()=>({}));
   let db;
   try{ db=await uGet(env,'td:db'); }catch(e){
-    if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash due to monthly bandwidth limit. Please un-suspend or upgrade in Upstash Console, or bind Cloudflare KV.', isDatabaseSuspended:true},503);
+    if(_memDBCache) db=_memDBCache;
+    else if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash due to monthly bandwidth limit. Please un-suspend or upgrade in Upstash Console, or bind Cloudflare KV.', isDatabaseSuspended:true},503);
   }
   if(!db){
-    db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};
-    await uSet(env,'td:db',db);
+    if(_memDBCache) db=_memDBCache;
+    else {
+      db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};
+      try{ await uSet(env,'td:db',db); }catch(e){}
+    }
   }
   if(await sha256(password)!==db.adminHash)return J({error:'Wrong password'},401);
   const t=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b=>b.toString(16).padStart(2,'0')).join('');
-  await uSet(env,`td:ses:${t}`,'admin',604800);
+  _memSesCache.set(t,'admin');
+  try{ await uSet(env,`td:ses:${t}`,'admin',604800); }catch(e){}
   return J({token:t,role:'admin'});
 }
 async function hUL(req,env){
   const{username='',password=''}=await req.json().catch(()=>({}));
   let db;
   try{ db=await uGet(env,'td:db'); }catch(e){
-    if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash. Please un-suspend in Upstash Console or bind Cloudflare KV.', isDatabaseSuspended:true},503);
+    if(_memDBCache) db=_memDBCache;
+    else if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash. Please un-suspend in Upstash Console or bind Cloudflare KV.', isDatabaseSuspended:true},503);
   }
   const u=(db&&db.users||[]).find(x=>x.username===username);
   if(!u||await sha256(password)!==u.passwordHash)return J({error:'Wrong username or password'},401);
   const t=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b=>b.toString(16).padStart(2,'0')).join('');
-  await uSet(env,`td:ses:${t}`,u.id,604800);
+  _memSesCache.set(t,u.id);
+  try{ await uSet(env,`td:ses:${t}`,u.id,604800); }catch(e){}
   return J({token:t,role:'user',userId:u.id,username:u.username,allowedDrives:u.allowedDrives||'all'});
 }
 async function hAG(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const cid=gGC(env);if(!cid)return J({error:'GOOGLE_CLIENT_ID not set in Cloudflare Pages env vars'},400);const o=new URL(req.url).origin;const u=new URL('https://accounts.google.com/o/oauth2/v2/auth');u.searchParams.set('client_id',cid);u.searchParams.set('redirect_uri',`${o}/api/auth/callback`);u.searchParams.set('response_type','code');u.searchParams.set('scope','https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile');u.searchParams.set('access_type','offline');u.searchParams.set('prompt','consent');return J({url:u.toString()});}
@@ -192,13 +214,23 @@ async function vDriveToken(req, env, driveId){
 async function hDB(req,env){
   let db;
   try{ db=await uGet(env,'td:db'); }catch(e){
-    if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash due to monthly bandwidth limit. Please un-suspend in Upstash Console or bind Cloudflare KV.', isDatabaseSuspended:true},503);
+    if(_memDBCache) db=_memDBCache;
+    else if(String(e.message).includes('ERR_DB_SUSPENDED')) return J({error:'Database suspended on Upstash due to monthly bandwidth limit. Please un-suspend in Upstash Console or bind Cloudflare KV.', isDatabaseSuspended:true},503);
   }
   if(!db){
-    db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};
-    await uSet(env,'td:db',db);
+    if(_memDBCache) db=_memDBCache;
+    else {
+      db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};
+      try{ await uSet(env,'td:db',db); }catch(e){}
+    }
   }
-  const policy = db.policy || { allowUserDownload: true, allowUserDelete: true };
+  const policy = {
+    allowUserDownload: db.policy ? db.policy.allowUserDownload !== false : true,
+    allowUserDelete: db.policy ? db.policy.allowUserDelete !== false : true,
+    allowUserRename: db.policy ? db.policy.allowUserRename !== false : true,
+    folderLockoutEnabled: db.policy ? db.policy.folderLockoutEnabled !== false : true
+  };
+  db.policy = policy;
   const r=await vSes(req,env,null);
   const openIds = getOpenDriveIds(db);
   if(r==='admin'){
@@ -1574,17 +1606,27 @@ async function hSetFolderVisibility(req,env){
 }
 
 async function hGetPolicy(req,env){
-  const db=await uGet(env,'td:db');
-  const policy=(db&&db.policy)||{allowUserDownload:true,allowUserDelete:true,allowUserRename:true,folderLockoutEnabled:true};
-  if(policy.allowUserRename === undefined) policy.allowUserRename = true;
-  if(policy.folderLockoutEnabled === undefined) policy.folderLockoutEnabled = true;
+  let db;
+  try{ db=await uGet(env,'td:db'); }catch(e){
+    if(_memDBCache) db=_memDBCache;
+  }
+  if(!db) db=_memDBCache || {v:3,policy:{}};
+  const policy={
+    allowUserDownload: db.policy ? db.policy.allowUserDownload !== false : true,
+    allowUserDelete: db.policy ? db.policy.allowUserDelete !== false : true,
+    allowUserRename: db.policy ? db.policy.allowUserRename !== false : true,
+    folderLockoutEnabled: db.policy ? db.policy.folderLockoutEnabled !== false : true
+  };
   return J({ok:true,policy});
 }
 
 async function hSetPolicy(req,env){
   if(!await vSes(req,env,'admin')) return J({error:'Unauthorized'},401);
-  const db=await uGet(env,'td:db');
-  if(!db) return J({error:'DB error'},500);
+  let db;
+  try{ db=await uGet(env,'td:db'); }catch(e){
+    if(_memDBCache) db=_memDBCache;
+  }
+  if(!db) db=_memDBCache || {v:3,policy:{}};
   const body=await req.json().catch(()=>({}));
   db.policy={
     allowUserDownload: body.allowUserDownload !== false,
@@ -1592,7 +1634,8 @@ async function hSetPolicy(req,env){
     allowUserRename: body.allowUserRename !== false,
     folderLockoutEnabled: body.folderLockoutEnabled !== false
   };
-  await uSet(env,'td:db',db);
+  _memDBCache = db;
+  try{ await uSet(env,'td:db',db); }catch(e){}
   return J({ok:true,policy:db.policy});
 }
 

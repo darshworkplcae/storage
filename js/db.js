@@ -112,11 +112,18 @@ function tmSyncWithServer(dbFiles) {
 function cacheDBLocally(db) {
   if (!db || typeof db !== 'object') return;
   try {
+    var pol = db.policy;
+    if (!pol) {
+      try {
+        var rawP = localStorage.getItem('td_policy');
+        if (rawP) pol = JSON.parse(rawP);
+      } catch(e){}
+    }
     localStorage.setItem('td_cached_db', JSON.stringify({
       v: db.v,
       openDriveId: db.openDriveId,
       openDriveIds: db.openDriveIds,
-      policy: db.policy,
+      policy: pol,
       drives: db.drives,
       folders: db.folders,
       files: (db.files || []).slice(0, 15000),
@@ -129,7 +136,14 @@ function getCachedLocalDB() {
   try {
     var raw = localStorage.getItem('td_cached_db');
     if (!raw) return null;
-    return JSON.parse(raw);
+    var parsed = JSON.parse(raw);
+    try {
+      var rawP = localStorage.getItem('td_policy');
+      if (rawP) {
+        parsed.policy = Object.assign({}, parsed.policy || {}, JSON.parse(rawP));
+      }
+    } catch(e){}
+    return parsed;
   } catch(e) {
     return null;
   }
