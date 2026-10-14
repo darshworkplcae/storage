@@ -215,6 +215,7 @@ async function uploadFiles(fileList, targetFolderId) {
   tmAddBatchQueued(fileItems.map(function (x) { return { id: x.tId, name: x.name, size: x.size }; }));
 
   window._isUploading = true;
+  window._isBatchUploading = true;
   await requestWakeLock();
   var uploadedCount = 0;
 
@@ -238,6 +239,7 @@ async function uploadFiles(fileList, targetFolderId) {
     }
   } finally {
     window._isUploading = false;
+    window._isBatchUploading = false;
     releaseWakeLock();
     try {
       S.db = await apiFetchDB();
@@ -331,6 +333,7 @@ async function processFolderFiles(files) {
   } catch (e) { }
 
   window._isUploading = true;
+  window._isBatchUploading = true;
   await requestWakeLock();
   toast('Preparing folder "' + rootFolder + '" (' + files.length + ' files)…', 'info');
 
@@ -379,19 +382,20 @@ async function processFolderFiles(files) {
           pathAcc += (pathAcc ? '/' : '') + folderName;
           if (!folderMap[pathAcc]) {
             // Find existing or create new folder
+            var currentParentId = parentId;
             var existingFolder = (S.db && S.db.folders || []).find(function (f) {
-              return f.driveId === _driveId && f.parentId === parentId && f.name.toLowerCase() === folderName.toLowerCase() && !f.trashed;
+              return f.driveId === _driveId && f.parentId === currentParentId && f.name.toLowerCase() === folderName.toLowerCase() && !f.trashed;
             });
             if (existingFolder) {
               folderMap[pathAcc] = existingFolder.id;
               parentId = existingFolder.id;
             } else {
-              var created = await apiCreateFolder({ driveId: _driveId, parentFolderId: parentId, name: folderName });
+              var created = await apiCreateFolder({ driveId: _driveId, parentFolderId: currentParentId, name: folderName });
               if (created && created.folderId) {
                 folderMap[pathAcc] = created.folderId;
-                parentId = created.folderId;
                 if (!S.db.folders) S.db.folders = [];
-                S.db.folders.push({ id: created.folderId, driveId: _driveId, parentId: parentId, name: folderName });
+                S.db.folders.push({ id: created.folderId, driveId: _driveId, parentId: currentParentId, name: folderName });
+                parentId = created.folderId;
               }
             }
           } else {
@@ -441,6 +445,7 @@ async function processFolderFiles(files) {
     }
   } finally {
     window._isUploading = false;
+    window._isBatchUploading = false;
     releaseWakeLock();
     try { localStorage.removeItem('td_active_batch'); } catch (e) { }
     try {
@@ -592,12 +597,23 @@ async function uploadOne(file, targetFolderId, existingTid) {
           tmUpdate(tId, pct, speed, loaded);
         }, _cancelSignal);
 
+        if (!result || !result.googleFileId) {
+          throw new Error('Upload completed but Google did not return a valid file ID');
+        }
+
         var localThumb = await localThumbPromise;
         if (localThumb) {
           try {
             var prefix = isVid ? 'td_vthumb_' : 'td_ithumb_';
+            var thumbKeys = [];
+            for (var tk = 0; tk < localStorage.length; tk++) {
+              var k = localStorage.key(tk);
+              if (k && (k.startsWith('td_vthumb_') || k.startsWith('td_ithumb_'))) thumbKeys.push(k);
+            }
+            if (thumbKeys.length > 25) {
+              thumbKeys.slice(0, thumbKeys.length - 20).forEach(function(k){ try{ localStorage.removeItem(k); }catch(e){} });
+            }
             localStorage.setItem(prefix + result.googleFileId, localThumb);
-            localStorage.setItem(prefix + init.fileLocalId, localThumb);
           } catch(e) {}
         }
 
@@ -632,7 +648,9 @@ async function uploadOne(file, targetFolderId, existingTid) {
           tmSyncWithServer(S.db.files);
         }
         renderSidebarStorage();
-        renderFilesPage(_driveId, _folderId);
+        if (!window._isBatchUploading) {
+          renderFilesPage(_driveId, _folderId);
+        }
         lastErr = null;
         return { ok: true };
 
@@ -761,6 +779,7 @@ async function retryAllFailedUploads() {
   renderTM();
 
   window._isUploading = true;
+  window._isBatchUploading = true;
   await requestWakeLock();
   var prevDrive = _driveId;
   var successCount = 0;
@@ -777,6 +796,7 @@ async function retryAllFailedUploads() {
   } finally {
     _driveId = prevDrive;
     window._isUploading = false;
+    window._isBatchUploading = false;
     releaseWakeLock();
     try {
       S.db = await apiFetchDB();

@@ -100,7 +100,8 @@ async function apiFetch(path, opts) {
     var r = await fetch(API + '/' + path, Object.assign({ headers: authHdr() }, opts));
     var ct = r.headers.get('Content-Type') || '';
     if (!ct.includes('application/json')) {
-      return { ok: r.ok, status: r.status, _raw: await r.text().catch(function(){return '';}) };
+      var raw = await r.text().catch(function(){return '';});
+      return { ok: r.ok, status: r.status, error: r.ok ? null : ('Server error (' + r.status + '): ' + (raw.slice(0, 120) || 'Unexpected response')), _raw: raw };
     }
     return await r.json();
   } catch(e) { return { error: e.message }; }
@@ -248,21 +249,50 @@ async function uploadToGoogleResumable(uploadUrl, file, onProgress, cancelSignal
 
       var startTime = Date.now();
       var lastProgressTime = 0;
+      var lastActivityTime = Date.now();
+      var lastLoaded = startOffset;
+      var stalled = false;
+
+      // Watchdog interval to detect stalled sockets (e.g. stalled at 100% or dead TCP connection)
+      var watchdog = setInterval(function() {
+        if (cancelSignal && cancelSignal.cancelled) {
+          clearInterval(watchdog);
+          try { xhr.abort(); } catch(e){}
+          return;
+        }
+        var elapsed = Date.now() - lastActivityTime;
+        var isAtFinalizing = (lastLoaded >= total);
+        var stallThreshold = isAtFinalizing ? 18000 : 35000;
+
+        if (elapsed > stallThreshold) {
+          clearInterval(watchdog);
+          stalled = true;
+          try { xhr.abort(); } catch(e){}
+        }
+      }, 2500);
+
       xhr.upload.onprogress = function(e) {
-        if (cancelSignal && cancelSignal.cancelled) { xhr.abort(); return; }
+        lastActivityTime = Date.now();
+        if (cancelSignal && cancelSignal.cancelled) {
+          clearInterval(watchdog);
+          try { xhr.abort(); } catch(e){}
+          return;
+        }
         if (e.lengthComputable) {
           var curLoaded = startOffset + e.loaded;
+          lastLoaded = curLoaded;
           var now = Date.now();
           if (curLoaded === total || now - lastProgressTime >= 100) {
             lastProgressTime = now;
-            var elapsed = (now - startTime) / 1000 || 0.001;
-            var speed = e.loaded / elapsed;
+            var elSec = (now - startTime) / 1000 || 0.001;
+            var speed = e.loaded / elSec;
             onProgress(curLoaded, total, speed);
           }
         }
       };
 
       xhr.onload = function() {
+        clearInterval(watchdog);
         if (xhr.status === 200 || xhr.status === 201) {
           var id = null;
           try { id = JSON.parse(xhr.responseText).id; } catch(e){}
@@ -282,10 +312,20 @@ async function uploadToGoogleResumable(uploadUrl, file, onProgress, cancelSignal
         }
       };
 
-      xhr.onerror = function() { resolve({ error: 'network' }); };
+      xhr.onerror = function() {
+        clearInterval(watchdog);
+        resolve({ error: 'network' });
+      };
+
       xhr.onabort = function() {
-        if (cancelSignal && cancelSignal.paused) resolve({ paused: true });
-        else reject(new Error('Cancelled'));
+        clearInterval(watchdog);
+        if (cancelSignal && cancelSignal.paused) {
+          resolve({ paused: true });
+        } else if (stalled) {
+          resolve({ error: 'stalled' });
+        } else {
+          reject(new Error('Cancelled'));
+        }
       };
 
       xhr.send(chunk);
@@ -299,9 +339,9 @@ async function uploadToGoogleResumable(uploadUrl, file, onProgress, cancelSignal
     } else if (res.status === 308) {
       startOffset = res.nextOffset;
       retries = 0;
-    } else if (res.error === 'network') {
+    } else if (res.error === 'network' || res.error === 'stalled') {
       retries++;
-      if (retries > 4) throw new Error('Network error — connection dropped after retries');
+      if (retries > 4) throw new Error('Upload connection stalled after retries');
       await new Promise(function(r){ setTimeout(r, 1200); });
       var queryCheck = await queryGoogleUploadedBytes(uploadUrl, total);
       if (queryCheck.complete || queryCheck.offset >= total) {
@@ -323,7 +363,13 @@ function queryGoogleUploadedBytes(uploadUrl, total) {
     var xhr = new XMLHttpRequest();
     xhr.open('PUT', uploadUrl);
     xhr.setRequestHeader('Content-Range', 'bytes */' + total);
+    var timer = setTimeout(function() {
+      try { xhr.abort(); } catch(e){}
+      resolve({ offset: 0 });
+    }, 12000);
+
     xhr.onload = function() {
+      clearTimeout(timer);
       if (xhr.status === 308) {
         var range = xhr.getResponseHeader('Range');
         if (range) {
@@ -341,7 +387,14 @@ function queryGoogleUploadedBytes(uploadUrl, total) {
       }
       resolve({ offset: 0 });
     };
-    xhr.onerror = function() { resolve({ offset: 0 }); };
+    xhr.onerror = function() {
+      clearTimeout(timer);
+      resolve({ offset: 0 });
+    };
+    xhr.onabort = function() {
+      clearTimeout(timer);
+      resolve({ offset: 0 });
+    };
     xhr.send();
   });
 }

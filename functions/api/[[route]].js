@@ -510,25 +510,45 @@ async function hUI(req,env){
   if(!ses && drv.passwordHash && !await vDriveToken(req, env, driveId)){
     return J({error:'Drive is locked by password'},403);
   }
-  const at=await gAT(env,drv.encToken);
+  let at;
+  try {
+    at=await gAT(env,drv.encToken);
+  } catch(e) {
+    try {
+      at=await gAT(env,drv.encToken,true);
+    } catch(e2) {
+      return J({error:'Google Drive token error: ' + (e2.message||e.message)}, 500);
+    }
+  }
   let pid=drv.rootFolderId;
   if(folderId){
     const f=(db.folders||[]).find(x=>x.id===folderId);
     if(f&&f.googleFolderId) pid=f.googleFolderId;
   }
-  const ir=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name',{
+  const reqInit = (token, targetPid) => fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name',{
     method:'POST',
     headers:{
-      Authorization:`Bearer ${at}`,
+      Authorization:`Bearer ${token}`,
       'Content-Type':'application/json',
       'X-Upload-Content-Type':mimeType||'application/octet-stream',
       'X-Upload-Content-Length':String(size),
       'Origin':(new URL(req.url).origin)
     },
-    body:JSON.stringify({name,mimeType:mimeType||'application/octet-stream',parents:[pid]})
+    body:JSON.stringify({name,mimeType:mimeType||'application/octet-stream',parents:[targetPid]})
   });
+  let ir = await reqInit(at, pid);
+  if (ir.status === 401) {
+    at = await gAT(env, drv.encToken, true);
+    ir = await reqInit(at, pid);
+  }
+  if (ir.status === 404 && pid !== drv.rootFolderId) {
+    ir = await reqInit(at, drv.rootFolderId);
+  }
   const uUrl=ir.headers.get('Location');
-  if(!uUrl) return J({error:'Upload session failed',detail:await ir.text()},500);
+  if(!uUrl) {
+    const errDetail = await ir.text().catch(()=>'');
+    return J({error:'Upload session failed (HTTP ' + ir.status + ')', detail:errDetail}, 500);
+  }
   return J({uploadUrl:uUrl,fileLocalId:uid()});
 }
 async function hUC(req,env){
@@ -1192,7 +1212,16 @@ async function hMF(req,env){
   if(!ses && drv.passwordHash && !await vDriveToken(req, env, driveId)){
     return J({error:'Drive is locked by password'},403);
   }
-  const at=await gAT(env,drv.encToken);
+  let at;
+  try {
+    at=await gAT(env,drv.encToken);
+  } catch(e) {
+    try {
+      at=await gAT(env,drv.encToken,true);
+    } catch(e2) {
+      return J({error:'Google Drive token error: ' + (e2.message||e.message)}, 500);
+    }
+  }
   let gPid=drv.rootFolderId;
   let parentAdminOnly = false;
   let parentAllowedUsers = null;
@@ -1202,7 +1231,11 @@ async function hMF(req,env){
     if(pf&&pf.adminOnly) parentAdminOnly = true;
     if(pf&&Array.isArray(pf.allowedUsers)&&pf.allowedUsers.length) parentAllowedUsers = [...pf.allowedUsers];
   }
-  const gFid=await mkDir(at,name.trim(),gPid);
+  let gFid=await mkDir(at,name.trim(),gPid);
+  if(!gFid){
+    at=await gAT(env,drv.encToken,true);
+    gFid=await mkDir(at,name.trim(),gPid);
+  }
   const fId=uid();
   if(!db.folders) db.folders=[];
   const newFolder = {
