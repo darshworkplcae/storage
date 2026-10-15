@@ -58,11 +58,10 @@
       </button>
     </div>
 
-    <!-- Hidden admin link (accessible exclusively via /tobi/admin) -->
-    <div class="lp-footer" style="display:none">
-      <a href="#/tobi/admin" class="lp-admin-link" onclick="showAdminLogin(event)">
-        <i class="fas fa-shield-halved"></i> Admin
-      </a>
+    <div class="lp-footer" style="display:flex;justify-content:center;margin-top:1rem">
+      <button type="button" class="btn-ghost sm" onclick="showAdminLogin(event)" style="font-size:0.8rem;color:var(--text2);display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;padding:6px 12px;background:rgba(255,255,255,0.03);cursor:pointer">
+        <i class="fas fa-shield-halved" style="color:var(--primary)"></i> Admin Sign In
+      </button>
     </div>
 
     <div style="margin-top:1.2rem;text-align:center;font-size:0.75rem;opacity:0.6">
@@ -120,6 +119,7 @@
         <div class="pmenu-item" onclick="toggleTheme()"><i class="fas fa-circle-half-stroke"></i> Switch Theme</div>
         <div class="pmenu-item danger user-or-admin hidden" id="pmenuLogout" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
         <div class="pmenu-item guest-only" id="pmenuLogin" onclick="showSignInModal()"><i class="fas fa-arrow-right-to-bracket"></i> Sign In</div>
+        <div class="pmenu-item guest-only" onclick="showAdminLogin(event)"><i class="fas fa-shield-halved"></i> Admin Sign In</div>
       </div>
     </div>
 
@@ -204,10 +204,12 @@
         <span class="ms-count-badge"><i class="fas fa-check-circle"></i> <span id="msCount">0</span> selected</span>
       </div>
       <div class="ms-actions">
-        <button class="btn-ghost sm" onclick="selectAllCurrentFiles()"><i class="fas fa-check-double"></i> Select All</button>
-        <button class="btn-ghost sm" onclick="showCopyDialog(Array.from(S.selectedFiles))"><i class="fas fa-copy"></i> Copy Selected</button>
+        <button class="btn-ghost sm" onclick="selectAllCurrentFiles()" title="Select All Items (Ctrl+A)"><i class="fas fa-check-double"></i> All</button>
+        <button class="btn-ghost sm" onclick="selectFilesOnly()" title="Select only files, keep folders safe"><i class="fas fa-file"></i> Files Only</button>
+        <button class="btn-ghost sm" onclick="showCopyDialog(Array.from(S.selectedFiles))"><i class="fas fa-copy"></i> Copy</button>
         <button class="btn-ghost sm" onclick="clearFileSelection()"><i class="fas fa-times"></i> Clear</button>
-        <button class="btn-danger sm" onclick="deleteSelectedFiles()"><i class="fas fa-trash-alt"></i> Delete Selected</button>
+        <button class="btn-danger sm" onclick="deleteSelectedFiles()" title="Move selected to Recycle Bin"><i class="fas fa-trash-alt"></i> To Trash</button>
+        <button class="btn-danger sm" id="msPermanentDeleteBtn" onclick="permanentDeleteSelectedFiles()" style="background:#ff453a;border-color:#ff453a" title="Permanently delete from Google Drive"><i class="fas fa-trash-can"></i> Permanent Delete</button>
       </div>
     </div>
 

@@ -163,10 +163,17 @@ async function apiConnectDrive() {
 }
 
 // ─── Upload: Step 1 — get Google resumable URL from our backend ───────────────
-async function apiUploadInit(driveId, folderId, name, size, mimeType) {
+async function apiUploadInit(driveId, folderId, name, size, mimeType, googleFolderId) {
   return apiFetch('upload/init', {
     method: 'POST',
-    body: JSON.stringify({ driveId:driveId, folderId:folderId||null, name:name, size:size, mimeType:mimeType||'application/octet-stream' })
+    body: JSON.stringify({
+      driveId: driveId,
+      folderId: folderId || null,
+      googleFolderId: googleFolderId || null,
+      name: name,
+      size: size,
+      mimeType: mimeType || 'application/octet-stream'
+    })
   });
 }
 

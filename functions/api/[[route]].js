@@ -20,7 +20,21 @@ async function uGet(env,key){
       if(raw!==null&&raw!==undefined){
         try{
           const p = JSON.parse(raw);
-          if (key==='td:db') _memDBCache = p;
+          if (key==='td:db') {
+            if (_memDBCache && _memDBCache.folders) {
+              const knownIds = new Set((p.folders||[]).map(f => f.id));
+              _memDBCache.folders.forEach(f => {
+                if (!knownIds.has(f.id)) (p.folders||(p.folders=[])).push(f);
+              });
+            }
+            if (_memDBCache && _memDBCache.files) {
+              const knownFIds = new Set((p.files||[]).map(f => f.id));
+              _memDBCache.files.forEach(f => {
+                if (!knownFIds.has(f.id)) (p.files||(p.files=[])).push(f);
+              });
+            }
+            _memDBCache = p;
+          }
           return p;
         }catch(e){return raw;}
       }
@@ -204,9 +218,16 @@ async function vDriveToken(req, env, driveId){
   if (multiTokensHeader) multiTokensHeader.split(',').map(t=>t.trim()).filter(Boolean).forEach(t=>tokens.push(t));
 
   for (const token of tokens) {
+    if (_memSesCache.has('dtk:' + token)) {
+      if (_memSesCache.get('dtk:' + token) === driveId) return true;
+    }
     try{
       const storedDriveId = await uGet(env, 'td:dtk:' + token);
-      if (String(storedDriveId || '').replace(/^"|"$/g, '') === driveId) return true;
+      const sid = String(storedDriveId || '').replace(/^"|"$/g, '');
+      if (sid) {
+        _memSesCache.set('dtk:' + token, sid);
+        if (sid === driveId) return true;
+      }
     }catch(e){}
   }
   return false;
@@ -267,8 +288,9 @@ async function hDB(req,env){
     });
   }
 
-  // Guest visitor: Strictly ALL open drives!
-  const guestDrives = (db.drives||[]).filter(d => openIds.includes(d.id)).map(sDrv);
+  // Guest visitor: Return all connected drives so mobile visitors can view and unlock them!
+  const allDrives = (db.drives||[]).map(sDrv);
+  const guestDrives = allDrives;
   const guestDriveIds = guestDrives.map(d => d.id);
 
   // Check which guest drives are unlocked (either have no password, or token valid)
@@ -542,7 +564,7 @@ async function hRestoreDB(req,env){
 }
 async function hUI(req,env){
   const body=await req.json().catch(()=>({}));
-  const{driveId,folderId,name,size,mimeType}=body;
+  const{driveId,folderId,googleFolderId,name,size,mimeType}=body;
   const db=await uGet(env,'td:db');
   const isOpenTarget=isDriveOpen(driveId,db);
   const ses=await vSes(req,env,null);
@@ -567,9 +589,13 @@ async function hUI(req,env){
     }
   }
   let pid=drv.rootFolderId;
-  if(folderId){
-    const f=(db.folders||[]).find(x=>x.id===folderId);
+  if(googleFolderId && googleFolderId.length > 10){
+    pid = googleFolderId;
+  } else if(folderId){
+    const allFolders = (db.folders||[]).concat((_memDBCache&&_memDBCache.folders)||[]);
+    const f=allFolders.find(x=>x.id===folderId || x.googleFolderId===folderId);
     if(f&&f.googleFolderId) pid=f.googleFolderId;
+    else if(folderId.length > 20 && !folderId.includes('-')) pid=folderId;
   }
   const reqInit = (token, targetPid) => fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name',{
     method:'POST',
@@ -628,6 +654,9 @@ async function hUC(req,env){
   };
   if(fAllowedUsers) newFile.allowedUsers = fAllowedUsers;
   db.files.push(newFile);
+  if(_memDBCache && _memDBCache.files) {
+    _memDBCache.files.push(newFile);
+  }
   if(drv && typeof size === 'number') drv.usedBytes = (drv.usedBytes || 0) + size;
   if(!db.activityLog) db.activityLog=[];
   db.activityLog.unshift({id:uid(),type:'upload',name,size,driveId,driveLetter:drv?drv.email:'?',ts:new Date().toISOString()});
@@ -1136,6 +1165,38 @@ async function hBatchApproveRestore(req,env){
   return J({ok:true,count});
 }
 
+async function gDriveBatchDelete(token, googleIds) {
+  if (!token || !googleIds || !googleIds.length) return;
+  for (let i = 0; i < googleIds.length; i += 50) {
+    const chunk = googleIds.slice(i, i + 50);
+    const boundary = 'batch_' + Math.random().toString(36).slice(2, 10);
+    let body = '';
+    chunk.forEach((gId, idx) => {
+      body += `--${boundary}\r\nContent-Type: application/http\r\nContent-ID: <item-${idx}>\r\n\r\nDELETE /drive/v3/files/${encodeURIComponent(gId)}?supportsAllDrives=true HTTP/1.1\r\n\r\n`;
+    });
+    body += `--${boundary}--\r\n`;
+
+    try {
+      const resp = await fetch('https://www.googleapis.com/batch/drive/v3', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': `multipart/mixed; boundary=${boundary}`
+        },
+        body
+      });
+      if (!resp.ok) throw new Error('batch delete error');
+    } catch(e) {
+      await Promise.allSettled(chunk.map(gId =>
+        fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?supportsAllDrives=true`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` }
+        }).catch(()=>{})
+      ));
+    }
+  }
+}
+
 async function hBatchPermanentDelete(req,env){
   const ses=await vSes(req,env,null);
   if(!ses) return J({error:'Unauthorized'},401);
@@ -1150,8 +1211,9 @@ async function hBatchPermanentDelete(req,env){
     allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
   }
   const toDelete=(db.files||[]).filter(f=>(fileIds.includes(f.id)||fileIds.includes(f.googleFileId)) && (!allowedList || allowedList.includes(f.driveId)));
+  const foldersToDelete=(db.folders||[]).filter(f=>fileIds.includes(f.id) && (!allowedList || allowedList.includes(f.driveId)));
 
-  // Cache access tokens once per drive (prevents exceeding Cloudflare subrequest limit!)
+  // Cache access tokens once per drive
   const driveTokens = {};
   for(const drv of (db.drives||[])){
     if(!driveTokens[drv.id] && drv.encToken){
@@ -1161,20 +1223,16 @@ async function hBatchPermanentDelete(req,env){
     }
   }
 
-  // Safely delete Google Drive files in parallel with cached tokens (max 35 to stay safely under limit)
-  const gDelTasks = [];
-  const gFilesToDelete = toDelete.filter(f => f.googleFileId && driveTokens[f.driveId]).slice(0, 35);
-  for(const f of gFilesToDelete){
-    const token = driveTokens[f.driveId];
-    gDelTasks.push(
-      fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.googleFileId)}?supportsAllDrives=true`,{
-        method:'DELETE',
-        headers:{Authorization:`Bearer ${token}`}
-      }).catch(()=>{})
-    );
-  }
-  if(gDelTasks.length) {
-    await Promise.allSettled(gDelTasks);
+  // Delete all selected files and folders on Google Drive
+  for(const drv of (db.drives||[])){
+    const token = driveTokens[drv.id];
+    if(!token) continue;
+    const gIds = [];
+    toDelete.filter(f => f.driveId === drv.id && f.googleFileId).forEach(f => gIds.push(f.googleFileId));
+    foldersToDelete.filter(f => f.driveId === drv.id && f.googleFolderId).forEach(f => gIds.push(f.googleFolderId));
+    if(gIds.length) {
+      await gDriveBatchDelete(token, gIds);
+    }
   }
 
   // Update drive used bytes
@@ -1183,13 +1241,27 @@ async function hBatchPermanentDelete(req,env){
     if(drv && typeof f.size === 'number') drv.usedBytes = Math.max(0, (drv.usedBytes || 0) - f.size);
   });
 
-  const delIds = toDelete.map(x=>x.id).concat(toDelete.map(x=>x.googleFileId));
-  db.files=(db.files||[]).filter(f=>!delIds.includes(f.id) && !delIds.includes(f.googleFileId));
-  db.folders=(db.folders||[]).filter(f=>!fileIds.includes(f.id));
+  const foldDelSet = new Set(foldersToDelete.map(x=>x.id));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const f of (db.folders || [])) {
+      if (!foldDelSet.has(f.id) && f.parentId && foldDelSet.has(f.parentId)) {
+        foldDelSet.add(f.id);
+        changed = true;
+      }
+    }
+  }
+  db.files=(db.files||[]).filter(f=>!delIds.includes(f.id) && !delIds.includes(f.googleFileId) && (!f.folderId || !foldDelSet.has(f.folderId)));
+  db.folders=(db.folders||[]).filter(f=>!foldDelSet.has(f.id));
+  if(_memDBCache) {
+    _memDBCache.files = db.files;
+    _memDBCache.folders = db.folders;
+  }
   if(!db.activityLog) db.activityLog=[];
-  db.activityLog.unshift({id:uid(),type:'delete_permanent_batch',count:toDelete.length,ts:new Date().toISOString()});
+  db.activityLog.unshift({id:uid(),type:'delete_permanent_batch',count:toDelete.length + foldersToDelete.length,ts:new Date().toISOString()});
   await uSet(env,'td:db',db);
-  return J({ok:true,count:toDelete.length});
+  return J({ok:true,count:toDelete.length + foldersToDelete.length});
 }
 
 async function hEmptyTrash(req,env){
@@ -1204,8 +1276,8 @@ async function hEmptyTrash(req,env){
     allowedList = (allowed && allowed !== 'all') ? (Array.isArray(allowed) ? allowed : [allowed]) : null;
   }
   const trashedFiles=(db.files||[]).filter(f=>!!f.trashed && (!allowedList || allowedList.includes(f.driveId)));
+  const trashedFolders=(db.folders||[]).filter(f=>!!f.trashed && (!allowedList || allowedList.includes(f.driveId)));
 
-  // Cache access tokens once per drive (prevents Cloudflare subrequest limit failure!)
   const driveTokens = {};
   for(const drv of (db.drives||[])){
     if(!driveTokens[drv.id] && drv.encToken){
@@ -1215,20 +1287,15 @@ async function hEmptyTrash(req,env){
     }
   }
 
-  // Safely delete Google Drive files in parallel (up to 35 files)
-  const gDelTasks = [];
-  const gFilesToDelete = trashedFiles.filter(f => f.googleFileId && driveTokens[f.driveId]).slice(0, 35);
-  for(const f of gFilesToDelete){
-    const token = driveTokens[f.driveId];
-    gDelTasks.push(
-      fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.googleFileId)}?supportsAllDrives=true`,{
-        method:'DELETE',
-        headers:{Authorization:`Bearer ${token}`}
-      }).catch(()=>{})
-    );
-  }
-  if(gDelTasks.length) {
-    await Promise.allSettled(gDelTasks);
+  for(const drv of (db.drives||[])){
+    const token = driveTokens[drv.id];
+    if(!token) continue;
+    const gIds = [];
+    trashedFiles.filter(f => f.driveId === drv.id && f.googleFileId).forEach(f => gIds.push(f.googleFileId));
+    trashedFolders.filter(f => f.driveId === drv.id && f.googleFolderId).forEach(f => gIds.push(f.googleFolderId));
+    if(gIds.length) {
+      await gDriveBatchDelete(token, gIds);
+    }
   }
 
   trashedFiles.forEach(f => {
@@ -1237,17 +1304,22 @@ async function hEmptyTrash(req,env){
   });
 
   const purgedIds = trashedFiles.map(x=>x.id);
+  const foldPurgedIds = trashedFolders.map(x=>x.id);
   db.files=(db.files||[]).filter(f=>!purgedIds.includes(f.id));
-  if(ses === 'admin') db.folders=(db.folders||[]).filter(f=>!f.trashed);
-  else if(allowedList) db.folders=(db.folders||[]).filter(f=>!(f.trashed && allowedList.includes(f.driveId)));
+  if(ses === 'admin') db.folders=(db.folders||[]).filter(f=>!foldPurgedIds.includes(f.id));
+  else if(allowedList) db.folders=(db.folders||[]).filter(f=>!(foldPurgedIds.includes(f.id) && allowedList.includes(f.driveId)));
+  if(_memDBCache) {
+    _memDBCache.files = db.files;
+    _memDBCache.folders = db.folders;
+  }
   if(!db.activityLog) db.activityLog=[];
-  db.activityLog.unshift({id:uid(),type:'empty_trash',count:trashedFiles.length,ts:new Date().toISOString()});
+  db.activityLog.unshift({id:uid(),type:'empty_trash',count:trashedFiles.length + trashedFolders.length,ts:new Date().toISOString()});
   await uSet(env,'td:db',db);
-  return J({ok:true,count:trashedFiles.length});
+  return J({ok:true,count:trashedFiles.length + trashedFolders.length});
 }
 
 async function hMF(req,env){
-  const{driveId,parentFolderId,name}=await req.json().catch(()=>({}));
+  const{driveId,parentFolderId,parentGoogleFolderId,name}=await req.json().catch(()=>({}));
   const db=await uGet(env,'td:db');
   const isOpenTarget=isDriveOpen(driveId,db);
   const ses=await vSes(req,env,null);
@@ -1271,9 +1343,14 @@ async function hMF(req,env){
   let gPid=drv.rootFolderId;
   let parentAdminOnly = false;
   let parentAllowedUsers = null;
+  if(parentGoogleFolderId && parentGoogleFolderId.length > 10){
+    gPid = parentGoogleFolderId;
+  }
   if(parentFolderId){
-    const pf=(db.folders||[]).find(f=>f.id===parentFolderId);
-    if(pf&&pf.googleFolderId) gPid=pf.googleFolderId;
+    const allFolders = (db.folders||[]).concat((_memDBCache&&_memDBCache.folders)||[]);
+    const pf=allFolders.find(f=>f.id===parentFolderId || f.googleFolderId===parentFolderId);
+    if(pf&&pf.googleFolderId && (!parentGoogleFolderId || parentGoogleFolderId.length <= 10)) gPid=pf.googleFolderId;
+    else if(parentFolderId.length > 20 && !parentFolderId.includes('-') && (!parentGoogleFolderId || parentGoogleFolderId.length <= 10)) gPid=parentFolderId;
     if(pf&&pf.adminOnly) parentAdminOnly = true;
     if(pf&&Array.isArray(pf.allowedUsers)&&pf.allowedUsers.length) parentAllowedUsers = [...pf.allowedUsers];
   }
@@ -1296,8 +1373,11 @@ async function hMF(req,env){
   };
   if(parentAllowedUsers) newFolder.allowedUsers = parentAllowedUsers;
   db.folders.push(newFolder);
+  if(_memDBCache && _memDBCache.folders) {
+    _memDBCache.folders.push(newFolder);
+  }
   await uSet(env,'td:db',db);
-  return J({ok:true,folderId:fId});
+  return J({ok:true,folderId:fId,googleFolderId:gFid,name:name.trim()});
 }
 
 async function hRF(req,env,fId){
@@ -1731,6 +1811,7 @@ async function hUnlockDrive(req,env){
 
   // Generate 5-hour access token (18,000s)
   const token = uid() + uid();
+  _memSesCache.set('dtk:' + token, driveId);
   await uSet(env, 'td:dtk:' + token, driveId, 18000);
   return J({ok:true, unlocked:true, token, expiresIn:18000});
 }
@@ -1898,7 +1979,7 @@ export async function onRequest({request,env}){
     if(p==='files/trash/empty'&&(m==='POST'||m==='DELETE'))return hEmptyTrash(request,env);
     if(p==='files/trash/batch-request-restore'&&m==='POST')return hBatchRequestRestore(request,env);
     if(p==='files/trash/batch-approve-restore'&&m==='POST')return hBatchApproveRestore(request,env);
-    if(p==='files/trash/batch-permanent-delete'&&(m==='POST'||m==='DELETE'))return hBatchPermanentDelete(request,env);
+    if((p==='files/trash/batch-permanent-delete'||p==='files/batch-permanent-delete')&&(m==='POST'||m==='DELETE'))return hBatchPermanentDelete(request,env);
     if(p.startsWith('files/trash/request-restore/')&&m==='POST')return hRequestRestore(request,env,p.replace('files/trash/request-restore/',''));
     if(p.startsWith('files/trash/approve-restore/')&&m==='POST')return hApproveRestore(request,env,p.replace('files/trash/approve-restore/',''));
     if(p.startsWith('files/trash/permanent-delete/')&&m==='DELETE')return hPermanentDelete(request,env,p.replace('files/trash/permanent-delete/',''));

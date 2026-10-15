@@ -290,6 +290,15 @@ function wireEvents() {
       if(lp&&lp.style.display!=='none'){ doUserLogin(); return; }
     }
     if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();var gs=$('globalSearch');if(gs)gs.focus();}
+    if((e.ctrlKey||e.metaKey)&&(e.key==='a'||e.key==='A')){
+      var tag = e.target && e.target.tagName;
+      if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.target.isContentEditable) {
+        if (typeof toggleSelectAllCurrent === 'function' && typeof _driveId !== 'undefined' && _driveId) {
+          e.preventDefault();
+          toggleSelectAllCurrent();
+        }
+      }
+    }
   });
 }
 

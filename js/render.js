@@ -24,6 +24,9 @@ function renderSidebarProfile(){
 
 function getAllowedDriveIds(){
   if(!S.ses||!S.ses.token){
+    if (S.db && Array.isArray(S.db.drives) && S.db.drives.length) {
+      return S.db.drives.map(d => d.id);
+    }
     if (typeof getOpenDriveIds === 'function') {
       return getOpenDriveIds(S.db);
     }
@@ -376,6 +379,7 @@ function toolbarHtml(driveId,folderId){
     <button class="btn-primary sm" onclick="triggerFileUpload()" title="Upload Files to this folder"><i class="fas fa-cloud-arrow-up"></i> <span>Upload</span></button>
     <button class="btn-ghost sm" onclick="triggerFolderUpload()" title="Upload entire folder from device"><i class="fas fa-folder-arrow-up"></i> <span>Folder ↑</span></button>
     <button class="btn-ghost sm" onclick="showNewFolderDialog()" title="Create New Folder"><i class="fas fa-folder-plus"></i> <span>+ Folder</span></button>
+    <button class="btn-ghost sm" id="toolbarSelectAllBtn" onclick="toggleSelectAllCurrent()" title="Select All Items (Ctrl+A)"><i class="fas fa-check-double"></i> <span>Select All</span></button>
   </div>
   <div class="filter-tabs">
     <button class="ftab ${(!S.filter||S.filter==='all')?'active':''}" data-filter="all">All</button>
@@ -877,6 +881,37 @@ function selectAllCurrentFiles() {
   updateSelectionUI();
 }
 
+function toggleSelectAllCurrent() {
+  if (!S.selectedFiles) S.selectedFiles = new Set();
+  const db = S.db || {};
+  const currentFolders = (db.folders || []).filter(f => f.driveId === _driveId && f.parentId === (_folderId || null) && !f.trashed);
+  const currentFiles = (db.files || []).filter(f => f.driveId === _driveId && f.folderId === (_folderId || null) && !f.trashed);
+  const allCurrent = [...currentFolders, ...currentFiles];
+  if (allCurrent.length === 0) return;
+
+  const allSelected = allCurrent.every(item => S.selectedFiles.has(item.id));
+  if (allSelected) {
+    allCurrent.forEach(item => S.selectedFiles.delete(item.id));
+  } else {
+    allCurrent.forEach(item => S.selectedFiles.add(item.id));
+  }
+  updateSelectionUI();
+}
+
+function selectFilesOnly() {
+  if (!S.selectedFiles) S.selectedFiles = new Set();
+  S.selectedFiles.clear();
+  const db = S.db || {};
+  const currentFiles = (db.files || []).filter(f => f.driveId === _driveId && f.folderId === (_folderId || null) && !f.trashed);
+  currentFiles.forEach(f => S.selectedFiles.add(f.id));
+  updateSelectionUI();
+  if (currentFiles.length === 0) {
+    toast('No loose files found in current view', 'info');
+  } else {
+    toast(`Selected ${currentFiles.length} file(s) (folders unselected)`, 'info');
+  }
+}
+
 function clearFileSelection() {
   if (S.selectedFiles) S.selectedFiles.clear();
   updateSelectionUI();
@@ -893,6 +928,8 @@ function updateSelectionUI() {
     const canDelete = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDelete !== false;
     const msDeleteBtn = bar.querySelector('.btn-danger');
     if (msDeleteBtn) msDeleteBtn.style.display = canDelete ? '' : 'none';
+    const msPermBtn = $('msPermanentDeleteBtn');
+    if (msPermBtn) msPermBtn.style.display = isAdmin ? '' : 'none';
   }
 
   document.querySelectorAll('.fg-card, .fl-row, .folder-chip-card').forEach(el => {
@@ -928,6 +965,38 @@ async function deleteSelectedFiles() {
   } else {
     toast(res ? (res.error || 'Failed to move items to trash') : 'Network error', 'error');
   }
+}
+
+async function permanentDeleteSelectedFiles() {
+  if (!S.selectedFiles || S.selectedFiles.size === 0) return;
+  const isAdmin = S.ses && S.ses.role === 'admin';
+  if (!isAdmin) {
+    toast('Only administrator can permanently delete items directly', 'warning');
+    return;
+  }
+  const count = S.selectedFiles.size;
+  if (!confirm(`PERMANENTLY DELETE ${count} selected item(s) from Google Drive?\n\nWARNING: This cannot be undone and will permanently free up Google Drive storage space immediately.`)) return;
+
+  const ids = Array.from(S.selectedFiles);
+  toast(`Permanently deleting ${count} item(s) from Google Drive…`, 'info');
+
+  let totalDeleted = 0;
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50);
+    const res = await apiBatchPermanentDelete(chunk);
+    if (res && res.ok) {
+      totalDeleted += (res.count || chunk.length);
+    } else {
+      toast(res ? (res.error || 'Failed during permanent deletion') : 'Network error', 'error');
+      break;
+    }
+  }
+
+  toast(`${totalDeleted} item(s) permanently deleted from Google Drive`, 'success');
+  clearFileSelection();
+  S.db = await apiFetchDB();
+  renderSidebarStorage();
+  renderFilesPage(_driveId, _folderId);
 }
 
 // ─── Quota Tracker ─────────────────────────────────────

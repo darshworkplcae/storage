@@ -357,7 +357,15 @@ async function processFolderFiles(files) {
 
   // ─── Phase 1: Pre-create ALL folder structures upfront in seconds ───
   var folderMap = {}; // relative path -> folderId
+  var folderGoogleMap = {}; // relative path -> googleFolderId
   var uniquePaths = new Set();
+
+  // If user is currently browsing inside a folder whose name matches rootFolder, avoid redundant nesting!
+  var curFolderObj = _folderId && S.db && S.db.folders ? S.db.folders.find(function(f){ return f.id === _folderId; }) : null;
+  if (curFolderObj && curFolderObj.name.toLowerCase() === rootFolder.toLowerCase()) {
+    folderMap[rootFolder] = _folderId;
+    if (curFolderObj.googleFolderId) folderGoogleMap[rootFolder] = curFolderObj.googleFolderId;
+  }
 
   files.forEach(function (f) {
     var relPath = f.webkitRelativePath || f.name;
@@ -382,10 +390,14 @@ async function processFolderFiles(files) {
     for (var sp = 0; sp < sortedPaths.length; sp++) {
       if (_cancelSignal && _cancelSignal.cancelled) break;
       var currentPath = sortedPaths[sp];
+      if (currentPath === rootFolder && folderMap[rootFolder]) {
+        continue;
+      }
       var pParts = currentPath.split('/');
       var parentAcc = pParts.slice(0, -1).join('/');
       var fName = pParts[pParts.length - 1];
       var curParentId = parentAcc ? folderMap[parentAcc] : (_folderId || null);
+      var curParentGoogleId = parentAcc ? folderGoogleMap[parentAcc] : (curFolderObj ? curFolderObj.googleFolderId : null);
 
       var existing = (S.db && S.db.folders || []).find(function (f) {
         return f.driveId === _driveId && f.parentId === curParentId && f.name.toLowerCase() === fName.toLowerCase() && !f.trashed;
@@ -393,13 +405,26 @@ async function processFolderFiles(files) {
 
       if (existing) {
         folderMap[currentPath] = existing.id;
+        if (existing.googleFolderId) folderGoogleMap[currentPath] = existing.googleFolderId;
       } else {
         try {
-          var created = await apiCreateFolder({ driveId: _driveId, parentFolderId: curParentId, name: fName });
+          var created = await apiCreateFolder({
+            driveId: _driveId,
+            parentFolderId: curParentId,
+            parentGoogleFolderId: curParentGoogleId,
+            name: fName
+          });
           if (created && created.folderId) {
             folderMap[currentPath] = created.folderId;
+            if (created.googleFolderId) folderGoogleMap[currentPath] = created.googleFolderId;
             if (!S.db.folders) S.db.folders = [];
-            S.db.folders.push({ id: created.folderId, driveId: _driveId, parentId: curParentId, name: fName });
+            S.db.folders.push({
+              id: created.folderId,
+              googleFolderId: created.googleFolderId,
+              driveId: _driveId,
+              parentId: curParentId,
+              name: fName
+            });
           }
         } catch (e) {
           console.warn('Folder pre-creation error:', fName, e);
@@ -431,6 +456,7 @@ async function processFolderFiles(files) {
       var parts = relPath.split('/');
       var parentAcc = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
       var parentId = (parentAcc && folderMap[parentAcc]) ? folderMap[parentAcc] : (_folderId || null);
+      var parentGoogleId = (parentAcc && folderGoogleMap[parentAcc]) ? folderGoogleMap[parentAcc] : (curFolderObj ? curFolderObj.googleFolderId : null);
 
       // Smart Resume & Deduplication in O(1) time
       var isAlreadyUploaded = existingFileSet.has((parentId || '') + '::' + file.name + '::' + file.size);
@@ -453,7 +479,7 @@ async function processFolderFiles(files) {
         skippedIds = [];
       }
 
-      var res = await uploadOne(file, parentId, item.tId);
+      var res = await uploadOne(file, parentId, item.tId, parentGoogleId);
       if (res && res.ok) uploadedCount++;
     }
 
@@ -576,7 +602,7 @@ async function generateLocalImageThumbnail(file) {
   });
 }
 
-async function uploadOne(file, targetFolderId, existingTid) {
+async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId) {
   _cancelSignal = { cancelled: false, paused: false, resumeResolve: null, xhr: null };
   var tId = existingTid || uid();
   var upBar = $('upBar'), upName = $('upName'), upStatus = $('upStatus'), upFill = $('upFill'), upPct = $('upPct'), upPauseBtn = $('upPauseBtn');
@@ -602,13 +628,19 @@ async function uploadOne(file, targetFolderId, existingTid) {
       try {
         if (_cancelSignal && _cancelSignal.cancelled) throw new Error('Cancelled');
         var destFolder = targetFolderId || _folderId || null;
+        var destGoogleFolder = targetGoogleFolderId || null;
+        if (!destGoogleFolder && destFolder && S.db && Array.isArray(S.db.folders)) {
+          var matchedF = S.db.folders.find(function(f){ return f.id === destFolder || f.googleFolderId === destFolder; });
+          if (matchedF && matchedF.googleFolderId) destGoogleFolder = matchedF.googleFolderId;
+          else if (destFolder.length > 20 && !destFolder.includes('-')) destGoogleFolder = destFolder;
+        }
         var isVid = (file.type && file.type.startsWith('video/')) || /\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(file.name);
         var isImg = (file.type && file.type.startsWith('image/')) || /\.(jpg|jpeg|png|webp|gif|bmp|heic|heif|avif)$/i.test(file.name);
         var localThumbPromise = isVid ? generateLocalVideoThumbnail(file) : isImg ? generateLocalImageThumbnail(file) : Promise.resolve(null);
 
         // Step 1: Get Google Drive resumable upload URL from backend
         if (upStatus) upStatus.textContent = (attempt > 1 ? 'Auto-retrying (' + attempt + '/' + maxRetries + ')… ' : '') + 'Connecting…';
-        var init = await apiUploadInit(_driveId, destFolder, file.name, file.size, file.type || 'application/octet-stream');
+        var init = await apiUploadInit(_driveId, destFolder, file.name, file.size, file.type || 'application/octet-stream', destGoogleFolder);
 
         if (!init || !init.uploadUrl) {
           throw new Error(init ? (init.error || 'Upload init failed — check that drive is connected') : 'Upload init response empty');
