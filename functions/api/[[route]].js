@@ -75,6 +75,7 @@ async function uGet(env,key){
     return null;
   }
 }
+let _lastUSetStatus = 'none';
 async function uSet(env,key,val,ttl){
   if(key==='td:db') {
     // Stamp a write-version so uGet can detect in-memory cache is newer than stale KV
@@ -89,13 +90,22 @@ async function uSet(env,key,val,ttl){
     try{
       const opts=(ttl&&ttl>=60)?{expirationTtl:ttl}:undefined;
       await kv.put(key,typeof val==='string'?val:JSON.stringify(val),opts);
+      _lastUSetStatus = 'kv_put_success_ver_' + _memDBCacheVer;
       return;
-    }catch(e){console.error('KV put error:',e);}
+    }catch(e){
+      _lastUSetStatus = 'kv_put_error: ' + (e.message||e);
+      console.error('KV put error:',e);
+    }
+  } else {
+    _lastUSetStatus = 'no_kv_binding_found';
   }
   try{
-    await fetch(`${gUU(env)}/set/${encodeURIComponent(key)}`,{method:'POST',headers:{Authorization:`Bearer ${gUT(env)}`,'Content-Type':'application/json'},body:JSON.stringify(val)});
+    const ur = await fetch(`${gUU(env)}/set/${encodeURIComponent(key)}`,{method:'POST',headers:{Authorization:`Bearer ${gUT(env)}`,'Content-Type':'application/json'},body:JSON.stringify(val)});
+    const ud = await ur.json().catch(()=>({}));
+    if (ud.error) _lastUSetStatus += ' | upstash_error: ' + ud.error;
+    else _lastUSetStatus += ' | upstash_ok';
     if(ttl) await uExp(env,key,ttl);
-  }catch(e){}
+  }catch(e){ _lastUSetStatus += ' | upstash_fetch_error: ' + e.message; }
 }
 async function uDel(env,key){
   const kv=getKV(env);
@@ -1474,10 +1484,15 @@ async function hDebugDB(req, env) {
   const action = url.searchParams.get('action') || 'view';
 
   if (action === 'view') {
+    const kv = getKV(env);
     const tera = (db.folders||[]).filter(f => (f.name||'').toLowerCase() === 'tera');
     const teraChildren = (db.folders||[]).filter(f => tera.some(t => t.id === f.parentId));
     const teraFiles = (db.files||[]).filter(f => tera.some(t => t.id === f.folderId));
     return J({
+      _dbVer: db._dbVer,
+      envKeys: Object.keys(env),
+      hasKV: !!kv,
+      lastUSetStatus: _lastUSetStatus,
       totalFolders: (db.folders||[]).length,
       totalFiles: (db.files||[]).length,
       drives: (db.drives||[]).map(d => ({id:d.id, name:d.name, email:d.email, rootFolderId:d.rootFolderId})),
