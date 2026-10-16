@@ -430,37 +430,45 @@ async function processFolderFiles(files) {
   await requestWakeLock();
   toast('Preparing folder "' + rootFolder + '" (' + files.length + ' files)…', 'info');
 
+
   // ── Batch progress tracking ──
-  var _batchTotal = files.length;
-  var _batchDone = 0;       // files completed (uploaded or skipped)
-  var _batchUploaded = 0;   // files actually uploaded (not skipped)
-  var _batchBytes = 0;      // bytes uploaded so far this session
-  var _batchTotalBytes = files.reduce(function(s,f){ return s + (f.size||0); }, 0);
+  var _batchTotal = files.length;          // all files (for overall %)
+  var _batchDone = 0;                       // total processed (uploaded + skipped + failed)
+  var _batchUploaded = 0;                   // actually uploaded this session
+  var _batchSkipped = 0;                    // skipped (already existed)
   var _batchStartTs = Date.now();
-  var _batchSpeedSamples = []; // rolling [bytes, ms] pairs for ETA
+  // _estUploads and _estSkips come from pre-scan below
 
   // Show overall progress bar
   var upOverall = $('upOverall'), upOverallFill = $('upOverallFill'), upOverallLabel = $('upOverallLabel');
   if (upOverall) upOverall.classList.remove('hidden');
 
-  function updateOverallBar(extraBytes, speed) {
+  // type: 'upload' | 'skip' | 'fail'
+  function updateOverallBar(type, bytes) {
     _batchDone++;
-    if (extraBytes) _batchBytes += extraBytes;
+    if (type === 'upload') {
+      _batchUploaded++;
+    } else if (type === 'skip') {
+      _batchSkipped++;
+    }
+    // Progress % based on total files processed
     var pct = _batchTotal > 0 ? Math.round(_batchDone / _batchTotal * 100) : 0;
     if (upOverallFill) upOverallFill.style.width = pct + '%';
     if (upOverallLabel) {
-      var remaining = _batchTotal - _batchDone;
+      // "left" = actual uploads remaining = estimated total uploads - uploaded so far
+      var uploadsLeft = Math.max(0, _estUploads - _batchUploaded);
+      var parts = [];
+      parts.push('\u2191 ' + _batchUploaded + ' / ' + _estUploads + ' uploaded');
+      if (_batchSkipped > 0) parts.push('\u26a1 ' + _batchSkipped + ' skipped');
+      // ETA based ONLY on upload time (not affected by instant skips)
       var etaStr = '';
-      // Use wall-clock time-per-file for ETA — accurate even for tiny files
-      // because API round-trips dominate, not bytes transferred
-      if (_batchDone >= 3) {
-        var elapsed = (Date.now() - _batchStartTs) / 1000; // seconds
-        var secPerFile = elapsed / _batchDone;
-        var etaSec = Math.round(secPerFile * remaining);
+      if (_batchUploaded >= 3 && uploadsLeft > 0) {
+        var elapsed = (Date.now() - _batchStartTs) / 1000;
+        var secPerUpload = elapsed / _batchUploaded;
+        var etaSec = Math.round(secPerUpload * uploadsLeft);
         if (etaSec > 0) etaStr = ' · ' + fmtEtaSec(etaSec);
       }
-      upOverallLabel.textContent = 'File ' + _batchDone + ' / ' + _batchTotal +
-        (remaining > 0 ? ' · ' + remaining + ' left' : ' · Done!') + etaStr;
+      upOverallLabel.textContent = parts.join(' · ') + (uploadsLeft > 0 ? ' · ' + uploadsLeft + ' left' : ' · Done!') + etaStr;
     }
   }
 
@@ -473,18 +481,31 @@ async function processFolderFiles(files) {
   tmAddBatchQueued(fileItems.map(function (x) { return { id: x.tId, name: x.name, size: x.size }; }));
   renderTM();
 
+
   // Build fast O(1) lookup set for existing files
   var existingFileSet = new Set();
+  // Also build a simpler name::size set for fast pre-scan (no folderId needed)
+  var existingNameSizeSet = new Set();
   // If user chose 'replace' or 'new folder', skip dedup — re-upload all files
   if (_dupAction !== 'replace' && _dupAction !== 'new') {
     if (S.db && Array.isArray(S.db.files)) {
       S.db.files.forEach(function(f) {
         if (!f.trashed && f.driveId === _driveId) {
           existingFileSet.add((f.folderId || '') + '::' + f.name + '::' + f.size);
+          existingNameSizeSet.add(f.name + '::' + f.size);
         }
       });
     }
   }
+
+  // ── Pre-scan: estimate how many files will be skipped vs uploaded ──
+  // Uses name+size only (O(n), fast) — approximate but very accurate for same-folder uploads
+  var _estSkips = 0;
+  fileItems.forEach(function(item) {
+    if (existingNameSizeSet.has(item.file.name + '::' + item.file.size)) _estSkips++;
+  });
+  var _estUploads = fileItems.length - _estSkips; // files that will actually be uploaded
+
 
   // ─── Phase 1: Pre-create ALL folder structures upfront in seconds ───
   var folderMap = {}; // relative path -> folderId
@@ -595,7 +616,7 @@ async function processFolderFiles(files) {
       if (isAlreadyUploaded) {
         skippedCount++;
         skippedIds.push(item.tId);
-        updateOverallBar(0, 0); // count skips toward total progress
+        updateOverallBar('skip', 0); // count skips toward total progress
         if (skippedIds.length >= 25) {
           tmBatchDone(skippedIds);
           skippedIds = [];
@@ -614,9 +635,9 @@ async function processFolderFiles(files) {
       var res = await uploadOne(file, parentId, item.tId, parentGoogleId);
       if (res && res.ok) {
         uploadedCount++;
-        updateOverallBar(file.size, res._speed || 0);
+        updateOverallBar('upload', file.size);
       } else {
-        updateOverallBar(0, 0); // failed — still count toward progress
+        updateOverallBar('fail', 0); // failed — still count toward progress
       }
     }
 
