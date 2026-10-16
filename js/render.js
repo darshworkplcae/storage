@@ -1193,6 +1193,28 @@ function renderTM(){
   const done=transfers.filter(t=>t.status==='done');
   const totalSpeed=uploading.reduce((sum, t) => sum + (t.speed || 0), 0);
 
+  // Calculate remaining queue bytes across all active (uploading + queued) files
+  const remainingBytes = active.reduce((sum, t) => {
+    const fSize = t.size || 0;
+    const fUploaded = (t.uploaded || (t.pct ? Math.round(fSize * t.pct / 100) : 0));
+    return sum + Math.max(0, fSize - fUploaded);
+  }, 0);
+
+  // Smooth rolling speed to prevent jumpy ETAs
+  if (totalSpeed > 0) {
+    window._rollingUploadSpeed = window._rollingUploadSpeed 
+      ? (window._rollingUploadSpeed * 0.75 + totalSpeed * 0.25)
+      : totalSpeed;
+  }
+  const effectiveSpeed = (window._rollingUploadSpeed && window._rollingUploadSpeed > 1024) ? window._rollingUploadSpeed : totalSpeed;
+  let queueEtaStr = '';
+  if (effectiveSpeed > 1024 && remainingBytes > 0 && active.length > 0) {
+    const sec = Math.round(remainingBytes / effectiveSpeed);
+    if (sec > 0 && sec < 86400 * 2) {
+      queueEtaStr = fmtEtaSec(sec);
+    }
+  }
+
   if(badge){
     if (active.length > 0) {
       badge.textContent = active.length;
@@ -1217,10 +1239,10 @@ function renderTM(){
   // Update live speed in topbar network meter
   if(speedEl){
     if(totalSpeed > 0){
-      speedEl.textContent = fmtSpeed(totalSpeed);
+      speedEl.textContent = fmtSpeed(totalSpeed) + (queueEtaStr ? ' · ' + queueEtaStr : '');
       speedEl.classList.add('active');
     } else if(uploading.length > 0){
-      speedEl.textContent = 'Active';
+      speedEl.textContent = 'Active' + (queueEtaStr ? ' · ' + queueEtaStr : '');
       speedEl.classList.add('active');
     } else if(active.length > 0){
       speedEl.textContent = `${active.length} queued`;
@@ -1235,8 +1257,8 @@ function renderTM(){
   }
 
   if(hdSpeed){
-    if(totalSpeed > 0) hdSpeed.textContent = `(${fmtSpeed(totalSpeed)})`;
-    else if(uploading.length > 0) hdSpeed.textContent = `(${uploading.length} active)`;
+    if(totalSpeed > 0) hdSpeed.textContent = `(${fmtSpeed(totalSpeed)}${queueEtaStr ? ' · ' + queueEtaStr : ''})`;
+    else if(uploading.length > 0) hdSpeed.textContent = `(${uploading.length} active${queueEtaStr ? ' · ' + queueEtaStr : ''})`;
     else if(failed.length > 0) hdSpeed.textContent = `(${failed.length} failed)`;
     else hdSpeed.textContent = '';
   }
@@ -1253,6 +1275,7 @@ function renderTM(){
       ${done.length ? `<span class="tm-chip done"><i class="fas fa-check"></i> ${done.length} Done</span>` : ''}
       ${failed.length ? `<span class="tm-chip failed"><i class="fas fa-circle-exclamation"></i> ${failed.length} Failed</span>` : ''}
       ${active.length ? `<span class="tm-chip active"><i class="fas fa-spinner fa-spin"></i> ${active.length} Active</span>` : ''}
+      ${(queueEtaStr && active.length) ? `<span class="tm-chip eta" style="background:rgba(78,134,245,0.15);color:#4e86f5;font-weight:600"><i class="fas fa-clock"></i> ${queueEtaStr} (${fmt(remainingBytes)})</span>` : ''}
     </div>`;
   }
 

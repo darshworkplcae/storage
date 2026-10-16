@@ -437,7 +437,8 @@ async function processFolderFiles(files) {
   var _batchUploaded = 0;                   // actually uploaded this session
   var _batchSkipped = 0;                    // skipped (already existed)
   var _batchStartTs = Date.now();
-  // _estUploads and _estSkips come from pre-scan below
+  var _uploadedBatchBytes = 0;
+  var _estUploadBytes = 0;
 
   // Show overall progress bar
   var upOverall = $('upOverall'), upOverallFill = $('upOverallFill'), upOverallLabel = $('upOverallLabel');
@@ -448,6 +449,7 @@ async function processFolderFiles(files) {
     _batchDone++;
     if (type === 'upload') {
       _batchUploaded++;
+      _uploadedBatchBytes += (bytes || 0);
     } else if (type === 'skip') {
       _batchSkipped++;
     }
@@ -455,20 +457,23 @@ async function processFolderFiles(files) {
     var pct = _batchTotal > 0 ? Math.round(_batchDone / _batchTotal * 100) : 0;
     if (upOverallFill) upOverallFill.style.width = pct + '%';
     if (upOverallLabel) {
-      // "left" = actual uploads remaining = estimated total uploads - uploaded so far
       var uploadsLeft = Math.max(0, _estUploads - _batchUploaded);
       var parts = [];
       parts.push('\u2191 ' + _batchUploaded + ' / ' + _estUploads + ' uploaded');
       if (_batchSkipped > 0) parts.push('\u26a1 ' + _batchSkipped + ' skipped');
-      // ETA based ONLY on upload time (not affected by instant skips)
+
+      // Byte-accurate ETA based on remaining un-uploaded bytes and rolling speed
+      var remBytes = Math.max(0, _estUploadBytes - _uploadedBatchBytes);
       var etaStr = '';
-      if (_batchUploaded >= 3 && uploadsLeft > 0) {
-        var elapsed = (Date.now() - _batchStartTs) / 1000;
-        var secPerUpload = elapsed / _batchUploaded;
-        var etaSec = Math.round(secPerUpload * uploadsLeft);
-        if (etaSec > 0) etaStr = ' · ' + fmtEtaSec(etaSec);
+      var activeSpeed = (window._rollingUploadSpeed || 0);
+      if (activeSpeed > 2048 && remBytes > 0 && uploadsLeft > 0) {
+        var etaSec = Math.round(remBytes / activeSpeed);
+        if (etaSec > 0 && etaSec < 86400 * 2) {
+          etaStr = ' · ~' + fmtEtaSec(etaSec);
+        }
       }
-      upOverallLabel.textContent = parts.join(' · ') + (uploadsLeft > 0 ? ' · ' + uploadsLeft + ' left' : ' · Done!') + etaStr;
+      var remSizeStr = remBytes > 0 && uploadsLeft > 0 ? ' (' + fmt(remBytes) + ')' : '';
+      upOverallLabel.textContent = parts.join(' · ') + (uploadsLeft > 0 ? ' · ' + uploadsLeft + ' left' + remSizeStr : ' · Done!') + etaStr;
     }
   }
 
@@ -501,10 +506,16 @@ async function processFolderFiles(files) {
   }
 
   // ── Pre-scan: estimate how many files will be skipped vs uploaded ──
-  // Uses name+size only (O(n), fast) — approximate but very accurate for same-folder uploads
   var _estSkips = 0;
+  _estUploadBytes = 0;
   fileItems.forEach(function(item) {
-    if (existingNameSizeSet.has(item.file.name + '::' + item.file.size)) _estSkips++;
+    var isSkip = existingNameSizeSet.has(item.file.name + '::' + item.file.size) ||
+                 existingNameSizeSet.has((item.file.name || '').toLowerCase().trim() + '::' + item.file.size);
+    if (isSkip) {
+      _estSkips++;
+    } else {
+      _estUploadBytes += (item.file.size || 0);
+    }
   });
   var _estUploads = fileItems.length - _estSkips; // files that will actually be uploaded
 
