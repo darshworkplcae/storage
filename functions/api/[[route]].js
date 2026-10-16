@@ -10,6 +10,7 @@ function gGS(e){return e.GOOGLE_CLIENT_SECRET||'';}
 const COR={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST,DELETE,PUT,OPTIONS','Access-Control-Allow-Headers':'Content-Type,Authorization,Range','Access-Control-Expose-Headers':'Content-Range,Content-Length,Accept-Ranges'};
 function J(d,s){return new Response(JSON.stringify(d),{status:s||200,headers:{...COR,'Content-Type':'application/json'}});}
 let _memDBCache = null;
+let _memDBCacheVer = 0; // write-version counter; incremented on every uSet('td:db')
 const _memSesCache = new Map();
 function getKV(env){return env.TELEDRIVE_KV||env.KV||env.STORAGE||env.DB_KV||null;}
 async function uGet(env,key){
@@ -21,19 +22,26 @@ async function uGet(env,key){
         try{
           const p = JSON.parse(raw);
           if (key==='td:db') {
-            if (_memDBCache && _memDBCache.folders) {
-              const knownIds = new Set((p.folders||[]).map(f => f.id));
-              _memDBCache.folders.forEach(f => {
-                if (!knownIds.has(f.id)) (p.folders||(p.folders=[])).push(f);
-              });
+            const kvVer = p._dbVer || 0;
+            // If our in-memory cache is from a NEWER write than what KV returned,
+            // trust the in-memory version (same worker-instance handled the write)
+            if (_memDBCache && _memDBCacheVer > kvVer) {
+              return _memDBCache;
             }
+            // KV is current (same or newer version) — only merge VERY RECENT
+            // uploaded files that may not have propagated yet (75-second window).
+            // NEVER merge folders — prevents deleted/deduped folders from reappearing.
             if (_memDBCache && _memDBCache.files) {
+              const cutoff = Date.now() - 75000;
               const knownFIds = new Set((p.files||[]).map(f => f.id));
               _memDBCache.files.forEach(f => {
-                if (!knownFIds.has(f.id)) (p.files||(p.files=[])).push(f);
+                if (!knownFIds.has(f.id) && f.date && new Date(f.date).getTime() > cutoff) {
+                  (p.files||(p.files=[])).push(f);
+                }
               });
             }
             _memDBCache = p;
+            _memDBCacheVer = kvVer;
           }
           return p;
         }catch(e){return raw;}
@@ -68,7 +76,14 @@ async function uGet(env,key){
   }
 }
 async function uSet(env,key,val,ttl){
-  if(key==='td:db') _memDBCache = val;
+  if(key==='td:db') {
+    // Stamp a write-version so uGet can detect in-memory cache is newer than stale KV
+    if(val && typeof val === 'object') {
+      val._dbVer = (_memDBCacheVer || 0) + 1;
+      _memDBCacheVer = val._dbVer;
+    }
+    _memDBCache = val;
+  }
   const kv=getKV(env);
   if(kv){
     try{
@@ -1585,6 +1600,11 @@ async function hBatchPermanentDelete(req,env){
     if(drv && typeof f.size === 'number') drv.usedBytes = Math.max(0, (drv.usedBytes || 0) - f.size);
   });
 
+  // Build set of file IDs to remove from DB
+  const fileDelIds = new Set();
+  toDelete.forEach(f => { if(f.id) fileDelIds.add(f.id); if(f.googleFileId) fileDelIds.add(f.googleFileId); });
+
+  // Build set of folder IDs to remove (cascade to child folders)
   const foldDelSet = new Set(foldersToDelete.map(x=>x.id));
   let changed = true;
   while (changed) {
@@ -1596,7 +1616,8 @@ async function hBatchPermanentDelete(req,env){
       }
     }
   }
-  db.files=(db.files||[]).filter(f=>!delIds.includes(f.id) && !delIds.includes(f.googleFileId) && (!f.folderId || !foldDelSet.has(f.folderId)));
+
+  db.files=(db.files||[]).filter(f=>!fileDelIds.has(f.id) && !fileDelIds.has(f.googleFileId) && (!f.folderId || !foldDelSet.has(f.folderId)));
   db.folders=(db.folders||[]).filter(f=>!foldDelSet.has(f.id));
   if(_memDBCache) {
     _memDBCache.files = db.files;

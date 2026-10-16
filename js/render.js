@@ -1001,6 +1001,8 @@ async function permanentDeleteSelectedFiles() {
   toast(`${totalDeleted} item(s) permanently deleted from Google Drive`, 'success');
   clearFileSelection();
   S.db = await apiFetchDB();
+  // Cache updated state so page refresh within 90s doesn't show deleted items
+  saveFreshDBOverride(S.db.folders, S.db.files);
   renderSidebarStorage();
   renderFilesPage(_driveId, _folderId);
 }

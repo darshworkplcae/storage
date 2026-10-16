@@ -107,7 +107,41 @@ async function apiFetch(path, opts) {
   } catch(e) { return { error: e.message }; }
 }
 
-function apiFetchDB()             { return apiFetch('db'); }
+// Save updated folders/files to sessionStorage after dedup or batch delete.
+// apiFetchDB will apply this override for 90 seconds to survive page refreshes
+// during the Cloudflare KV propagation window.
+function saveFreshDBOverride(folders, files) {
+  try {
+    sessionStorage.setItem('_td_db_override', JSON.stringify({
+      folders: folders,
+      files:   files,
+      ts:      Date.now()
+    }));
+  } catch(e) {}
+}
+function clearFreshDBOverride() {
+  try { sessionStorage.removeItem('_td_db_override'); } catch(e) {}
+}
+
+async function apiFetchDB() {
+  var db = await apiFetch('db');
+  if (!db || db.error) return db;
+  // Apply sessionStorage override if it's fresh (within 90s — one KV propagation window)
+  try {
+    var raw = sessionStorage.getItem('_td_db_override');
+    if (raw) {
+      var ov = JSON.parse(raw);
+      if (ov && ov.ts && (Date.now() - ov.ts) < 90000) {
+        if (ov.folders) db.folders = ov.folders;
+        if (ov.files)   db.files   = ov.files;
+      } else {
+        sessionStorage.removeItem('_td_db_override'); // expired
+      }
+    }
+  } catch(e) {}
+  return db;
+}
+
 function apiAdminLogin(pass)      { return apiFetch('auth/login',       { method:'POST', body: JSON.stringify({ password:pass }) }); }
 function apiUserLogin(u, p)       { return apiFetch('auth/user-login',  { method:'POST', body: JSON.stringify({ username:u, password:p }) }); }
 function apiDriveQuota()          { return apiFetch('drives/quota'); }

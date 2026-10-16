@@ -872,10 +872,12 @@ async function dedupFolders(driveId, driveName) {
   }
 
   toast('✅ Dedup done! Merged ' + res.merged + ' folder(s), moved ' + res.movedFiles + ' file(s). Refreshing…', 'success', 8000);
-  // Use the folders/files returned directly from the response (avoids KV propagation delay)
+  // Use folders/files from response directly — avoids KV propagation delay
   if (res.updatedFolders) {
     S.db.folders = res.updatedFolders;
     if (res.updatedFiles) S.db.files = res.updatedFiles;
+    // Cache to sessionStorage so page refreshes within 90s also show correct data
+    saveFreshDBOverride(res.updatedFolders, res.updatedFiles || S.db.files);
   } else {
     S.db = await apiFetchDB();
   }
