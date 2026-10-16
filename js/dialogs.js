@@ -225,7 +225,7 @@ async function uploadFiles(fileList, targetFolderId) {
       if (j > 0 && j % 15 === 0) {
         await new Promise(function(r) { setTimeout(r, 0); });
       }
-      var res = await uploadOne(fileItems[j].file, destFolder, fileItems[j].tId);
+      var res = await uploadOne(fileItems[j].file, destFolder, fileItems[j].tId, null, targetDrive);
       if (res && res.ok) uploadedCount++;
     }
     if (uploadedCount === fileItems.length) {
@@ -299,7 +299,9 @@ async function uploadFolder() {
 }
 
 async function processFolderFiles(files) {
-  var isOpenTarget = (_driveId && S.db && isDriveOpen(_driveId, S.db));
+  var batchDriveId = _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : null);
+  var batchFolderId = _folderId || null;
+  var isOpenTarget = (batchDriveId && S.db && isDriveOpen(batchDriveId, S.db));
   var isAuth = (S.ses && S.ses.token);
 
   if (!files.length) return;
@@ -326,8 +328,8 @@ async function processFolderFiles(files) {
   // ─── Smart Duplicate Folder Detection ───
   // Check if a folder with this exact name already exists in the target location
   var _existingRootFolder = (S.db && S.db.folders || []).find(function(f) {
-    return f.driveId === _driveId &&
-      (f.parentId || null) === (_folderId || null) &&
+    return f.driveId === batchDriveId &&
+      (f.parentId || null) === (batchFolderId || null) &&
       f.name.toLowerCase() === rootFolder.toLowerCase() &&
       !f.trashed;
   });
@@ -342,14 +344,14 @@ async function processFolderFiles(files) {
       var _subtreeFolderIds = new Set([_existingRootFolder.id]);
       (function collectSubtree(parentId) {
         (S.db.folders || []).forEach(function(sf) {
-          if (sf.parentId === parentId && !sf.trashed && sf.driveId === _driveId) {
+          if (sf.parentId === parentId && !sf.trashed && sf.driveId === batchDriveId) {
             _subtreeFolderIds.add(sf.id);
             collectSubtree(sf.id);
           }
         });
       })(_existingRootFolder.id);
       S.db.files.forEach(function(ff) {
-        if (!ff.trashed && ff.driveId === _driveId && _subtreeFolderIds.has(ff.folderId)) {
+        if (!ff.trashed && ff.driveId === batchDriveId && _subtreeFolderIds.has(ff.folderId)) {
           _subtreeSet.add(ff.name + '::' + ff.size);
         }
       });
@@ -415,8 +417,8 @@ async function processFolderFiles(files) {
 
   try {
     localStorage.setItem('td_active_batch', JSON.stringify({
-      driveId: _driveId,
-      folderId: _folderId || null,
+      driveId: batchDriveId,
+      folderId: batchFolderId,
       folderName: rootFolder,
       total: files.length,
       time: Date.now()
@@ -482,7 +484,7 @@ async function processFolderFiles(files) {
   var fileItems = files.map(function (f) {
     return { file: f, tId: uid(), name: f.name, size: f.size };
   });
-  poolUploadFiles(fileItems, _driveId, null);
+  poolUploadFiles(fileItems, batchDriveId, null);
   tmAddBatchQueued(fileItems.map(function (x) { return { id: x.tId, name: x.name, size: x.size }; }));
   renderTM();
 
@@ -495,7 +497,7 @@ async function processFolderFiles(files) {
   if (_dupAction !== 'replace' && _dupAction !== 'new') {
     if (S.db && Array.isArray(S.db.files)) {
       S.db.files.forEach(function(f) {
-        if (!f.trashed && f.driveId === _driveId) {
+        if (!f.trashed && f.driveId === batchDriveId) {
           existingFileSet.add((f.folderId || '') + '::' + f.name + '::' + f.size);
           existingFileSet.add((f.folderId || '') + '::' + (f.name || '').toLowerCase().trim() + '::' + f.size);
           existingNameSizeSet.add(f.name + '::' + f.size);
@@ -526,9 +528,9 @@ async function processFolderFiles(files) {
   var uniquePaths = new Set();
 
   // If user is currently browsing inside a folder whose name matches rootFolder, avoid redundant nesting!
-  var curFolderObj = _folderId && S.db && S.db.folders ? S.db.folders.find(function(f){ return f.id === _folderId; }) : null;
+  var curFolderObj = batchFolderId && S.db && S.db.folders ? S.db.folders.find(function(f){ return f.id === batchFolderId; }) : null;
   if (curFolderObj && curFolderObj.name.toLowerCase() === rootFolder.toLowerCase()) {
-    folderMap[rootFolder] = _folderId;
+    folderMap[rootFolder] = batchFolderId;
     if (curFolderObj.googleFolderId) folderGoogleMap[rootFolder] = curFolderObj.googleFolderId;
   }
 
@@ -561,11 +563,11 @@ async function processFolderFiles(files) {
       var pParts = currentPath.split('/');
       var parentAcc = pParts.slice(0, -1).join('/');
       var fName = pParts[pParts.length - 1];
-      var curParentId = parentAcc ? folderMap[parentAcc] : (_folderId || null);
+      var curParentId = parentAcc ? folderMap[parentAcc] : (batchFolderId || null);
       var curParentGoogleId = parentAcc ? folderGoogleMap[parentAcc] : (curFolderObj ? curFolderObj.googleFolderId : null);
 
       var existing = (S.db && S.db.folders || []).find(function (f) {
-        return f.driveId === _driveId && f.parentId === curParentId && f.name.toLowerCase() === fName.toLowerCase() && !f.trashed;
+        return f.driveId === batchDriveId && f.parentId === curParentId && f.name.toLowerCase() === fName.toLowerCase() && !f.trashed;
       });
 
       if (existing) {
@@ -574,7 +576,7 @@ async function processFolderFiles(files) {
       } else {
         try {
           var created = await apiCreateFolder({
-            driveId: _driveId,
+            driveId: batchDriveId,
             parentFolderId: curParentId,
             parentGoogleFolderId: curParentGoogleId,
             name: fName
@@ -586,7 +588,7 @@ async function processFolderFiles(files) {
             S.db.folders.push({
               id: created.folderId,
               googleFolderId: created.googleFolderId,
-              driveId: _driveId,
+              driveId: batchDriveId,
               parentId: curParentId,
               name: fName
             });
@@ -596,7 +598,7 @@ async function processFolderFiles(files) {
           // Recovery: the folder may have been created on Google Drive but the response timed out.
           // Check S.db.folders in case it was pushed by a previous attempt — prevents duplicates on resume.
           var recovered = (S.db && S.db.folders || []).find(function(r) {
-            return r.driveId === _driveId && r.parentId === curParentId
+            return r.driveId === batchDriveId && r.parentId === curParentId
               && r.name.toLowerCase() === fName.toLowerCase() && !r.trashed;
           });
           if (recovered) {
@@ -685,7 +687,7 @@ async function processFolderFiles(files) {
         skippedIds = [];
       }
 
-      var res = await uploadOne(file, parentId, item.tId, parentGoogleId);
+      var res = await uploadOne(file, parentId, item.tId, parentGoogleId, batchDriveId);
       if (res && res.ok) {
         uploadedCount++;
         updateOverallBar('upload', file.size);
@@ -816,10 +818,14 @@ async function generateLocalImageThumbnail(file) {
   });
 }
 
-async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId) {
+async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId, targetDriveId) {
   _cancelSignal = { cancelled: false, paused: false, resumeResolve: null, xhr: null };
   var tId = existingTid || uid();
   var upBar = $('upBar'), upName = $('upName'), upStatus = $('upStatus'), upFill = $('upFill'), upPct = $('upPct'), upPauseBtn = $('upPauseBtn');
+
+  // Resolve target drive reliably: parameter > folder's driveId > current _driveId > default drive in db
+  var targetFolderObj = targetFolderId && S.db && Array.isArray(S.db.folders) ? S.db.folders.find(function(f){ return f.id === targetFolderId || f.googleFolderId === targetFolderId; }) : null;
+  var resolvedDriveId = targetDriveId || (targetFolderObj ? targetFolderObj.driveId : null) || _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : null);
 
   if (upBar) {
     upBar.classList.remove('hidden');
@@ -832,7 +838,7 @@ async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId
   if (upName) upName.textContent = file.name;
   if (upStatus) upStatus.textContent = 'Initializing…';
   tmAdd(tId, file.name, file.size);
-  poolUploadFiles([{ file: file, tId: tId }], _driveId, targetFolderId);
+  poolUploadFiles([{ file: file, tId: tId }], resolvedDriveId, targetFolderId);
 
   var maxRetries = 2;
   var lastErr = null;
@@ -854,7 +860,7 @@ async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId
 
         // Step 1: Get Google Drive resumable upload URL from backend
         if (upStatus) upStatus.textContent = (attempt > 1 ? 'Auto-retrying (' + attempt + '/' + maxRetries + ')… ' : '') + 'Connecting…';
-        var init = await apiUploadInit(_driveId, destFolder, file.name, file.size, file.type || 'application/octet-stream', destGoogleFolder);
+        var init = await apiUploadInit(resolvedDriveId, destFolder, file.name, file.size, file.type || 'application/octet-stream', destGoogleFolder);
 
         if (!init || !init.uploadUrl) {
           throw new Error(init ? (init.error || 'Upload init failed — check that drive is connected') : 'Upload init response empty');
@@ -895,7 +901,7 @@ async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId
 
         // Step 3: Save metadata to our DB
         if (upStatus) upStatus.textContent = 'Saving…';
-        var activeDriveId = _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : null);
+        var activeDriveId = resolvedDriveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : null);
         await apiUploadComplete({
           fileLocalId: init.fileLocalId,
           googleFileId: result.googleFileId,
@@ -993,8 +999,8 @@ async function retrySingleUpload(tId) {
 
   try {
     var destFolder = pooled.folderId || _folderId || null;
-    if (pooled.driveId) _driveId = pooled.driveId;
-    var res = await uploadOne(pooled.file, destFolder, item.id);
+    var retryDriveId = pooled.driveId || (destFolder && S.db && Array.isArray(S.db.folders) ? (S.db.folders.find(function(f){ return f.id === destFolder; })||{}).driveId : null) || _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : null);
+    var res = await uploadOne(pooled.file, destFolder, item.id, null, retryDriveId);
     if (res && res.ok) {
       toast('"' + item.name + '" uploaded successfully!', 'success');
     }
@@ -1065,8 +1071,8 @@ async function retryAllFailedUploads() {
       if (_cancelSignal && _cancelSignal.cancelled) break;
       var pair = canRetry[i];
       var destFolder = pair.pooled.folderId || _folderId || null;
-      if (pair.pooled.driveId) _driveId = pair.pooled.driveId;
-      var res = await uploadOne(pair.pooled.file, destFolder, pair.item.id);
+      var retryDriveId = pair.pooled.driveId || (destFolder && S.db && Array.isArray(S.db.folders) ? (S.db.folders.find(function(f){ return f.id === destFolder; })||{}).driveId : null) || _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : null);
+      var res = await uploadOne(pair.pooled.file, destFolder, pair.item.id, null, retryDriveId);
       if (res && res.ok) successCount++;
     }
   } finally {

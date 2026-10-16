@@ -794,8 +794,15 @@ async function hRestoreDB(req,env){
 }
 async function hUI(req,env){
   const body=await req.json().catch(()=>({}));
-  const{driveId,folderId,googleFolderId,name,size,mimeType}=body;
+  let {driveId,folderId,googleFolderId,name,size,mimeType}=body;
   const db=await uGet(env,'td:db');
+  if(!driveId && folderId) {
+    const f = (db && db.folders || []).find(x => x.id === folderId);
+    if(f && f.driveId) driveId = f.driveId;
+  }
+  if(!driveId && db && db.drives && db.drives.length) {
+    driveId = db.drives[0].id;
+  }
   const isOpenTarget=isDriveOpen(driveId,db);
   const ses=await vSes(req,env,null);
   if(!ses && !isOpenTarget) return J({error:'Sign in required'},401);
@@ -803,9 +810,9 @@ async function hUI(req,env){
     const isMedia = (mimeType && (mimeType.startsWith('image/') || mimeType.startsWith('video/'))) || (name && /\.(jpg|jpeg|png|gif|webp|mp4|mov|mkv|webm|avi)$/i.test(name));
     if(!isMedia) return J({error:'Open drive only allows photos and videos'},400);
   }
-  const drv=(db&&db.drives||[]).find(d=>d.id===driveId);
+  const drv=(db&&db.drives||[]).find(d=>d.id===driveId) || (db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
-  if(!ses && drv.passwordHash && !await vDriveToken(req, env, driveId)){
+  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
     return J({error:'Drive is locked by password'},403);
   }
   let at;
@@ -855,15 +862,22 @@ async function hUI(req,env){
 }
 async function hUC(req,env){
   const body=await req.json().catch(()=>({}));
-  const{fileLocalId,googleFileId,driveId,folderId,name,size,mimeType,thumb}=body;
+  let {fileLocalId,googleFileId,driveId,folderId,name,size,mimeType,thumb}=body;
   const db=await uGet(env,'td:db');
+  if(!driveId && folderId) {
+    const f = (db && db.folders || []).find(x => x.id === folderId);
+    if(f && f.driveId) driveId = f.driveId;
+  }
+  if(!driveId && db && db.drives && db.drives.length) {
+    driveId = db.drives[0].id;
+  }
   const isOpenTarget=isDriveOpen(driveId,db);
   const ses=await vSes(req,env,null);
   if(!ses && !isOpenTarget) return J({error:'Unauthorized'},401);
   if(!db) return J({error:'DB error'},500);
-  const drv=(db.drives||[]).find(d=>d.id===driveId);
+  const drv=(db.drives||[]).find(d=>d.id===driveId) || (db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
-  if(!ses && drv.passwordHash && !await vDriveToken(req, env, driveId)){
+  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
     return J({error:'Drive is locked by password'},403);
   }
   if(!db.files) db.files=[];
@@ -882,7 +896,7 @@ async function hUC(req,env){
     const newFile = {
       id:fileLocalId,
       googleFileId,
-      driveId,
+      driveId: drv.id,
       folderId:folderId||null,
       name,
       size,
@@ -2219,15 +2233,23 @@ async function hEmptyTrash(req,env){
 }
 
 async function hMF(req,env){
-  const{driveId,parentFolderId,parentGoogleFolderId,name}=await req.json().catch(()=>({}));
+  const body=await req.json().catch(()=>({}));
+  let {driveId,parentFolderId,parentGoogleFolderId,name}=body;
   const db=await uGet(env,'td:db');
+  if(!driveId && parentFolderId) {
+    const f = (db && db.folders || []).find(x => x.id === parentFolderId);
+    if(f && f.driveId) driveId = f.driveId;
+  }
+  if(!driveId && db && db.drives && db.drives.length) {
+    driveId = db.drives[0].id;
+  }
   const isOpenTarget=isDriveOpen(driveId,db);
   const ses=await vSes(req,env,null);
   if(!ses&&!isOpenTarget) return J({error:'Unauthorized'},401);
   if(!name||!name.trim()) return J({error:'Folder name required'},400);
-  const drv=(db&&db.drives||[]).find(d=>d.id===driveId);
+  const drv=(db&&db.drives||[]).find(d=>d.id===driveId) || (db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
-  if(!ses && drv.passwordHash && !await vDriveToken(req, env, driveId)){
+  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
     return J({error:'Drive is locked by password'},403);
   }
   let at;
