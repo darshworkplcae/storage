@@ -642,11 +642,11 @@ function handleVideoThumbFallback(imgEl) {
     });
   }
 
-  // 2. Start smart retry polling for Google Drive async thumbnail generation
+  // 2. Start smart retry polling for Google Drive async thumbnail generation (max 2 retries)
   var retries = parseInt(imgEl.dataset.retries || '0', 10);
-  if (retries < 8) {
+  if (retries < 2) {
     imgEl.dataset.retries = String(retries + 1);
-    var delay = 3500 + retries * 1500;
+    var delay = 3500 + retries * 2000;
     setTimeout(function () {
       if (!imgEl.isConnected) return;
       var testImg = new Image();
@@ -663,9 +663,6 @@ function handleVideoThumbFallback(imgEl) {
           } catch(e) {}
         }
       };
-      testImg.onerror = function () {
-        handleVideoThumbFallback(imgEl);
-      };
     }, delay);
   }
 }
@@ -674,9 +671,9 @@ function handleImageThumbFallback(imgEl) {
   if (!imgEl) return;
   imgEl.onerror = null;
   var retries = parseInt(imgEl.dataset.retries || '0', 10);
-  if (retries < 6) {
+  if (retries < 2) {
     imgEl.dataset.retries = String(retries + 1);
-    var delay = 3000 + retries * 1500;
+    var delay = 3000 + retries * 2000;
     setTimeout(function () {
       if (!imgEl.isConnected) return;
       var testImg = new Image();
@@ -689,7 +686,11 @@ function handleImageThumbFallback(imgEl) {
         }
       };
       testImg.onerror = function () {
-        handleImageThumbFallback(imgEl);
+        var col = imgEl.dataset.col || '#30d158';
+        var icon = imgEl.dataset.icon || 'fa-file-image';
+        if (imgEl.parentElement) {
+          imgEl.parentElement.innerHTML = '<div class="fg-icon" style="color:' + col + '"><i class="fas ' + icon + '"></i></div>';
+        }
       };
     }, delay);
     return;

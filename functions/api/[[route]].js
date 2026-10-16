@@ -12,6 +12,8 @@ function J(d,s){return new Response(JSON.stringify(d),{status:s||200,headers:{..
 let _memDBCache = null;
 let _memDBCacheVer = 0; // write-version counter; incremented on every uSet('td:db')
 let _lastGDriveCheck = 0;
+let _lastGDriveSave = 0;
+let _globalCtx = null;
 let _gdriveDbFileId = '1io5JlFLOzrB2J8UoVIYjGVeRMh3jqNFn';
 const _memSesCache = new Map();
 function getKV(env){return env.TELEDRIVE_KV||env.KV||env.STORAGE||env.DB_KV||null;}
@@ -55,6 +57,9 @@ async function verifyDriveToken(token, driveId, secret) {
 }
 
 async function uGet(env,key){
+  if (key === 'td:db' && _memDBCache) {
+    return _memDBCache;
+  }
   const kv=getKV(env);
   if(kv){
     try{
@@ -64,38 +69,8 @@ async function uGet(env,key){
           let p = JSON.parse(raw);
           if (key==='td:db') {
             const kvVer = p._dbVer || 0;
-            // If our in-memory cache is from a NEWER write than what KV returned,
-            // trust the in-memory version (same worker-instance handled the write)
-            if (_memDBCache && _memDBCacheVer > kvVer) {
-              return _memDBCache;
-            }
-            // Check Google Drive durable backup when KV might be stale or writes were blocked
-            const now = Date.now();
-            if ((!_memDBCache || now - _lastGDriveCheck > 8000) && p && p.drives && p.drives.length) {
-              _lastGDriveCheck = now;
-              try {
-                const gdb = await loadDBFromGDrive(env, p.drives[0]);
-                if (gdb && (gdb._dbVer || 0) > kvVer) {
-                  _memDBCache = gdb;
-                  _memDBCacheVer = gdb._dbVer || 0;
-                  return gdb;
-                }
-              } catch(e) { console.error('GDrive backup load error in uGet:', e); }
-            }
             if (_memDBCache && _memDBCacheVer >= kvVer) {
               return _memDBCache;
-            }
-            // KV is current (same or newer version) — only merge VERY RECENT
-            // uploaded files that may not have propagated yet (75-second window).
-            // NEVER merge folders — prevents deleted/deduped folders from reappearing.
-            if (_memDBCache && _memDBCache.files) {
-              const cutoff = Date.now() - 75000;
-              const knownFIds = new Set((p.files||[]).map(f => f.id));
-              _memDBCache.files.forEach(f => {
-                if (!knownFIds.has(f.id) && f.date && new Date(f.date).getTime() > cutoff) {
-                  (p.files||(p.files=[])).push(f);
-                }
-              });
             }
             _memDBCache = p;
             _memDBCacheVer = kvVer;
@@ -141,7 +116,14 @@ async function uSet(env,key,val,ttl){
       _memDBCacheVer = val._dbVer;
     }
     _memDBCache = val;
-    try { await saveDBToGDrive(env, val); } catch(e){}
+    // Persist to Google Drive in background (non-blocking for ultra-fast uploads)
+    const now = Date.now();
+    if (_globalCtx && typeof _globalCtx.waitUntil === 'function') {
+      _globalCtx.waitUntil(saveDBToGDrive(env, val));
+    } else if (now - _lastGDriveSave > 15000) {
+      _lastGDriveSave = now;
+      saveDBToGDrive(env, val).catch(() => {});
+    }
   }
   const kv=getKV(env);
   if(kv){
@@ -436,8 +418,9 @@ async function hDB(req,env){
       try{ await uSet(env,'td:db',db); }catch(e){}
     }
   }
-  // Check if Google Drive holds a more recent database backup (handles KV put limit exceeded)
-  if (db && db.drives && db.drives.length) {
+  // Only check Google Drive if explicitly requested with ?refresh=gdrive or ?sync=1
+  const dbUrl = new URL(req.url);
+  if ((dbUrl.searchParams.get('refresh') === 'gdrive' || dbUrl.searchParams.get('sync') === '1') && db && db.drives && db.drives.length) {
     try {
       const gdb = await loadDBFromGDrive(env, db.drives[0]);
       if (gdb && (gdb._dbVer || 0) > (db._dbVer || 0)) {
@@ -851,22 +834,29 @@ async function hUC(req,env){
   const parentFolder = folderId ? (db.folders||[]).find(x=>x.id===folderId) : null;
   const isAdmOnly = parentFolder ? !!parentFolder.adminOnly : false;
   const fAllowedUsers = (parentFolder && Array.isArray(parentFolder.allowedUsers) && parentFolder.allowedUsers.length) ? [...parentFolder.allowedUsers] : undefined;
-  const newFile = {
-    id:fileLocalId,
-    googleFileId,
-    driveId,
-    folderId:folderId||null,
-    name,
-    size,
-    mimeType:mimeType||'application/octet-stream',
-    uploadedBy:ses||'guest',
-    date:new Date().toISOString(),
-    adminOnly: isAdmOnly
-  };
-  if(fAllowedUsers) newFile.allowedUsers = fAllowedUsers;
-  db.files.push(newFile);
-  if(_memDBCache && _memDBCache.files) {
-    _memDBCache.files.push(newFile);
+  const existingFile = db.files.find(f => f.id === fileLocalId || (googleFileId && f.googleFileId === googleFileId));
+  if (existingFile) {
+    existingFile.name = name;
+    existingFile.size = size;
+    existingFile.mimeType = mimeType || existingFile.mimeType;
+    existingFile.folderId = folderId || null;
+    if (googleFileId) existingFile.googleFileId = googleFileId;
+    if (fAllowedUsers) existingFile.allowedUsers = fAllowedUsers;
+  } else {
+    const newFile = {
+      id:fileLocalId,
+      googleFileId,
+      driveId,
+      folderId:folderId||null,
+      name,
+      size,
+      mimeType:mimeType||'application/octet-stream',
+      uploadedBy:ses||'guest',
+      date:new Date().toISOString(),
+      adminOnly: isAdmOnly
+    };
+    if(fAllowedUsers) newFile.allowedUsers = fAllowedUsers;
+    db.files.push(newFile);
   }
   if(drv && typeof size === 'number') drv.usedBytes = (drv.usedBytes || 0) + size;
   if(!db.activityLog) db.activityLog=[];
@@ -998,6 +988,13 @@ async function hDL(req,env,gId){
 }
 async function hThumb(req,env,gId){
   const url=new URL(req.url);
+  const reqSz = url.searchParams.get('sz') || 's360';
+  const cacheKey = new Request(`https://${url.hostname}/api/__cf_thumb__/${gId}?sz=${reqSz}`, { method: 'GET' });
+  try {
+    const cached = await caches.default.match(cacheKey);
+    if (cached) return cached;
+  } catch(e) {}
+
   const tokenParam=url.searchParams.get('token');
   let ses=null;
   if(tokenParam){
@@ -1057,21 +1054,28 @@ async function hThumb(req,env,gId){
 
   // Try Google Drive thumbnail link with auth header
   if(gData.thumbnailLink){
-    const reqSz = url.searchParams.get('sz') || 's360';
     const highResThumb = gData.thumbnailLink.replace(/=s\d+$/, '=' + reqSz);
     const tResp = await fetch(highResThumb, {
       headers: { Authorization: `Bearer ${at}` }
     });
     if(tResp.ok){
       const ct = tResp.headers.get('Content-Type') || 'image/jpeg';
-      return new Response(tResp.body,{
+      const thumbResp = new Response(tResp.body,{
         status:200,
         headers:{
           ...COR,
           'Content-Type':ct,
-          'Cache-Control':'public, max-age=2592000, s-maxage=2592000, immutable'
+          'Cache-Control':'public, max-age=604800, s-maxage=604800, immutable'
         }
       });
+      try {
+        if (_globalCtx && typeof _globalCtx.waitUntil === 'function') {
+          _globalCtx.waitUntil(caches.default.put(cacheKey, thumbResp.clone()));
+        } else {
+          caches.default.put(cacheKey, thumbResp.clone()).catch(()=>{});
+        }
+      } catch(e) {}
+      return thumbResp;
     }
   }
 
@@ -1084,7 +1088,7 @@ async function hThumb(req,env,gId){
     if(imgResp.ok){
       let ct = imgResp.headers.get('Content-Type') || (fileObj ? fileObj.mimeType : 'image/jpeg');
       if (ct === 'application/octet-stream') ct = 'image/jpeg';
-      return new Response(imgResp.body, {
+      const imgThumbResp = new Response(imgResp.body, {
         status: 200,
         headers: {
           ...COR,
@@ -1092,6 +1096,14 @@ async function hThumb(req,env,gId){
           'Cache-Control': 'public, max-age=604800, s-maxage=604800, immutable'
         }
       });
+      try {
+        if (_globalCtx && typeof _globalCtx.waitUntil === 'function') {
+          _globalCtx.waitUntil(caches.default.put(cacheKey, imgThumbResp.clone()));
+        } else {
+          caches.default.put(cacheKey, imgThumbResp.clone()).catch(()=>{});
+        }
+      } catch(e) {}
+      return imgThumbResp;
     }
   }
 
@@ -1821,6 +1833,92 @@ async function hDebugDB(req, env) {
         files: (targetDb.files||[]).filter(x => x.folderId === f.id).length
       })),
       files: finalTeraFiles.map(f => ({ name: f.name, size: f.size }))
+    });
+  }
+
+  if (action === 'inspect-folder') {
+    const targetFolderId = url.searchParams.get('folderId');
+    const folderFiles = (db.files||[]).filter(f => f.folderId === targetFolderId && !f.trashed);
+    const groups = {};
+    for (const f of folderFiles) {
+      const k = (f.name||'').toLowerCase().trim() + '::' + (f.size||0);
+      if (!groups[k]) groups[k] = [];
+      groups[k].push({ id: f.id, googleFileId: f.googleFileId, name: f.name, size: f.size, date: f.date });
+    }
+    const dups = Object.entries(groups).filter(([k, g]) => g.length > 1);
+    return J({
+      folderId: targetFolderId,
+      totalFiles: folderFiles.length,
+      duplicateGroups: dups.length,
+      duplicates: dups.map(([k, g]) => ({ key: k, count: g.length, files: g }))
+    });
+  }
+
+  if (action === 'auto-dedup-files') {
+    const drv = (db.drives||[])[0];
+    let gdb = null;
+    if (drv) {
+      try { gdb = await loadDBFromGDrive(env, drv); } catch(e){}
+    }
+    const targetDb = gdb || db;
+    if (!targetDb.files) targetDb.files = [];
+
+    // Group all non-trashed files by: folderId::lowercaseName::size
+    const groups = new Map();
+    for (const f of targetDb.files) {
+      if (f.trashed) continue;
+      const k = (f.folderId || 'root') + '::' + (f.name || '').toLowerCase().trim() + '::' + (f.size || 0);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(f);
+    }
+
+    let duplicateGroupsCount = 0;
+    let removedFilesCount = 0;
+    const loserIds = new Set();
+
+    for (const [key, group] of groups.entries()) {
+      if (group.length <= 1) continue;
+      duplicateGroupsCount++;
+
+      // Sort: winner has date, then newest ID (mvap > mv7)
+      group.sort((a, b) => {
+        const da = a.date ? new Date(a.date).getTime() : 0;
+        const db = b.date ? new Date(b.date).getTime() : 0;
+        if (db !== da) return db - da; // newest date first
+        return (b.id || '').localeCompare(a.id || '');
+      });
+
+      const winner = group[0];
+      const losers = group.slice(1);
+
+      for (const loser of losers) {
+        loserIds.add(loser.id);
+        removedFilesCount++;
+      }
+    }
+
+    const initialCount = targetDb.files.length;
+    targetDb.files = targetDb.files.filter(f => !loserIds.has(f.id));
+    const finalCount = targetDb.files.length;
+
+    targetDb._dbVer = Math.max((_memDBCacheVer || 0), (targetDb._dbVer || 0)) + 10;
+    _memDBCacheVer = targetDb._dbVer;
+    _memDBCache = targetDb;
+    await uSet(env, 'td:db', targetDb);
+    const gDriveBackupId = await saveDBToGDrive(env, targetDb);
+
+    // Get Trip folder file count for user verification
+    const tripFiles = targetDb.files.filter(f => f.folderId === 'mvap02cggbjju');
+
+    return J({
+      ok: true,
+      initialCount,
+      finalCount,
+      removedFilesCount,
+      duplicateGroupsCount,
+      tripFilesCount: tripFiles.length,
+      gDriveBackupId,
+      _dbVer: targetDb._dbVer
     });
   }
 
@@ -2656,24 +2754,33 @@ async function hUBC(req, env) {
   const added = [];
   for (const item of files) {
     const { fileLocalId, googleFileId, driveId, folderId, name, size, mimeType } = item;
-    const parentFolder = folderId ? (db.folders||[]).find(x => x.id === folderId) : null;
-    const isAdmOnly = parentFolder ? !!parentFolder.adminOnly : false;
-    const fAllowedUsers = (parentFolder && Array.isArray(parentFolder.allowedUsers) && parentFolder.allowedUsers.length) ? [...parentFolder.allowedUsers] : undefined;
-    const newFile = {
-      id: fileLocalId,
-      googleFileId,
-      driveId,
-      folderId: folderId || null,
-      name,
-      size,
-      mimeType: mimeType || 'application/octet-stream',
-      uploadedBy: ses || 'guest',
-      date: new Date().toISOString(),
-      adminOnly: isAdmOnly
-    };
-    if (fAllowedUsers) newFile.allowedUsers = fAllowedUsers;
-    db.files.push(newFile);
-    added.push(newFile);
+    const existingFile = db.files.find(f => f.id === fileLocalId || (googleFileId && f.googleFileId === googleFileId));
+    if (existingFile) {
+      existingFile.name = name;
+      existingFile.size = size;
+      existingFile.mimeType = mimeType || existingFile.mimeType;
+      existingFile.folderId = folderId || null;
+      if (googleFileId) existingFile.googleFileId = googleFileId;
+    } else {
+      const parentFolder = folderId ? (db.folders||[]).find(x => x.id === folderId) : null;
+      const isAdmOnly = parentFolder ? !!parentFolder.adminOnly : false;
+      const fAllowedUsers = (parentFolder && Array.isArray(parentFolder.allowedUsers) && parentFolder.allowedUsers.length) ? [...parentFolder.allowedUsers] : undefined;
+      const newFile = {
+        id: fileLocalId,
+        googleFileId,
+        driveId,
+        folderId: folderId || null,
+        name,
+        size,
+        mimeType: mimeType || 'application/octet-stream',
+        uploadedBy: ses || 'guest',
+        date: new Date().toISOString(),
+        adminOnly: isAdmOnly
+      };
+      if (fAllowedUsers) newFile.allowedUsers = fAllowedUsers;
+      db.files.push(newFile);
+      added.push(newFile);
+    }
   }
 
   await uSet(env, 'td:db', db);
@@ -2683,7 +2790,9 @@ async function hUBC(req, env) {
 async function hCP(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const{newPassword}=await req.json().catch(()=>({}));if(!newPassword||newPassword.length<4)return J({error:'Min 4 chars'},400);let db=await uGet(env,'td:db');if(!db)db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};db.adminHash=await sha256(newPassword);await uSet(env,'td:db',db);return J({ok:true});}
 async function hInit(req,env){const url=new URL(req.url),ex=await uGet(env,'td:db');if(ex&&ex.adminHash&&url.searchParams.get('reset')!=='yes')return J({error:'Already initialized. Add ?reset=yes to force.'},409);const{adminPassword='admin123'}=await req.json().catch(()=>({}));await uSet(env,'td:db',{v:3,adminHash:await sha256(adminPassword),drives:[],files:[],folders:[],activityLog:[],users:[]});return J({ok:true,message:`Password set: ${adminPassword}`});}
 
-export async function onRequest({request,env}){
+export async function onRequest(ctx){
+  _globalCtx = ctx;
+  const { request, env } = ctx;
   if(request.method==='OPTIONS')return new Response(null,{status:204,headers:COR});
   const url=new URL(request.url),p=url.pathname.replace(/^\/api\/?/,''),m=request.method;
   try{

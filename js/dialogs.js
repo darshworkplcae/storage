@@ -492,7 +492,9 @@ async function processFolderFiles(files) {
       S.db.files.forEach(function(f) {
         if (!f.trashed && f.driveId === _driveId) {
           existingFileSet.add((f.folderId || '') + '::' + f.name + '::' + f.size);
+          existingFileSet.add((f.folderId || '') + '::' + (f.name || '').toLowerCase().trim() + '::' + f.size);
           existingNameSizeSet.add(f.name + '::' + f.size);
+          existingNameSizeSet.add((f.name || '').toLowerCase().trim() + '::' + f.size);
         }
       });
     }
@@ -650,7 +652,8 @@ async function processFolderFiles(files) {
       }
 
       // Smart Resume & Deduplication in O(1) time
-      var isAlreadyUploaded = existingFileSet.has((parentId || '') + '::' + file.name + '::' + file.size);
+      var isAlreadyUploaded = existingFileSet.has((parentId || '') + '::' + file.name + '::' + file.size) ||
+                              existingFileSet.has((parentId || '') + '::' + (file.name || '').toLowerCase().trim() + '::' + file.size);
 
       if (isAlreadyUploaded) {
         skippedCount++;
