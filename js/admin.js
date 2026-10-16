@@ -63,6 +63,7 @@ function renderSettingsPage() {
               '<button class="btn-danger xs" style="flex:1;font-size:.74rem" onclick="purgeGDriveRootFiles(\''+d.id+'\',\''+esc(d.name)+'\')" title="DANGER: Permanently deletes ALL loose files directly in TeleDrive root folder on Google Drive. Folders (ok, pdfs, tera etc) are safe. Frees storage for duplicate/stray files."><i class="fas fa-fire"></i> Purge Stray Root Files</button>' +
               '<button class="btn-warning xs" style="flex:1;font-size:.74rem" onclick="dedupFolders(\''+d.id+'\',\''+esc(d.name)+'\')" title="Find and merge duplicate folders by name. Only fixes the DB — never touches Google Drive folders."><i class="fas fa-code-merge"></i> Dedup Folders</button>' +
               '<button class="btn-primary xs" style="flex:1;font-size:.74rem" onclick="restoreDriveFolders(\''+d.id+'\',\''+esc(d.name)+'\')" title="Untrash all folders tracked in DB from Google Drive. Use this to recover folders accidentally trashed by dedup."><i class="fas fa-trash-arrow-up"></i> Restore Folders</button>' +
+              '<button class="btn-ghost xs" style="flex:1;font-size:.74rem" onclick="fixFolderLocations(\''+d.id+'\',\''+esc(d.name)+'\')" title="Move misplaced subfolders back to their correct parent on Google Drive (fixes folders that landed at wrong Drive location)."><i class="fas fa-folder-tree"></i> Fix Locations</button>' +
             '</div>' +
           '</div>';
         }).join('') + '</div>',
@@ -871,7 +872,13 @@ async function dedupFolders(driveId, driveName) {
   }
 
   toast('✅ Dedup done! Merged ' + res.merged + ' folder(s), moved ' + res.movedFiles + ' file(s). Refreshing…', 'success', 8000);
-  S.db = await apiFetchDB();
+  // Use the folders/files returned directly from the response (avoids KV propagation delay)
+  if (res.updatedFolders) {
+    S.db.folders = res.updatedFolders;
+    if (res.updatedFiles) S.db.files = res.updatedFiles;
+  } else {
+    S.db = await apiFetchDB();
+  }
   renderSettingsPage();
   renderSidebarStorage();
   renderFilesPage();
@@ -901,6 +908,48 @@ async function restoreDriveFolders(driveId, driveName) {
   S.db = await apiFetchDB();
   renderSettingsPage();
   renderSidebarStorage();
+}
+
+
+async function fixFolderLocations(driveId, driveName) {
+  toast('Checking folder locations for "' + driveName + '"…', 'info');
+  var dryRes = await apiFetch('admin/fix-folder-locations', {
+    method: 'POST',
+    body: JSON.stringify({ driveId: driveId, dryRun: true })
+  }).catch(function() { return null; });
+
+  if (!dryRes || dryRes.error) {
+    toast(dryRes ? dryRes.error : 'Check failed — see console', 'error');
+    return;
+  }
+
+  if (!dryRes.willCheck || dryRes.willCheck === 0) {
+    toast('✅ No misplaced folders detected for "' + driveName + '"!', 'success');
+    return;
+  }
+
+  if (!window.confirm(
+    'Fix Folder Locations for "' + driveName + '"?\n\n' +
+    'Will check and move ' + dryRes.willCheck + ' folder(s) to their correct location on Google Drive.\n\n' +
+    'Folders already in the correct location will be skipped.\n' +
+    'Accidentally trashed folders will be untrashed first.\n\nProceed?'
+  )) {
+    toast('Cancelled.', 'info');
+    return;
+  }
+
+  toast('Moving folders to correct locations on Google Drive…', 'info', 20000);
+  var res = await apiFetch('admin/fix-folder-locations', {
+    method: 'POST',
+    body: JSON.stringify({ driveId: driveId, dryRun: false })
+  }).catch(function() { return null; });
+
+  if (!res || res.error) {
+    toast(res ? res.error : 'Fix failed — see console', 'error');
+    return;
+  }
+
+  toast('✅ ' + res.message, 'success', 12000);
 }
 
 

@@ -1298,7 +1298,9 @@ async function hDedupFolders(req, env) {
   await uSet(env, 'td:db', db);
 
   return J({ok:true, merged: mergedCount.folders, movedFiles: mergedCount.files,
-    message: `Merged ${mergedCount.folders} duplicate folder(s), moved ${mergedCount.files} file(s) to winners. No Drive folders were touched.`
+    message: `Merged ${mergedCount.folders} duplicate folder(s), moved ${mergedCount.files} file(s) to winners. No Drive folders were touched.`,
+    updatedFolders: db.folders,
+    updatedFiles: db.files
   });
 }
 
@@ -1352,7 +1354,82 @@ async function hRestoreDriveFolders(req, env) {
 
 
 
+
+
+// ─── Fix Folder Locations: move Drive folders back to their correct parent ───
+// Finds folders tracked in DB but living at the wrong location on Google Drive.
+// Uses addParents/removeParents to move them to the correct parent's googleFolderId.
+async function hFixFolderLocations(req, env) {
+  if(!await vSes(req, env, 'admin')) return J({error:'Unauthorized'}, 401);
+  const body = await req.json().catch(()=>({}));
+  const { driveId: filterDriveId = null, dryRun = false } = body;
+
+  const db = await uGet(env, 'td:db');
+  if(!db) return J({error:'DB error'}, 500);
+
+  const folders = db.folders || [];
+
+  // Build lookup: folderId → googleFolderId
+  const idToGoogleId = {};
+  for(const f of folders) {
+    if(f.id && f.googleFolderId) idToGoogleId[f.id] = f.googleFolderId;
+  }
+
+  // Only process folders with googleFolderId AND whose parent also has googleFolderId
+  const toFix = folders.filter(f => {
+    if(!f.googleFolderId || !f.parentId) return false;
+    if(filterDriveId && f.driveId !== filterDriveId) return false;
+    return !!idToGoogleId[f.parentId];
+  });
+
+  if(!toFix.length) return J({ok:true, fixed:0, dryRun, message:'No folders with known parent Google IDs found'});
+  if(dryRun) return J({ok:true, dryRun:true, willCheck:toFix.length, message:`Will verify ${toFix.length} folder(s) on Google Drive`});
+
+  // Group by driveId to reuse access tokens
+  const byDrive = {};
+  for(const f of toFix) {
+    if(!byDrive[f.driveId]) byDrive[f.driveId] = [];
+    byDrive[f.driveId].push(f);
+  }
+
+  let fixed = 0, skipped = 0, failed = 0;
+  for(const [dId, dFolders] of Object.entries(byDrive)) {
+    const drv = (db.drives||[]).find(d => d.id === dId);
+    if(!drv) continue;
+    let at;
+    try { at = await gAT(env, drv.encToken); }
+    catch(e) { try { at = await gAT(env, drv.encToken, true); } catch(e2) { failed += dFolders.length; continue; } }
+
+    for(const folder of dFolders) {
+      const expectedParentGId = idToGoogleId[folder.parentId];
+      try {
+        // Untrash + check current parents
+        const infoRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${folder.googleFolderId}?fields=parents,trashed&supportsAllDrives=true`,
+          { headers:{Authorization:`Bearer ${at}`} }
+        );
+        if(!infoRes.ok) { failed++; continue; }
+        const info = await infoRes.json();
+        if(info.trashed) {
+          await fetch(`https://www.googleapis.com/drive/v3/files/${folder.googleFolderId}?supportsAllDrives=true`,
+            { method:'PATCH', headers:{'Authorization':`Bearer ${at}`,'Content-Type':'application/json'}, body:'{"trashed":false}' }
+          ).catch(()=>{});
+        }
+        const curParents = info.parents || [];
+        if(curParents.includes(expectedParentGId)) { skipped++; continue; }
+        // Move to correct parent
+        const removeP = curParents.join(',');
+        const url = `https://www.googleapis.com/drive/v3/files/${folder.googleFolderId}?addParents=${expectedParentGId}${removeP?'&removeParents='+removeP:''}&supportsAllDrives=true&fields=id`;
+        const moveRes = await fetch(url, { method:'PATCH', headers:{'Authorization':`Bearer ${at}`,'Content-Type':'application/json'}, body:'{}' });
+        if(moveRes.ok) fixed++; else failed++;
+      } catch(e) { failed++; }
+    }
+  }
+  return J({ok:true, fixed, skipped, failed, message:`Moved ${fixed} folder(s) to correct location on Drive. ${skipped} already correct. ${failed} failed.`});
+}
+
 // ─── Drive Root Purge: list & delete ALL files directly in a drive's root folder on Google Drive ───
+
 
 // Phase A (action=list): scans Drive, saves IDs to KV job, returns { jobId, total }
 // Phase B (action=delete): deletes up to 300 per call, returns { deleted, remaining }
@@ -2255,6 +2332,7 @@ export async function onRequest({request,env}){
     if(p==='admin/drive-root-purge'&&m==='POST')return hDriveRootPurge(request,env);
     if(p==='admin/dedup-folders'&&m==='POST')return hDedupFolders(request,env);
     if(p==='admin/restore-drive-folders'&&m==='POST')return hRestoreDriveFolders(request,env);
+    if(p==='admin/fix-folder-locations'&&m==='POST')return hFixFolderLocations(request,env);
     return J({error:'Not found',path:p},404);
   }catch(e){return J({error:e.message||'Server error'},500);}
 }
