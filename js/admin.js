@@ -42,8 +42,8 @@ function renderSettingsPage() {
             '<div class="dc-top">' +
               '<div class="dc-icon" style="background:'+d.color+'22;color:'+d.color+'"><i class="fas fa-hard-drive"></i></div>' +
               '<div class="dc-info">' +
-                '<div class="dc-name" style="display:flex;align-items:center;gap:6px">' +
-                  esc(d.name) + (isOpen?'<span class="badge-open">Open Drive</span>':'') + (d.hasPassword?'<span class="badge-open" style="background:rgba(255,159,10,0.15);color:#ff9f0a;border-color:rgba(255,159,10,0.35)"><i class="fas fa-lock"></i> Protected</span>':'') +
+               '<div class="dc-name">' +
+                  '<span class="dc-name-text">' + esc(d.name) + '</span>' + (isOpen?'<span class="badge-open">Open Drive</span>':'') + (d.hasPassword?'<span class="badge-open" style="background:rgba(255,159,10,0.15);color:#ff9f0a;border-color:rgba(255,159,10,0.35)"><i class="fas fa-lock"></i> Protected</span>':'') +
                 '</div>' +
                 '<div class="dc-email">'+esc(d.email)+'</div>' +
               '</div>' +

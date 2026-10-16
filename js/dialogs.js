@@ -322,6 +322,97 @@ async function processFolderFiles(files) {
   }
 
   var rootFolder = files[0].webkitRelativePath ? files[0].webkitRelativePath.split('/')[0] : 'Folder';
+
+  // ─── Smart Duplicate Folder Detection ───
+  // Check if a folder with this exact name already exists in the target location
+  var _existingRootFolder = (S.db && S.db.folders || []).find(function(f) {
+    return f.driveId === _driveId &&
+      (f.parentId || null) === (_folderId || null) &&
+      f.name.toLowerCase() === rootFolder.toLowerCase() &&
+      !f.trashed;
+  });
+
+  var _dupAction = null; // 'skip' | 'replace' | 'new' | null (folder didn't exist)
+
+  if (_existingRootFolder) {
+    // Count how many of these files are likely already uploaded (by name+size in that subtree)
+    var _subtreeSet = new Set();
+    if (S.db && Array.isArray(S.db.files)) {
+      // Collect all folderId's in the existing folder subtree
+      var _subtreeFolderIds = new Set([_existingRootFolder.id]);
+      (function collectSubtree(parentId) {
+        (S.db.folders || []).forEach(function(sf) {
+          if (sf.parentId === parentId && !sf.trashed && sf.driveId === _driveId) {
+            _subtreeFolderIds.add(sf.id);
+            collectSubtree(sf.id);
+          }
+        });
+      })(_existingRootFolder.id);
+      S.db.files.forEach(function(ff) {
+        if (!ff.trashed && ff.driveId === _driveId && _subtreeFolderIds.has(ff.folderId)) {
+          _subtreeSet.add(ff.name + '::' + ff.size);
+        }
+      });
+    }
+    var _alreadyCount = files.filter(function(f) { return _subtreeSet.has(f.name + '::' + f.size); }).length;
+
+    // Find next available [2], [3], etc. name
+    var _newSuffix = 2;
+    var _newRootName = rootFolder + ' [' + _newSuffix + ']';
+    while ((S.db && S.db.folders || []).find(function(f) {
+      return f.driveId === _driveId && (f.parentId || null) === (_folderId || null) && f.name === _newRootName && !f.trashed;
+    })) {
+      _newSuffix++;
+      _newRootName = rootFolder + ' [' + _newSuffix + ']';
+    }
+
+    _dupAction = await new Promise(function(resolve) {
+      // Build modal
+      var ov = document.createElement('div');
+      ov.className = 'modal-overlay';
+      ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(8px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem;';
+      var pct = files.length > 0 ? Math.round(_alreadyCount / files.length * 100) : 0;
+      ov.innerHTML =
+        '<div style="background:var(--surface,#13152a);border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:1.6rem;max-width:420px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,.75);">' +
+          '<div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1.2rem;">' +
+            '<div style="width:42px;height:42px;border-radius:12px;background:rgba(255,159,10,.15);color:#ff9f0a;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0;"><i class="fas fa-folder-open"></i></div>' +
+            '<div>' +
+              '<div style="font-size:1rem;font-weight:700;color:var(--text1,#e8eaf6);">Folder already exists</div>' +
+              '<div style="font-size:.8rem;color:var(--text2,#8c90b0);margin-top:.15rem;">"<strong>' + esc(rootFolder) + '</strong>" · ' + files.length + ' files · ' + _alreadyCount + ' already uploaded (' + pct + '%)</div>' +
+            '</div>' +
+          '</div>' +
+          '<div style="display:flex;flex-direction:column;gap:.5rem;">' +
+            '<button id="dupSkipBtn" style="background:rgba(78,134,245,.15);border:1px solid rgba(78,134,245,.35);color:#4e86f5;border-radius:10px;padding:.7rem 1rem;cursor:pointer;text-align:left;font-size:.87rem;transition:background .18s;">' +
+              '<i class="fas fa-forward-step" style="width:18px"></i> <strong>Skip existing</strong> — upload only new files' +
+            '</button>' +
+            '<button id="dupReplaceBtn" style="background:rgba(255,69,58,.1);border:1px solid rgba(255,69,58,.3);color:#ff453a;border-radius:10px;padding:.7rem 1rem;cursor:pointer;text-align:left;font-size:.87rem;transition:background .18s;">' +
+              '<i class="fas fa-arrows-rotate" style="width:18px"></i> <strong>Re-upload all</strong> — overwrite everything' +
+            '</button>' +
+            '<button id="dupNewBtn" style="background:rgba(48,209,88,.1);border:1px solid rgba(48,209,88,.3);color:#30d158;border-radius:10px;padding:.7rem 1rem;cursor:pointer;text-align:left;font-size:.87rem;transition:background .18s;">' +
+              '<i class="fas fa-folder-plus" style="width:18px"></i> <strong>Upload as "' + esc(_newRootName) + '"</strong> — keep both' +
+            '</button>' +
+            '<button id="dupCancelBtn" style="background:transparent;border:1px solid rgba(255,255,255,.1);color:var(--text2,#8c90b0);border-radius:10px;padding:.55rem 1rem;cursor:pointer;text-align:left;font-size:.84rem;">' +
+              '<i class="fas fa-xmark" style="width:18px"></i> Cancel upload' +
+            '</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(ov);
+      function cleanup(val) { if (ov.parentNode) ov.parentNode.removeChild(ov); resolve(val); }
+      ov.querySelector('#dupSkipBtn').onclick = function() { cleanup('skip'); };
+      ov.querySelector('#dupReplaceBtn').onclick = function() { cleanup('replace'); };
+      ov.querySelector('#dupNewBtn').onclick = function() { cleanup(_newRootName); };
+      ov.querySelector('#dupCancelBtn').onclick = function() { cleanup('cancel'); };
+      ov.addEventListener('mousedown', function(e) { if (e.target === ov) cleanup('cancel'); });
+    });
+
+    if (_dupAction === 'cancel') return;
+    // If user chose a new name like "tera [2]", update rootFolder
+    if (_dupAction !== 'skip' && _dupAction !== 'replace') {
+      rootFolder = _dupAction; // e.g. "tera [2]"
+      _dupAction = 'new'; // just flag it
+    }
+  }
+
   try {
     localStorage.setItem('td_active_batch', JSON.stringify({
       driveId: _driveId,
@@ -331,6 +422,7 @@ async function processFolderFiles(files) {
       time: Date.now()
     }));
   } catch (e) { }
+
 
   window._isUploading = true;
   window._isBatchUploading = true;
@@ -347,12 +439,15 @@ async function processFolderFiles(files) {
 
   // Build fast O(1) lookup set for existing files
   var existingFileSet = new Set();
-  if (S.db && Array.isArray(S.db.files)) {
-    S.db.files.forEach(function(f) {
-      if (!f.trashed && f.driveId === _driveId) {
-        existingFileSet.add((f.folderId || '') + '::' + f.name + '::' + f.size);
-      }
-    });
+  // If user chose 'replace' or 'new folder', skip dedup — re-upload all files
+  if (_dupAction !== 'replace' && _dupAction !== 'new') {
+    if (S.db && Array.isArray(S.db.files)) {
+      S.db.files.forEach(function(f) {
+        if (!f.trashed && f.driveId === _driveId) {
+          existingFileSet.add((f.folderId || '') + '::' + f.name + '::' + f.size);
+        }
+      });
+    }
   }
 
   // ─── Phase 1: Pre-create ALL folder structures upfront in seconds ───
