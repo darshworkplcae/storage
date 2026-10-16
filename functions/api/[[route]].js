@@ -1198,11 +1198,13 @@ async function gDriveBatchDelete(token, googleIds) {
 }
 
 // ─── Drive Root Purge: list & delete ALL files directly in a drive's root folder on Google Drive ───
-// This runs server-side — no browser hang. Works even for 10,000+ files.
+// Phase A (action=list): scans Drive, saves IDs to KV job, returns { jobId, total }
+// Phase B (action=delete): deletes up to 300 per call, returns { deleted, remaining }
+// Phase C (dryRun=true): just list count, no KV storage
 async function hDriveRootPurge(req, env) {
   if(!await vSes(req, env, 'admin')) return J({error:'Unauthorized'}, 401);
   const body = await req.json().catch(()=>({}));
-  const { driveId, dryRun = false } = body;
+  const { driveId, dryRun = false, action = 'list', jobId = null, offset = 0 } = body;
   if(!driveId) return J({error:'driveId required'}, 400);
 
   const db = await uGet(env, 'td:db');
@@ -1219,7 +1221,38 @@ async function hDriveRootPurge(req, env) {
     catch(e2) { return J({error:'Token error: ' + (e2.message||e.message)}, 500); }
   }
 
-  // Collect ALL Google Drive file IDs directly in the root folder (not in subfolders)
+  // ── Phase B: delete a chunk using stored job ──
+  if (action === 'delete' && jobId) {
+    const jobKey = 'td:purge:' + jobId;
+    const jobData = await env.TELEDRIVE_KV.get(jobKey, {type:'json'}).catch(()=>null);
+    if (!jobData || !jobData.ids) return J({error:'Job not found or expired'}, 404);
+
+    const CHUNK = 300;
+    const ids = jobData.ids;
+    const chunkIds = ids.slice(offset, offset + CHUNK);
+    const remaining = Math.max(0, ids.length - offset - chunkIds.length);
+
+    if (chunkIds.length > 0) {
+      await gDriveBatchDelete(at, chunkIds);
+      // Also clean from DB
+      const gIdSet = new Set(chunkIds);
+      db.files = (db.files||[]).filter(f => !gIdSet.has(f.googleFileId));
+      if(_memDBCache) _memDBCache.files = db.files;
+      await uSet(env, 'td:db', db);
+    }
+
+    if (remaining <= 0) {
+      // Job complete — remove KV job key
+      await env.TELEDRIVE_KV.delete(jobKey).catch(()=>{});
+      if(!db.activityLog) db.activityLog = [];
+      db.activityLog.unshift({id:uid(),type:'drive_root_purge',driveId,deletedFromDrive:ids.length,ts:new Date().toISOString()});
+      await uSet(env, 'td:db', db);
+    }
+
+    return J({ok:true, deleted:chunkIds.length, remaining, nextOffset: offset + chunkIds.length, total: ids.length});
+  }
+
+  // ── Phase A: list all file IDs in Drive root ──
   const rootFolderId = drv.rootFolderId;
   const allGoogleFileIds = [];
   let pageToken = null;
@@ -1237,36 +1270,21 @@ async function hDriveRootPurge(req, env) {
     }
     pageToken = data.nextPageToken || null;
     pageCount++;
-    // Safety limit: never more than 200 pages (200,000 files)
     if(pageCount >= 200) break;
   } while(pageToken);
 
   const totalFound = allGoogleFileIds.length;
-  if(totalFound === 0) return J({ok:true, deleted:0, message:'No loose files found in Google Drive root'});
+  if(totalFound === 0) return J({ok:true, deleted:0, found:0, message:'No loose files found in Google Drive root'});
 
   if(dryRun) return J({ok:true, dryRun:true, found:totalFound, message:`Would delete ${totalFound} files from Google Drive root`});
 
-  // Delete all found files in batches of 50
-  await gDriveBatchDelete(at, allGoogleFileIds);
+  // Store IDs in KV for chunked deletion (TTL 2h)
+  const newJobId = uid();
+  await env.TELEDRIVE_KV.put('td:purge:' + newJobId, JSON.stringify({ids: allGoogleFileIds, driveId, createdAt: Date.now()}), {expirationTtl: 7200});
 
-  // Also remove them from our DB if tracked
-  const allGoogleIdSet = new Set(allGoogleFileIds);
-  const beforeCount = (db.files||[]).length;
-  db.files = (db.files||[]).filter(f => !allGoogleIdSet.has(f.googleFileId));
-  const removedFromDB = beforeCount - db.files.length;
-
-  // Update drive used bytes
-  const removedSize = (db.files||[]).reduce((s,f) => s + (f.size||0), 0);
-  // Just refresh from Google after cleanup
-  if(_memDBCache) {
-    _memDBCache.files = db.files;
-  }
-  if(!db.activityLog) db.activityLog = [];
-  db.activityLog.unshift({id:uid(),type:'drive_root_purge',driveId,deletedFromDrive:totalFound,removedFromDB,ts:new Date().toISOString()});
-  await uSet(env, 'td:db', db);
-
-  return J({ok:true, deleted:totalFound, removedFromDB, message:`Deleted ${totalFound} loose files from Google Drive root. Removed ${removedFromDB} from TeleDrive DB.`});
+  return J({ok:true, action:'list', jobId: newJobId, total: totalFound, found: totalFound});
 }
+
 
 async function hBatchPermanentDelete(req,env){
   const ses=await vSes(req,env,null);

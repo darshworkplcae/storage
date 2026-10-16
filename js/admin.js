@@ -678,7 +678,7 @@ async function scanDriveFiles(driveId) {
 
 
 async function purgeGDriveRootFiles(driveId, driveName) {
-  // First do a dry run to show how many files will be deleted
+  // Step 1: dry-run scan to get count
   toast('Scanning Google Drive root for stray files…', 'info', 10000);
   var dryRes = await apiFetch('admin/drive-root-purge', { method: 'POST', body: JSON.stringify({ driveId: driveId, dryRun: true }) });
   if (!dryRes || dryRes.error) {
@@ -689,27 +689,104 @@ async function purgeGDriveRootFiles(driveId, driveName) {
     toast('No loose files found in Google Drive root — already clean!', 'success');
     return;
   }
+
   if (!confirm(
     'PURGE STRAY FILES from Google Drive?\n\n' +
     'Drive: ' + driveName + '\n' +
     'Files to delete: ' + dryRes.found + ' loose files in TeleDrive root\n\n' +
     '⚠️ WARNING: This permanently deletes ALL these files from Google Drive and CANNOT be undone.\n' +
     'Your folders (ok, pdfs, tera, photosold etc) are SAFE — only loose root files are deleted.\n\n' +
-    'This will free up ~188 GB of storage.\n\n' +
     'Click OK to permanently delete ' + dryRes.found + ' files.'
   )) return;
 
-  toast('Purging ' + dryRes.found + ' stray files from Google Drive root… (this may take a minute for 2000+ files)', 'info', 120000);
-  var res = await apiFetch('admin/drive-root-purge', { method: 'POST', body: JSON.stringify({ driveId: driveId, dryRun: false }) });
-  if (res && res.ok) {
-    toast('✅ Done! Deleted ' + res.deleted + ' files from Google Drive. Removed ' + res.removedFromDB + ' from TeleDrive DB. Refresh Quota to see freed storage.', 'success', 15000);
+  // Step 2: list phase — backend scans Drive and stores IDs in KV, returns jobId
+  toast('Indexing ' + dryRes.found + ' files on Google Drive…', 'info', 15000);
+  var listRes = await apiFetch('admin/drive-root-purge', { method: 'POST', body: JSON.stringify({ driveId: driveId, dryRun: false, action: 'list' }) });
+  if (!listRes || listRes.error || !listRes.jobId) {
+    toast(listRes ? (listRes.error || 'Failed to start purge job') : 'Network error', 'error');
+    return;
+  }
+
+  var jobId = listRes.jobId;
+  var totalFiles = listRes.total;
+
+  // Step 3: show live progress modal and delete in 300-file chunks
+  var cancelled = false;
+  var ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);backdrop-filter:blur(10px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  ov.innerHTML =
+    '<div id="purgeModal" style="background:var(--surface,#13152a);border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:1.6rem;max-width:400px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,.8);">' +
+      '<div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1.2rem;">' +
+        '<div style="width:40px;height:40px;border-radius:12px;background:rgba(255,69,58,.15);color:#ff453a;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;"><i class="fas fa-fire"></i></div>' +
+        '<div>' +
+          '<div style="font-size:.95rem;font-weight:700;color:var(--text1,#e8eaf6);">Purging stray files…</div>' +
+          '<div style="font-size:.78rem;color:var(--text2,#8c90b0);margin-top:.1rem;">' + esc(driveName) + ' · ' + totalFiles + ' files total</div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="margin-bottom:.8rem;">' +
+        '<div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--text2,#8c90b0);margin-bottom:.35rem;">' +
+          '<span id="purgeStatusTxt">Starting…</span>' +
+          '<span id="purgePctTxt">0%</span>' +
+        '</div>' +
+        '<div style="height:6px;background:rgba(255,255,255,.1);border-radius:3px;overflow:hidden;">' +
+          '<div id="purgeBarFill" style="height:100%;background:linear-gradient(90deg,#ff453a,#ff9f0a);border-radius:3px;transition:width .4s;width:0%"></div>' +
+        '</div>' +
+      '</div>' +
+      '<button id="purgeCancelBtn" style="width:100%;background:transparent;border:1px solid rgba(255,255,255,.12);color:var(--text2,#8c90b0);border-radius:10px;padding:.55rem;cursor:pointer;font-size:.83rem;">' +
+        '<i class="fas fa-xmark"></i> Stop (keeps progress)' +
+      '</button>' +
+    '</div>';
+  document.body.appendChild(ov);
+  ov.querySelector('#purgeCancelBtn').onclick = function() { cancelled = true; };
+
+  var deletedSoFar = 0;
+  var offset = 0;
+  var CHUNK = 300;
+
+  function updatePurgeUI(deleted, remaining) {
+    deletedSoFar += deleted;
+    var pct = totalFiles > 0 ? Math.round(deletedSoFar / totalFiles * 100) : 0;
+    var fill = document.getElementById('purgeBarFill');
+    var statusTxt = document.getElementById('purgeStatusTxt');
+    var pctTxt = document.getElementById('purgePctTxt');
+    if (fill) fill.style.width = pct + '%';
+    if (pctTxt) pctTxt.textContent = pct + '%';
+    if (statusTxt) statusTxt.textContent = 'Deleted ' + deletedSoFar + ' / ' + totalFiles + (remaining > 0 ? ' · ' + remaining + ' remaining' : ' · Done!');
+  }
+
+  try {
+    while (!cancelled) {
+      var delRes = await apiFetch('admin/drive-root-purge', {
+        method: 'POST',
+        body: JSON.stringify({ driveId: driveId, dryRun: false, action: 'delete', jobId: jobId, offset: offset })
+      });
+
+      if (!delRes || delRes.error) {
+        toast('Purge chunk error: ' + (delRes ? delRes.error : 'Network error'), 'error');
+        break;
+      }
+
+      updatePurgeUI(delRes.deleted || 0, delRes.remaining || 0);
+      offset = delRes.nextOffset || (offset + CHUNK);
+
+      if (delRes.remaining <= 0 || offset >= totalFiles) break; // all done
+      // Small pause between chunks so we don't hammer the API
+      await new Promise(function(r) { setTimeout(r, 400); });
+    }
+  } finally {
+    if (ov.parentNode) ov.parentNode.removeChild(ov);
+  }
+
+  if (cancelled) {
+    toast('Purge stopped at ' + deletedSoFar + ' / ' + totalFiles + ' files. Click Purge again to continue from where you left off.', 'warning', 8000);
+  } else {
+    toast('✅ Done! Deleted ' + deletedSoFar + ' stray files from Google Drive. Refresh Quota to see freed storage.', 'success', 12000);
     S.db = await apiFetchDB();
     renderSettingsPage();
     renderSidebarStorage();
-  } else {
-    toast(res ? (res.error || 'Purge failed') : 'Network error', 'error');
   }
 }
+
 
 async function exportDBBackup() {
   toast('Generating database backup…', 'info');

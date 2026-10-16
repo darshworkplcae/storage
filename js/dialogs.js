@@ -424,10 +424,44 @@ async function processFolderFiles(files) {
   } catch (e) { }
 
 
+
   window._isUploading = true;
   window._isBatchUploading = true;
   await requestWakeLock();
   toast('Preparing folder "' + rootFolder + '" (' + files.length + ' files)…', 'info');
+
+  // ── Batch progress tracking ──
+  var _batchTotal = files.length;
+  var _batchDone = 0;       // files completed (uploaded or skipped)
+  var _batchUploaded = 0;   // files actually uploaded (not skipped)
+  var _batchBytes = 0;      // bytes uploaded so far this session
+  var _batchTotalBytes = files.reduce(function(s,f){ return s + (f.size||0); }, 0);
+  var _batchStartTs = Date.now();
+  var _batchSpeedSamples = []; // rolling [bytes, ms] pairs for ETA
+
+  // Show overall progress bar
+  var upOverall = $('upOverall'), upOverallFill = $('upOverallFill'), upOverallLabel = $('upOverallLabel');
+  if (upOverall) upOverall.classList.remove('hidden');
+
+  function updateOverallBar(extraBytes, speed) {
+    _batchDone++;
+    if (extraBytes) _batchBytes += extraBytes;
+    var pct = _batchTotal > 0 ? Math.round(_batchDone / _batchTotal * 100) : 0;
+    if (upOverallFill) upOverallFill.style.width = pct + '%';
+    if (upOverallLabel) {
+      var remaining = _batchTotal - _batchDone;
+      var etaStr = '';
+      if (speed > 0 && _batchTotalBytes > _batchBytes) {
+        etaStr = ' · ' + fmtEta(_batchTotalBytes - _batchBytes, speed);
+      } else if (_batchDone > 1) {
+        var elapsed = (Date.now() - _batchStartTs) / 1000;
+        var avgRate = _batchBytes / elapsed;
+        if (avgRate > 0 && _batchTotalBytes > _batchBytes) etaStr = ' · ' + fmtEta(_batchTotalBytes - _batchBytes, avgRate);
+      }
+      upOverallLabel.textContent = 'File ' + _batchDone + ' / ' + _batchTotal + (remaining > 0 ? ' · ' + remaining + ' left' : '') + etaStr;
+    }
+  }
+
 
   // Pre-queue all folder files upfront in batch
   var fileItems = files.map(function (f) {
@@ -559,6 +593,7 @@ async function processFolderFiles(files) {
       if (isAlreadyUploaded) {
         skippedCount++;
         skippedIds.push(item.tId);
+        updateOverallBar(0, 0); // count skips toward total progress
         if (skippedIds.length >= 25) {
           tmBatchDone(skippedIds);
           skippedIds = [];
@@ -575,7 +610,12 @@ async function processFolderFiles(files) {
       }
 
       var res = await uploadOne(file, parentId, item.tId, parentGoogleId);
-      if (res && res.ok) uploadedCount++;
+      if (res && res.ok) {
+        uploadedCount++;
+        updateOverallBar(file.size, res._speed || 0);
+      } else {
+        updateOverallBar(0, 0); // failed — still count toward progress
+      }
     }
 
     if (skippedIds.length > 0) {
@@ -596,6 +636,9 @@ async function processFolderFiles(files) {
     window._isUploading = false;
     window._isBatchUploading = false;
     releaseWakeLock();
+    // Hide overall progress bar
+    if (upOverall) upOverall.classList.add('hidden');
+    if (upOverallFill) upOverallFill.style.width = '0%';
     try { localStorage.removeItem('td_active_batch'); } catch (e) { }
     try {
       S.db = await apiFetchDB();
@@ -743,7 +786,9 @@ async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId
 
         // Step 2: Upload directly to Google Drive (with Pause & Resume capability!)
         if (upStatus) upStatus.textContent = (attempt > 1 ? 'Auto-retrying (' + attempt + '/' + maxRetries + ')… ' : '') + 'Uploading…';
+        var _lastSpeed = 0;
         var result = await uploadToGoogleResumable(init.uploadUrl, file, function (loaded, total, speed) {
+          _lastSpeed = speed || _lastSpeed;
           var pct = total > 0 ? Math.round(loaded / total * 100) : 0;
           if (upFill) upFill.style.width = pct + '%';
           if (upPct) upPct.textContent = pct + '%';
@@ -807,7 +852,7 @@ async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId
           renderFilesPage(_driveId, _folderId);
         }
         lastErr = null;
-        return { ok: true };
+        return { ok: true, _speed: _lastSpeed };
 
       } catch (e) {
         lastErr = e;

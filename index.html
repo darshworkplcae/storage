@@ -275,12 +275,17 @@
         <div class="up-info">
           <div class="up-name" id="upName">Uploading…</div>
           <div class="up-status" id="upStatus"></div>
+          <!-- Overall batch progress row — shown only during folder uploads -->
+          <div class="up-overall hidden" id="upOverall">
+            <div class="up-overall-track"><div class="up-overall-fill" id="upOverallFill"></div></div>
+            <span class="up-overall-label" id="upOverallLabel"></span>
+          </div>
         </div>
         <div class="up-track-wrap">
           <div class="up-track"><div class="up-fill" id="upFill"></div></div>
           <span class="up-pct" id="upPct">0%</span>
         </div>
-                <button class="icon-btn" id="upPauseBtn" title="Pause / Resume"><i class="fas fa-pause"></i></button>
+              <button class="icon-btn" id="upPauseBtn" title="Pause / Resume"><i class="fas fa-pause"></i></button>
         <button class="icon-btn" id="upCancelBtn" title="Cancel"><i class="fas fa-times"></i></button>
       </div>
     </div>

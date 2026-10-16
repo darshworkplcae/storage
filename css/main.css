@@ -457,6 +457,13 @@ code{background:var(--bg5);padding:.1rem .35rem;border-radius:4px;font-size:.78r
 .up-track{width:70px;height:3px;background:var(--bg5);border-radius:2px;overflow:hidden;}
 .up-fill{height:100%;background:var(--primary);border-radius:2px;transition:.1s;}
 .up-pct{font-size:.72rem;color:var(--text3);width:28px;text-align:right;}
+/* Overall batch progress (folder uploads) */
+.up-overall{display:flex;align-items:center;gap:.4rem;margin-top:.25rem;}
+.up-overall.hidden{display:none;}
+.up-overall-track{flex:1;height:2px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden;}
+.up-overall-fill{height:100%;background:linear-gradient(90deg,#30d158,#4e86f5);border-radius:2px;transition:width .3s;}
+.up-overall-label{font-size:.68rem;color:var(--text3);white-space:nowrap;flex-shrink:0;}
+
 
 /* ─── Transfer Panel ─── */
 .tm-btn-wrap{position:relative;}
