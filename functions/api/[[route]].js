@@ -924,8 +924,13 @@ async function hDL(req,env,gId){
   const tokenParam=url.searchParams.get('token');
   let ses=null;
   if(tokenParam){
-    const v=await uGet(env,`td:ses:${tokenParam}`);
-    ses=String(v||'').replace(/^"|"$/g,'')||null;
+    const signedUser = await verifySignedToken(tokenParam, gEK(env));
+    if (signedUser) {
+      ses = signedUser;
+    } else {
+      const v=await uGet(env,`td:ses:${tokenParam}`);
+      ses=String(v||'').replace(/^"|"$/g,'')||null;
+    }
   }
   if(!ses) ses=await vSes(req,env,null);
   const db=await uGet(env,'td:db');
@@ -1033,8 +1038,13 @@ async function hThumb(req,env,gId){
   const tokenParam=url.searchParams.get('token');
   let ses=null;
   if(tokenParam){
-    const v=await uGet(env,`td:ses:${tokenParam}`);
-    ses=String(v||'').replace(/^"|"$/g,'')||null;
+    const signedUser = await verifySignedToken(tokenParam, gEK(env));
+    if (signedUser) {
+      ses = signedUser;
+    } else {
+      const v=await uGet(env,`td:ses:${tokenParam}`);
+      ses=String(v||'').replace(/^"|"$/g,'')||null;
+    }
   }
   if(!ses) ses=await vSes(req,env,null);
   const db=await uGet(env,'td:db');
