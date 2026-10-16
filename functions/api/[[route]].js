@@ -1311,7 +1311,8 @@ async function hDedupFolders(req, env) {
 async function hDriveRootPurge(req, env) {
   if(!await vSes(req, env, 'admin')) return J({error:'Unauthorized'}, 401);
   const body = await req.json().catch(()=>({}));
-  const { driveId, dryRun = false, action = 'list', jobId = null, offset = 0 } = body;
+  const { driveId, dryRun = false, action = 'list', jobId = null, offset = 0,
+          targetGoogleFolderId = null, targetFolderLabel = 'root' } = body;
   if(!driveId) return J({error:'driveId required'}, 400);
 
   const db = await uGet(env, 'td:db');
@@ -1352,21 +1353,21 @@ async function hDriveRootPurge(req, env) {
       // Job complete — remove KV job key
       await env.TELEDRIVE_KV.delete(jobKey).catch(()=>{});
       if(!db.activityLog) db.activityLog = [];
-      db.activityLog.unshift({id:uid(),type:'drive_root_purge',driveId,deletedFromDrive:ids.length,ts:new Date().toISOString()});
+      db.activityLog.unshift({id:uid(),type:'drive_root_purge',driveId,label:jobData.label||'root',deletedFromDrive:ids.length,ts:new Date().toISOString()});
       await uSet(env, 'td:db', db);
     }
 
     return J({ok:true, deleted:chunkIds.length, remaining, nextOffset: offset + chunkIds.length, total: ids.length});
   }
 
-  // ── Phase A: list all file IDs in Drive root ──
-  const rootFolderId = drv.rootFolderId;
+  // ── Phase A: list all non-folder file IDs in target folder (or drive root if none specified) ──
+  const scanFolderId = targetGoogleFolderId || drv.rootFolderId;
   const allGoogleFileIds = [];
   let pageToken = null;
   let pageCount = 0;
 
   do {
-    const q = encodeURIComponent(`'${rootFolderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`);
+    const q = encodeURIComponent(`'${scanFolderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`);
     let url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(id,name,size)&pageSize=1000&supportsAllDrives=true`;
     if(pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
     const resp = await fetch(url, { headers: { Authorization: `Bearer ${at}` } });
@@ -1381,13 +1382,13 @@ async function hDriveRootPurge(req, env) {
   } while(pageToken);
 
   const totalFound = allGoogleFileIds.length;
-  if(totalFound === 0) return J({ok:true, deleted:0, found:0, message:'No loose files found in Google Drive root'});
+  if(totalFound === 0) return J({ok:true, deleted:0, found:0, message:`No loose files found in "${targetFolderLabel}"`});
 
-  if(dryRun) return J({ok:true, dryRun:true, found:totalFound, message:`Would delete ${totalFound} files from Google Drive root`});
+  if(dryRun) return J({ok:true, dryRun:true, found:totalFound, message:`Would delete ${totalFound} loose files from "${targetFolderLabel}"`});
 
   // Store IDs in KV for chunked deletion (TTL 2h)
   const newJobId = uid();
-  await env.TELEDRIVE_KV.put('td:purge:' + newJobId, JSON.stringify({ids: allGoogleFileIds, driveId, createdAt: Date.now()}), {expirationTtl: 7200});
+  await env.TELEDRIVE_KV.put('td:purge:' + newJobId, JSON.stringify({ids: allGoogleFileIds, driveId, label: targetFolderLabel, createdAt: Date.now()}), {expirationTtl: 7200});
 
   return J({ok:true, action:'list', jobId: newJobId, total: totalFound, found: totalFound});
 }

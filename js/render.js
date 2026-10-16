@@ -371,6 +371,11 @@ function renderFilesPage(driveId, folderId){
 }
 
 function toolbarHtml(driveId,folderId){
+  const isAdmin = S.ses.role === 'admin';
+  const curFolderObj = folderId ? (S.db && S.db.folders || []).find(function(f){ return f.id === folderId; }) : null;
+  const adminFolderPurgeBtn = (isAdmin && curFolderObj && curFolderObj.googleFolderId)
+    ? `<button class="btn-danger sm" onclick="purgeStrayFilesInFolder('${esc(driveId)}','${esc(folderId)}','${esc(curFolderObj.googleFolderId)}','${esc(curFolderObj.name)}')" title="ADMIN: Delete all loose files directly inside this Google Drive folder (not in subfolders). Removes stray files caused by upload bugs."><i class="fas fa-fire"></i> <span>Purge Stray Here</span></button>`
+    : '';
   return `<div class="nav-btns">
     <button class="icon-btn" onclick="goBackFolder()" title="Back"><i class="fas fa-chevron-left"></i></button>
     <button class="icon-btn" onclick="goUp()" title="Up"><i class="fas fa-arrow-up"></i></button>
@@ -380,6 +385,7 @@ function toolbarHtml(driveId,folderId){
     <button class="btn-ghost sm" onclick="triggerFolderUpload()" title="Upload entire folder from device"><i class="fas fa-folder-arrow-up"></i> <span>Folder ↑</span></button>
     <button class="btn-ghost sm" onclick="showNewFolderDialog()" title="Create New Folder"><i class="fas fa-folder-plus"></i> <span>+ Folder</span></button>
     <button class="btn-ghost sm" id="toolbarSelectAllBtn" onclick="toggleSelectAllCurrent()" title="Select All Items (Ctrl+A)"><i class="fas fa-check-double"></i> <span>Select All</span></button>
+    ${adminFolderPurgeBtn}
   </div>
   <div class="filter-tabs">
     <button class="ftab ${(!S.filter||S.filter==='all')?'active':''}" data-filter="all">All</button>

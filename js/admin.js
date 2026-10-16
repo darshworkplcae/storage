@@ -678,31 +678,69 @@ async function scanDriveFiles(driveId) {
 }
 
 
-async function purgeGDriveRootFiles(driveId, driveName) {
-  // Step 1: dry-run scan to get count
-  toast('Scanning Google Drive root for stray files…', 'info', 10000);
-  var dryRes = await apiFetch('admin/drive-root-purge', { method: 'POST', body: JSON.stringify({ driveId: driveId, dryRun: true }) });
+async function purgeStrayFilesInFolder(driveId, folderId, googleFolderId, folderName) {
+  // Wraps purgeGDriveRootFiles but scans inside a specific Google Drive subfolder
+  toast('Scanning "' + folderName + '" on Google Drive for stray files…', 'info', 10000);
+  var dryRes = await apiFetch('admin/drive-root-purge', {
+    method: 'POST',
+    body: JSON.stringify({ driveId: driveId, dryRun: true, targetGoogleFolderId: googleFolderId, targetFolderLabel: folderName })
+  });
   if (!dryRes || dryRes.error) {
     toast(dryRes ? dryRes.error : 'Scan failed', 'error');
     return;
   }
   if (dryRes.found === 0) {
-    toast('No loose files found in Google Drive root — already clean!', 'success');
+    toast('✅ No stray files found directly inside "' + folderName + '" — already clean!', 'success');
     return;
   }
+  if (!window.confirm(
+    'Found ' + dryRes.found + ' stray file(s) directly inside "' + folderName + '" on Google Drive.\n\n' +
+    'These are files that should be in subfolders but ended up here due to upload bugs.\n\n' +
+    '⚠️ DANGER: This will permanently delete them from Google Drive!\n\nProceed?'
+  )) {
+    toast('Purge cancelled.', 'info');
+    return;
+  }
+  // Delegate to the same purge flow, passing the googleFolderId
+  await purgeGDriveRootFiles(driveId, folderName, googleFolderId);
+  // Refresh the folder view
+  S.db = await apiFetchDB();
+  renderFilesPage(_driveId, _folderId);
+}
 
-  if (!confirm(
-    'PURGE STRAY FILES from Google Drive?\n\n' +
-    'Drive: ' + driveName + '\n' +
-    'Files to delete: ' + dryRes.found + ' loose files in TeleDrive root\n\n' +
-    '⚠️ WARNING: This permanently deletes ALL these files from Google Drive and CANNOT be undone.\n' +
-    'Your folders (ok, pdfs, tera, photosold etc) are SAFE — only loose root files are deleted.\n\n' +
-    'Click OK to permanently delete ' + dryRes.found + ' files.'
-  )) return;
+async function purgeGDriveRootFiles(driveId, driveName, targetGoogleFolderId) {
+  var targetFolderLabel = targetGoogleFolderId ? driveName : 'root';
+
+  // Step 1: dry-run scan to get count (skip if called from purgeStrayFilesInFolder which already did it)
+  if (!targetGoogleFolderId) {
+    toast('Scanning Google Drive root for stray files…', 'info', 10000);
+    var dryRes = await apiFetch('admin/drive-root-purge', { method: 'POST', body: JSON.stringify({ driveId: driveId, dryRun: true }) });
+    if (!dryRes || dryRes.error) {
+      toast(dryRes ? dryRes.error : 'Scan failed', 'error');
+      return;
+    }
+    if (dryRes.found === 0) {
+      toast('No loose files found in Google Drive root — already clean!', 'success');
+      return;
+    }
+
+    if (!confirm(
+      'PURGE STRAY FILES from Google Drive?\n\n' +
+      'Drive: ' + driveName + '\n' +
+      'Files to delete: ' + dryRes.found + ' loose files in TeleDrive root\n\n' +
+      '⚠️ WARNING: This permanently deletes ALL these files from Google Drive and CANNOT be undone.\n' +
+      'Your folders (ok, pdfs, tera, photosold etc) are SAFE — only loose root files are deleted.\n\n' +
+      'Click OK to permanently delete ' + dryRes.found + ' files.'
+    )) return;
+  }
 
   // Step 2: list phase — backend scans Drive and stores IDs in KV, returns jobId
-  toast('Indexing ' + dryRes.found + ' files on Google Drive…', 'info', 15000);
-  var listRes = await apiFetch('admin/drive-root-purge', { method: 'POST', body: JSON.stringify({ driveId: driveId, dryRun: false, action: 'list' }) });
+  toast('Indexing files on Google Drive…', 'info', 15000);
+  var listRes = await apiFetch('admin/drive-root-purge', { method: 'POST', body: JSON.stringify({
+    driveId: driveId, dryRun: false, action: 'list',
+    targetGoogleFolderId: targetGoogleFolderId || null,
+    targetFolderLabel: targetFolderLabel
+  }) });
   if (!listRes || listRes.error || !listRes.jobId) {
     toast(listRes ? (listRes.error || 'Failed to start purge job') : 'Network error', 'error');
     return;
