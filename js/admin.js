@@ -670,7 +670,9 @@ async function scanDriveFiles(driveId) {
 
     var msg = 'Sync complete! ' + totalAddedFiles + ' new file(s) and ' + totalAddedFolders + ' folder(s) synced. Total: ' + finalTotalFiles + ' files in database.';
     toast(msg, 'success', 8000);
+    clearFreshDBOverride(); // Clear any stale post-dedup override before re-fetching
     S.db = await apiFetchDB();
+    saveFreshDBOverride(S.db.folders, S.db.files); // Cache so refresh also shows correct state
     renderSettingsPage();
     renderSidebarStorage();
     if (typeof _curPage !== 'undefined' && _curPage === 'files') renderFilesPage(_driveId, _folderId);
