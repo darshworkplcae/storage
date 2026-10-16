@@ -59,8 +59,9 @@ function renderSettingsPage() {
               '<button class="btn-ghost xs '+(d.hasPassword?'active-lock':'')+'" style="flex:1;'+(d.hasPassword?'color:#ff9f0a;border-color:rgba(255,159,10,0.4);background:rgba(255,159,10,0.1)':'')+'" onclick="showSetDrivePasswordDialog(\''+d.id+'\','+(d.hasPassword?true:false)+',\''+esc(d.name).replace(/'/g,"\\'")+'\',\''+esc(d.passwordHint||'').replace(/'/g,"\\'")+'\')" title="Set Password for Drive Access"><i class="fas '+(d.hasPassword?'fa-lock':'fa-key')+'"></i> '+(d.hasPassword?'Pass Set':'Drive Pass')+'</button>' +
               '<button class="btn-ghost xs" style="flex:1" onclick="scanDriveFiles(\''+d.id+'\')" title="Scan Google Drive to detect and restore all uploaded files"><i class="fas fa-rotate"></i> Sync Files</button>' +
             '</div>' +
-            '<div style="margin-top:.4rem">' +
-              '<button class="btn-danger xs" style="width:100%;font-size:.74rem" onclick="purgeGDriveRootFiles(\''+d.id+'\',\''+esc(d.name)+'\')" title="DANGER: Permanently deletes ALL loose files directly in TeleDrive root folder on Google Drive. Folders (ok, pdfs, tera etc) are safe. Frees storage for duplicate/stray files."><i class="fas fa-fire"></i> Purge Stray Root Files (Free Storage)</button>' +
+            '<div style="margin-top:.4rem;display:flex;gap:6px">' +
+              '<button class="btn-danger xs" style="flex:1;font-size:.74rem" onclick="purgeGDriveRootFiles(\''+d.id+'\',\''+esc(d.name)+'\')" title="DANGER: Permanently deletes ALL loose files directly in TeleDrive root folder on Google Drive. Folders (ok, pdfs, tera etc) are safe. Frees storage for duplicate/stray files."><i class="fas fa-fire"></i> Purge Stray Root Files</button>' +
+              '<button class="btn-warning xs" style="flex:1;font-size:.74rem" onclick="dedupFolders(\''+d.id+'\',\''+esc(d.name)+'\')" title="Find and merge duplicate folders (same name+parent) in this drive. Re-parents all files to the winning folder."><i class="fas fa-code-merge"></i> Dedup Folders</button>' +
             '</div>' +
           '</div>';
         }).join('') + '</div>',
@@ -788,7 +789,58 @@ async function purgeGDriveRootFiles(driveId, driveName) {
 }
 
 
+async function dedupFolders(driveId, driveName) {
+  toast('Scanning for duplicate folders in "' + driveName + '"…', 'info');
+  var dryRes = await apiFetch('admin/dedup-folders', {
+    method: 'POST',
+    body: JSON.stringify({ driveId: driveId, dryRun: true })
+  }).catch(function() { return null; });
+
+  if (!dryRes || dryRes.error) {
+    toast(dryRes ? dryRes.error : 'Scan failed', 'error');
+    return;
+  }
+
+  var willMerge = dryRes.wouldMergeFolders || 0;
+  if (willMerge === 0) {
+    toast('✅ No duplicate folders found in "' + driveName + '"! Everything looks clean.', 'success');
+    return;
+  }
+
+  var groups    = dryRes.duplicateGroups   || 0;
+  var willMove  = dryRes.wouldMoveFiles    || 0;
+  var trashLosers = window.confirm(
+    'Found ' + groups + ' duplicate folder group(s) in "' + driveName + '".\n\n' +
+    '• ' + willMerge + ' duplicate folder record(s) will be removed from DB\n' +
+    '• ' + willMove + ' file(s) will be re-linked to the correct folder\n\n' +
+    'Also trash the duplicate Google Drive folders? (Recommended — frees storage)\n\nClick OK to also trash losers on Drive, Cancel to only fix the DB.'
+  );
+  if (!window.confirm('Proceed with dedup' + (trashLosers ? ' + trash losers on Google Drive' : ' (DB fix only)') + '?')) {
+    toast('Dedup cancelled.', 'info');
+    return;
+  }
+
+  toast('Merging duplicate folders…', 'info');
+  var res = await apiFetch('admin/dedup-folders', {
+    method: 'POST',
+    body: JSON.stringify({ driveId: driveId, dryRun: false, trashLosers: trashLosers })
+  }).catch(function() { return null; });
+
+  if (!res || res.error) {
+    toast(res ? res.error : 'Dedup failed', 'error');
+    return;
+}
+
+  toast('✅ Dedup done! Merged ' + res.merged + ' folder(s), moved ' + res.movedFiles + ' file(s). Refreshing…', 'success', 8000);
+  S.db = await apiFetchDB();
+  renderSettingsPage();
+  renderSidebarStorage();
+  renderFilesPage();
+}
+
+
 async function exportDBBackup() {
+
   toast('Generating database backup…', 'info');
   try {
     var r = await apiFetch('admin/backup');

@@ -580,6 +580,17 @@ async function processFolderFiles(files) {
           }
         } catch (e) {
           console.warn('Folder pre-creation error:', fName, e);
+          // Recovery: the folder may have been created on Google Drive but the response timed out.
+          // Check S.db.folders in case it was pushed by a previous attempt — prevents duplicates on resume.
+          var recovered = (S.db && S.db.folders || []).find(function(r) {
+            return r.driveId === _driveId && r.parentId === curParentId
+              && r.name.toLowerCase() === fName.toLowerCase() && !r.trashed;
+          });
+          if (recovered) {
+            folderMap[currentPath] = recovered.id;
+            if (recovered.googleFolderId) folderGoogleMap[currentPath] = recovered.googleFolderId;
+          }
+          // If still not found, file uploads for this path will be safely skipped below.
         }
       }
     }
@@ -607,8 +618,36 @@ async function processFolderFiles(files) {
       var relPath = file.webkitRelativePath || file.name;
       var parts = relPath.split('/');
       var parentAcc = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
-      var parentId = (parentAcc && folderMap[parentAcc]) ? folderMap[parentAcc] : (_folderId || null);
-      var parentGoogleId = (parentAcc && folderGoogleMap[parentAcc]) ? folderGoogleMap[parentAcc] : (curFolderObj ? curFolderObj.googleFolderId : null);
+      // Resolve parentId — if parentAcc is set but the folder wasn't created, skip this file
+      // rather than dumping it into the wrong parent (tera root or browse folder).
+      var parentId = null;
+      if (parentAcc) {
+        parentId = folderMap[parentAcc] || null;
+        if (!parentId) {
+          // Folder creation failed and recovery also failed — skip this file.
+          updateOverallBar('fail', 0);
+          tmDone(item.tId, false);
+          continue;
+        }
+      } else {
+        parentId = _folderId || null;
+      }
+
+      // Resolve parentGoogleId — look up in map, then DB, but NEVER fall back to curFolderObj
+      // (that would put the file in the wrong Google Drive folder).
+      var parentGoogleId = null;
+      if (parentAcc) {
+        if (folderGoogleMap[parentAcc]) {
+          parentGoogleId = folderGoogleMap[parentAcc];
+        } else {
+          // Try to recover from DB using our local folderId
+          var _pf = (S.db && S.db.folders || []).find(function(f) { return f.id === parentId; });
+          if (_pf && _pf.googleFolderId) parentGoogleId = _pf.googleFolderId;
+        }
+        // If still null, pass null — backend will use its own rootFolderId fallback (safer than wrong folder).
+      } else {
+        parentGoogleId = curFolderObj ? curFolderObj.googleFolderId : null;
+      }
 
       // Smart Resume & Deduplication in O(1) time
       var isAlreadyUploaded = existingFileSet.has((parentId || '') + '::' + file.name + '::' + file.size);

@@ -1511,6 +1511,31 @@ body.has-active-upload .multi-select-bar {
   padding: 0.35rem 0.75rem;
   font-size: 0.8rem;
 }
+.btn-warning {
+  background: #ff9f0a;
+  color: #000;
+  border-radius: var(--r8);
+  padding: 0.45rem 0.95rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  box-shadow: 0 3px 0 #b36b00, 0 4px 12px rgba(255,159,10,0.3);
+  transition: all 0.12s;
+}
+.btn-warning:hover {
+  background: #ffb83d;
+  box-shadow: 0 3px 0 #b36b00, 0 6px 16px rgba(255,159,10,0.45);
+}
+.btn-warning:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #b36b00, 0 2px 6px rgba(255,159,10,0.2);
+}
+.btn-warning.xs {
+  padding: 0.28rem 0.6rem;
+  font-size: 0.78rem;
+}
+
 
 /* ═══ Mobile Floating Action Button (FAB) ═══ */
 .mobile-fab-wrap {
