@@ -1197,6 +1197,77 @@ async function gDriveBatchDelete(token, googleIds) {
   }
 }
 
+// ─── Drive Root Purge: list & delete ALL files directly in a drive's root folder on Google Drive ───
+// This runs server-side — no browser hang. Works even for 10,000+ files.
+async function hDriveRootPurge(req, env) {
+  if(!await vSes(req, env, 'admin')) return J({error:'Unauthorized'}, 401);
+  const body = await req.json().catch(()=>({}));
+  const { driveId, dryRun = false } = body;
+  if(!driveId) return J({error:'driveId required'}, 400);
+
+  const db = await uGet(env, 'td:db');
+  if(!db) return J({error:'DB error'}, 500);
+
+  const drv = (db.drives||[]).find(d => d.id === driveId);
+  if(!drv) return J({error:'Drive not found'}, 404);
+  if(!drv.rootFolderId) return J({error:'Drive has no rootFolderId'}, 400);
+
+  let at;
+  try { at = await gAT(env, drv.encToken); }
+  catch(e) {
+    try { at = await gAT(env, drv.encToken, true); }
+    catch(e2) { return J({error:'Token error: ' + (e2.message||e.message)}, 500); }
+  }
+
+  // Collect ALL Google Drive file IDs directly in the root folder (not in subfolders)
+  const rootFolderId = drv.rootFolderId;
+  const allGoogleFileIds = [];
+  let pageToken = null;
+  let pageCount = 0;
+
+  do {
+    const q = encodeURIComponent(`'${rootFolderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`);
+    let url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(id,name,size)&pageSize=1000&supportsAllDrives=true`;
+    if(pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${at}` } });
+    if(!resp.ok) break;
+    const data = await resp.json();
+    if(data.files && data.files.length) {
+      data.files.forEach(f => allGoogleFileIds.push(f.id));
+    }
+    pageToken = data.nextPageToken || null;
+    pageCount++;
+    // Safety limit: never more than 200 pages (200,000 files)
+    if(pageCount >= 200) break;
+  } while(pageToken);
+
+  const totalFound = allGoogleFileIds.length;
+  if(totalFound === 0) return J({ok:true, deleted:0, message:'No loose files found in Google Drive root'});
+
+  if(dryRun) return J({ok:true, dryRun:true, found:totalFound, message:`Would delete ${totalFound} files from Google Drive root`});
+
+  // Delete all found files in batches of 50
+  await gDriveBatchDelete(at, allGoogleFileIds);
+
+  // Also remove them from our DB if tracked
+  const allGoogleIdSet = new Set(allGoogleFileIds);
+  const beforeCount = (db.files||[]).length;
+  db.files = (db.files||[]).filter(f => !allGoogleIdSet.has(f.googleFileId));
+  const removedFromDB = beforeCount - db.files.length;
+
+  // Update drive used bytes
+  const removedSize = (db.files||[]).reduce((s,f) => s + (f.size||0), 0);
+  // Just refresh from Google after cleanup
+  if(_memDBCache) {
+    _memDBCache.files = db.files;
+  }
+  if(!db.activityLog) db.activityLog = [];
+  db.activityLog.unshift({id:uid(),type:'drive_root_purge',driveId,deletedFromDrive:totalFound,removedFromDB,ts:new Date().toISOString()});
+  await uSet(env, 'td:db', db);
+
+  return J({ok:true, deleted:totalFound, removedFromDB, message:`Deleted ${totalFound} loose files from Google Drive root. Removed ${removedFromDB} from TeleDrive DB.`});
+}
+
 async function hBatchPermanentDelete(req,env){
   const ses=await vSes(req,env,null);
   if(!ses) return J({error:'Unauthorized'},401);
@@ -2006,6 +2077,7 @@ export async function onRequest({request,env}){
     if(p==='admin/backup'&&m==='GET')return hBackupDB(request,env);
     if(p==='admin/restore'&&m==='POST')return hRestoreDB(request,env);
     if(p==='admin/init'&&m==='POST')return hInit(request,env);
+    if(p==='admin/drive-root-purge'&&m==='POST')return hDriveRootPurge(request,env);
     return J({error:'Not found',path:p},404);
   }catch(e){return J({error:e.message||'Server error'},500);}
 }

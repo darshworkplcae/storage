@@ -59,6 +59,9 @@ function renderSettingsPage() {
               '<button class="btn-ghost xs '+(d.hasPassword?'active-lock':'')+'" style="flex:1;'+(d.hasPassword?'color:#ff9f0a;border-color:rgba(255,159,10,0.4);background:rgba(255,159,10,0.1)':'')+'" onclick="showSetDrivePasswordDialog(\''+d.id+'\','+(d.hasPassword?true:false)+',\''+esc(d.name).replace(/'/g,"\\'")+'\',\''+esc(d.passwordHint||'').replace(/'/g,"\\'")+'\')" title="Set Password for Drive Access"><i class="fas '+(d.hasPassword?'fa-lock':'fa-key')+'"></i> '+(d.hasPassword?'Pass Set':'Drive Pass')+'</button>' +
               '<button class="btn-ghost xs" style="flex:1" onclick="scanDriveFiles(\''+d.id+'\')" title="Scan Google Drive to detect and restore all uploaded files"><i class="fas fa-rotate"></i> Sync Files</button>' +
             '</div>' +
+            '<div style="margin-top:.4rem">' +
+              '<button class="btn-danger xs" style="width:100%;font-size:.74rem" onclick="purgeGDriveRootFiles(\''+d.id+'\',\''+esc(d.name)+'\')" title="DANGER: Permanently deletes ALL loose files directly in TeleDrive root folder on Google Drive. Folders (ok, pdfs, tera etc) are safe. Frees storage for duplicate/stray files."><i class="fas fa-fire"></i> Purge Stray Root Files (Free Storage)</button>' +
+            '</div>' +
           '</div>';
         }).join('') + '</div>',
     '</div>',
@@ -670,6 +673,41 @@ async function scanDriveFiles(driveId) {
     if (typeof _curPage !== 'undefined' && _curPage === 'files') renderFilesPage(_driveId, _folderId);
   } catch(e) {
     toast(e.message || 'Scan error', 'error', 8000);
+  }
+}
+
+
+async function purgeGDriveRootFiles(driveId, driveName) {
+  // First do a dry run to show how many files will be deleted
+  toast('Scanning Google Drive root for stray files…', 'info', 10000);
+  var dryRes = await apiFetch('admin/drive-root-purge', { method: 'POST', body: JSON.stringify({ driveId: driveId, dryRun: true }) });
+  if (!dryRes || dryRes.error) {
+    toast(dryRes ? dryRes.error : 'Scan failed', 'error');
+    return;
+  }
+  if (dryRes.found === 0) {
+    toast('No loose files found in Google Drive root — already clean!', 'success');
+    return;
+  }
+  if (!confirm(
+    'PURGE STRAY FILES from Google Drive?\n\n' +
+    'Drive: ' + driveName + '\n' +
+    'Files to delete: ' + dryRes.found + ' loose files in TeleDrive root\n\n' +
+    '⚠️ WARNING: This permanently deletes ALL these files from Google Drive and CANNOT be undone.\n' +
+    'Your folders (ok, pdfs, tera, photosold etc) are SAFE — only loose root files are deleted.\n\n' +
+    'This will free up ~188 GB of storage.\n\n' +
+    'Click OK to permanently delete ' + dryRes.found + ' files.'
+  )) return;
+
+  toast('Purging ' + dryRes.found + ' stray files from Google Drive root… (this may take a minute for 2000+ files)', 'info', 120000);
+  var res = await apiFetch('admin/drive-root-purge', { method: 'POST', body: JSON.stringify({ driveId: driveId, dryRun: false }) });
+  if (res && res.ok) {
+    toast('✅ Done! Deleted ' + res.deleted + ' files from Google Drive. Removed ' + res.removedFromDB + ' from TeleDrive DB. Refresh Quota to see freed storage.', 'success', 15000);
+    S.db = await apiFetchDB();
+    renderSettingsPage();
+    renderSidebarStorage();
+  } else {
+    toast(res ? (res.error || 'Purge failed') : 'Network error', 'error');
   }
 }
 

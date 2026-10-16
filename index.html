@@ -58,10 +58,11 @@
       </button>
     </div>
 
-    <div class="lp-footer" style="display:flex;justify-content:center;margin-top:1rem">
-      <button type="button" class="btn-ghost sm" onclick="showAdminLogin(event)" style="font-size:0.8rem;color:var(--text2);display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;padding:6px 12px;background:rgba(255,255,255,0.03);cursor:pointer">
-        <i class="fas fa-shield-halved" style="color:var(--primary)"></i> Admin Sign In
-      </button>
+    <!-- Hidden admin link (accessible exclusively via /tobi/admin route) -->
+    <div class="lp-footer" style="display:none">
+      <a href="#/tobi/admin" class="lp-admin-link" onclick="showAdminLogin(event)">
+        <i class="fas fa-shield-halved"></i> Admin
+      </a>
     </div>
 
     <div style="margin-top:1.2rem;text-align:center;font-size:0.75rem;opacity:0.6">
@@ -119,7 +120,6 @@
         <div class="pmenu-item" onclick="toggleTheme()"><i class="fas fa-circle-half-stroke"></i> Switch Theme</div>
         <div class="pmenu-item danger user-or-admin hidden" id="pmenuLogout" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Logout</div>
         <div class="pmenu-item guest-only" id="pmenuLogin" onclick="showSignInModal()"><i class="fas fa-arrow-right-to-bracket"></i> Sign In</div>
-        <div class="pmenu-item guest-only" onclick="showAdminLogin(event)"><i class="fas fa-shield-halved"></i> Admin Sign In</div>
       </div>
     </div>
 
