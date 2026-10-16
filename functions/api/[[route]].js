@@ -1489,35 +1489,42 @@ async function hDebugDB(req, env) {
   }
 
   if (action === 'auto-clean-tera') {
-    const teraCandidates = (db.folders||[]).filter(f => (f.name||'').toLowerCase() === 'tera' && !f.trashed);
-    if (!teraCandidates.length) return J({error: 'No tera folder found'}, 404);
+    // Step 1: Remove exact duplicate objects by folder ID
+    const seenFolderIds = new Set();
+    const uniqueFolders = [];
+    for (const f of (db.folders || [])) {
+      if (f && f.id && !seenFolderIds.has(f.id)) {
+        seenFolderIds.add(f.id);
+        uniqueFolders.push(f);
+      }
+    }
+    db.folders = uniqueFolders;
 
-    // Prefer candidate at root (no parentId), with most files/folders, then googleFolderId
-    teraCandidates.sort((a,b) => {
-      const aIsRoot = !a.parentId ? 1 : 0;
-      const bIsRoot = !b.parentId ? 1 : 0;
-      if (bIsRoot !== aIsRoot) return bIsRoot - aIsRoot;
-      const aChildCount = (db.folders||[]).filter(f => f.parentId === a.id).length;
-      const bChildCount = (db.folders||[]).filter(f => f.parentId === b.id).length;
-      if (bChildCount !== aChildCount) return bChildCount - aChildCount;
-      return (b.googleFolderId ? 1 : 0) - (a.googleFolderId ? 1 : 0);
-    });
+    // Step 2: Canonical tera folder is mv73d3n3g2wy8 (or the one named 'tera' at root)
+    let canonicalTera = (db.folders||[]).find(f => f.id === 'mv73d3n3g2wy8');
+    if (!canonicalTera) {
+      canonicalTera = (db.folders||[]).find(f => (f.name||'').toLowerCase() === 'tera' && !f.parentId && !f.trashed);
+    }
+    if (!canonicalTera) return J({error: 'Canonical tera folder not found'}, 404);
 
-    const teraWinner = teraCandidates[0];
-    const otherTeras = teraCandidates.slice(1);
-    const otherTeraIds = new Set(otherTeras.map(t => t.id));
+    const teraId = canonicalTera.id;
 
-    // Re-parent children and files from other teras to teraWinner
-    (db.folders||[]).forEach(f => {
-      if (otherTeraIds.has(f.parentId)) f.parentId = teraWinner.id;
-    });
-    (db.files||[]).forEach(f => {
-      if (otherTeraIds.has(f.folderId)) f.folderId = teraWinner.id;
-    });
-    db.folders = (db.folders||[]).filter(f => !otherTeraIds.has(f.id));
+    // Step 3: Any OTHER folder named 'tera' at root is a duplicate -> merge into canonicalTera
+    const duplicateTeras = (db.folders||[]).filter(f => (f.name||'').toLowerCase() === 'tera' && f.id !== teraId);
+    for (const dt of duplicateTeras) {
+      // Re-parent subfolders and files to canonicalTera
+      (db.folders||[]).forEach(f => {
+        if (f.parentId === dt.id) f.parentId = teraId;
+      });
+      (db.files||[]).forEach(f => {
+        if (f.folderId === dt.id) f.folderId = teraId;
+      });
+    }
+    const dupTeraIds = new Set(duplicateTeras.map(t => t.id));
+    db.folders = (db.folders||[]).filter(f => !dupTeraIds.has(f.id));
 
-    // Now deduplicate subfolders directly inside teraWinner
-    const children = (db.folders||[]).filter(f => f.parentId === teraWinner.id && !f.trashed);
+    // Step 4: Safely deduplicate children directly inside canonicalTera by name
+    const children = (db.folders||[]).filter(f => f.parentId === teraId && !f.trashed);
     const byName = {};
     for (const c of children) {
       const k = (c.name||'').toLowerCase().trim();
@@ -1526,63 +1533,72 @@ async function hDebugDB(req, env) {
     }
 
     const fileCounts = {};
-    for(const fi of (db.files||[])) {
-      if(fi.folderId) fileCounts[fi.folderId] = (fileCounts[fi.folderId]||0) + 1;
+    for (const fi of (db.files||[])) {
+      if (fi.folderId) fileCounts[fi.folderId] = (fileCounts[fi.folderId]||0) + 1;
     }
 
-    let mergedFoldersCount = 0;
-    const removedFolderIds = new Set();
-    const finalKeepers = [];
+    let mergedCount = 0;
+    const toRemoveIds = new Set();
 
     for (const [k, group] of Object.entries(byName)) {
-      if (group.length === 1) {
-        finalKeepers.push({name: group[0].name, files: fileCounts[group[0].id]||0});
-        continue;
-      }
-      group.sort((a,b) => {
+      if (group.length <= 1) continue;
+
+      // Sort by file count desc, then googleFolderId, then oldest
+      group.sort((a, b) => {
         const fc = (fileCounts[b.id]||0) - (fileCounts[a.id]||0);
         if (fc !== 0) return fc;
         if (b.googleFolderId && !a.googleFolderId) return 1;
         if (a.googleFolderId && !b.googleFolderId) return -1;
         return (a.id||'').localeCompare(b.id||'');
       });
+
       const winner = group[0];
       const losers = group.slice(1);
+
       if (!winner.googleFolderId) {
         const withG = losers.find(l => l.googleFolderId);
         if (withG) winner.googleFolderId = withG.googleFolderId;
       }
+
       for (const loser of losers) {
+        if (loser.id === winner.id) continue; // Safety guard: never mark winner as loser
+        // Re-parent files
         for (const fi of (db.files||[])) {
           if (fi.folderId === loser.id) fi.folderId = winner.id;
         }
+        // Re-parent child folders
         for (const fo of (db.folders||[])) {
           if (fo.parentId === loser.id) fo.parentId = winner.id;
         }
-        removedFolderIds.add(loser.id);
-        mergedFoldersCount++;
+        toRemoveIds.add(loser.id);
+        mergedCount++;
       }
-      finalKeepers.push({name: winner.name, files: (db.files||[]).filter(x=>x.folderId===winner.id).length});
     }
 
-    db.folders = (db.folders||[]).filter(f => !removedFolderIds.has(f.id));
+    db.folders = (db.folders||[]).filter(f => !toRemoveIds.has(f.id));
+
     if (_memDBCache) {
       _memDBCache.folders = db.folders;
       _memDBCache.files = db.files;
     }
     await uSet(env, 'td:db', db);
 
-    const remainingTeraChildren = (db.folders||[]).filter(f => f.parentId === teraWinner.id && !f.trashed);
-    const remainingTeraFiles = (db.files||[]).filter(f => f.folderId === teraWinner.id && !f.trashed);
+    const finalTeraFolders = (db.folders||[]).filter(f => f.parentId === teraId && !f.trashed);
+    const finalTeraFiles   = (db.files||[]).filter(f => f.folderId === teraId && !f.trashed);
 
     return J({
       ok: true,
-      mergedFoldersCount,
-      teraFolderId: teraWinner.id,
-      remainingTeraFoldersCount: remainingTeraChildren.length,
-      remainingTeraFilesCount: remainingTeraFiles.length,
-      folders: remainingTeraChildren.map(f => ({name: f.name, id: f.id, files: (db.files||[]).filter(x=>x.folderId===f.id).length})),
-      files: remainingTeraFiles.map(f => ({name: f.name, size: f.size}))
+      mergedCount,
+      teraFolderId: teraId,
+      foldersCount: finalTeraFolders.length,
+      filesCount: finalTeraFiles.length,
+      folders: finalTeraFolders.map(f => ({
+        id: f.id,
+        name: f.name,
+        googleFolderId: f.googleFolderId,
+        files: (db.files||[]).filter(x => x.folderId === f.id).length
+      })),
+      files: finalTeraFiles.map(f => ({ name: f.name, size: f.size }))
     });
   }
 
