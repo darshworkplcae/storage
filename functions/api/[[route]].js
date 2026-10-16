@@ -58,9 +58,6 @@ async function verifyDriveToken(token, driveId, secret) {
 }
 
 async function uGet(env,key){
-  if (key === 'td:db' && _memDBCache) {
-    return _memDBCache;
-  }
   const kv=getKV(env);
   if(kv){
     try{
