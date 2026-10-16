@@ -1197,13 +1197,15 @@ async function gDriveBatchDelete(token, googleIds) {
   }
 }
 
-// ─── Dedup Folders: merge duplicate folders (same driveId+parentId+name) ───
-// Keeps the "winner" with googleFolderId and most associated files.
-// Re-parents files from losers to winner, removes loser folder records.
+// ─── Dedup Folders: merge duplicate folders (same driveId+name) ───
+// Groups by driveId+name ONLY (not parentId) because the upload bug caused duplicates
+// to end up with different parentIds. Winner = folder with most associated files.
+// Loser's files are re-parented to winner. Winner inherits loser's parentId if its own is null.
+// NEVER trashes anything on Google Drive — only fixes the DB.
 async function hDedupFolders(req, env) {
   if(!await vSes(req, env, 'admin')) return J({error:'Unauthorized'}, 401);
   const body = await req.json().catch(()=>({}));
-  const { dryRun = false, trashLosers = false, driveId: filterDriveId = null } = body;
+  const { dryRun = false, driveId: filterDriveId = null } = body;
 
   const db = await uGet(env, 'td:db');
   if(!db) return J({error:'DB error'}, 500);
@@ -1211,87 +1213,84 @@ async function hDedupFolders(req, env) {
   const folders = db.folders || [];
   const files   = db.files   || [];
 
-  // Group folders by (driveId, parentId, lowercaseName)
+  // Pre-compute file counts per folder
+  const fileCounts = {};
+  for(const fi of files) {
+    if(fi.folderId) fileCounts[fi.folderId] = (fileCounts[fi.folderId]||0) + 1;
+  }
+
+  // Group by (driveId + lowercaseName) — ignore parentId because bug caused different parentIds
   const groupMap = {};
   for(const f of folders) {
     if(f.trashed) continue;
     if(filterDriveId && f.driveId !== filterDriveId) continue;
-    const key = (f.driveId||'') + '::' + (f.parentId||'') + '::' + (f.name||'').toLowerCase();
+    const key = (f.driveId||'') + '::' + (f.name||'').toLowerCase();
     if(!groupMap[key]) groupMap[key] = [];
     groupMap[key].push(f);
   }
 
-  // Find all groups with duplicates
   const dupGroups = Object.values(groupMap).filter(g => g.length > 1);
   if(dupGroups.length === 0) return J({ok:true, message:'No duplicate folders found', merged:0});
 
-  const mergedCount  = { folders: 0, files: 0 };
-  const losers       = [];
+  const mergedCount = { folders: 0, files: 0 };
+  const mergeLog = [];
 
-  // For each dup group, pick winner & merge
   for(const group of dupGroups) {
-    // Winner = folder with googleFolderId; among those, prefer the one with more files
-    const fileCounts = {};
-    for(const fi of files) {
-      if(fi.folderId) fileCounts[fi.folderId] = (fileCounts[fi.folderId]||0) + 1;
-    }
+    // Winner = the one with the most associated files; tie-break: has googleFolderId
     const sorted = [...group].sort((a, b) => {
-      const aHasG = a.googleFolderId ? 1 : 0;
-      const bHasG = b.googleFolderId ? 1 : 0;
-      if(aHasG !== bHasG) return bHasG - aHasG;
-      return (fileCounts[b.id]||0) - (fileCounts[a.id]||0);
+      const fc = (fileCounts[b.id]||0) - (fileCounts[a.id]||0);
+      if(fc !== 0) return fc;
+      return (b.googleFolderId ? 1 : 0) - (a.googleFolderId ? 1 : 0);
     });
     const winner = sorted[0];
     const loserList = sorted.slice(1);
 
+    // If winner has no googleFolderId but a loser does, steal it
+    if(!winner.googleFolderId) {
+      const withG = loserList.find(l => l.googleFolderId);
+      if(withG) { winner.googleFolderId = withG.googleFolderId; }
+    }
+    // If winner has no parentId but a loser does, adopt loser's parentId (more likely correct)
+    if(!winner.parentId) {
+      const withP = loserList.find(l => l.parentId);
+      if(withP) { winner.parentId = withP.parentId; }
+    }
+
     for(const loser of loserList) {
-      // Re-parent files that belong to loser → winner
       let movedFiles = 0;
+      // Re-parent all files from loser → winner
       for(const fi of files) {
-        if(fi.folderId === loser.id) {
-          fi.folderId = winner.id;
-          movedFiles++;
-        }
+        if(fi.folderId === loser.id) { fi.folderId = winner.id; movedFiles++; }
       }
-      // Also re-parent child folders whose parent was the loser → winner
+      // Re-parent child folders whose parentId was the loser → winner
       for(const fo of folders) {
-        if(fo.parentId === loser.id && !fo.trashed) {
-          fo.parentId = winner.id;
-        }
+        if(fo.parentId === loser.id && !fo.trashed) fo.parentId = winner.id;
       }
       mergedCount.files += movedFiles;
-      losers.push({ id: loser.id, googleFolderId: loser.googleFolderId, name: loser.name, driveId: loser.driveId, movedFiles });
       mergedCount.folders++;
+      mergeLog.push({kept: winner.name, removedId: loser.id, movedFiles});
     }
   }
 
   if(dryRun) {
     return J({ok:true, dryRun:true, duplicateGroups: dupGroups.length,
       wouldMergeFolders: mergedCount.folders, wouldMoveFiles: mergedCount.files,
-      losers: losers.map(l => ({name:l.name, id:l.id, googleFolderId:l.googleFolderId, movedFiles:l.movedFiles}))
+      log: mergeLog
     });
   }
 
-  // Remove loser folder records from DB
-  const loserIds = new Set(losers.map(l => l.id));
-  db.folders = folders.filter(f => !loserIds.has(f.id));
-
-  // If trashLosers: trash each loser Google Drive folder
-  if(trashLosers) {
-    const driveIds = [...new Set(losers.map(l => l.driveId).filter(Boolean))];
-    for(const dId of driveIds) {
-      const drv = (db.drives||[]).find(d => d.id === dId);
-      if(!drv) continue;
-      let at;
-      try { at = await gAT(env, drv.encToken); }
-      catch(e) { try { at = await gAT(env, drv.encToken, true); } catch(e2) { continue; } }
-      for(const l of losers.filter(x => x.driveId === dId && x.googleFolderId)) {
-        await fetch(`https://www.googleapis.com/drive/v3/files/${l.googleFolderId}?supportsAllDrives=true`,
-          { method:'PATCH', headers:{'Authorization':`Bearer ${at}`,'Content-Type':'application/json'}, body:JSON.stringify({trashed:true}) }
-        ).catch(()=>{});
-      }
-    }
+  // Remove loser folder records from DB only — NEVER touch Google Drive folders
+  const loserIdSet = new Set();
+  for(const group of dupGroups) {
+    const sorted = [...group].sort((a,b) => {
+      const fc = (fileCounts[b.id]||0) - (fileCounts[a.id]||0);
+      if(fc !== 0) return fc;
+      return (b.googleFolderId ? 1 : 0) - (a.googleFolderId ? 1 : 0);
+    });
+    sorted.slice(1).forEach(l => loserIdSet.add(l.id));
   }
+  db.folders = folders.filter(f => !loserIdSet.has(f.id));
+  db.files = files; // already mutated in-place above
 
   if(!db.activityLog) db.activityLog = [];
   db.activityLog.unshift({id:uid(),type:'dedup_folders',mergedFolders:mergedCount.folders,movedFiles:mergedCount.files,ts:new Date().toISOString()});
@@ -1299,9 +1298,59 @@ async function hDedupFolders(req, env) {
   await uSet(env, 'td:db', db);
 
   return J({ok:true, merged: mergedCount.folders, movedFiles: mergedCount.files,
-    message: `Merged ${mergedCount.folders} duplicate folder(s), moved ${mergedCount.files} file(s) to winners.`
+    message: `Merged ${mergedCount.folders} duplicate folder(s), moved ${mergedCount.files} file(s) to winners. No Drive folders were touched.`
   });
 }
+
+// ─── Restore Drive Folders: untrash all folders tracked in DB from Google Drive ───
+// Restores any folders accidentally trashed by dedup or manual deletion
+async function hRestoreDriveFolders(req, env) {
+  if(!await vSes(req, env, 'admin')) return J({error:'Unauthorized'}, 401);
+  const body = await req.json().catch(()=>({}));
+  const { driveId: filterDriveId = null } = body;
+
+  const db = await uGet(env, 'td:db');
+  if(!db) return J({error:'DB error'}, 500);
+
+  const folders = (db.folders||[]).filter(f => f.googleFolderId && (!filterDriveId || f.driveId === filterDriveId));
+  if(!folders.length) return J({ok:true, restored:0, message:'No folders with googleFolderId found'});
+
+  // Group by driveId to reuse access tokens
+  const byDrive = {};
+  for(const f of folders) {
+    if(!byDrive[f.driveId]) byDrive[f.driveId] = [];
+    byDrive[f.driveId].push(f);
+  }
+
+  let totalRestored = 0;
+  let totalFailed = 0;
+  const errors = [];
+
+  for(const [dId, dFolders] of Object.entries(byDrive)) {
+    const drv = (db.drives||[]).find(d => d.id === dId);
+    if(!drv) continue;
+    let at;
+    try { at = await gAT(env, drv.encToken); }
+    catch(e) { try { at = await gAT(env, drv.encToken, true); } catch(e2) { errors.push('Token error for drive '+dId); continue; } }
+
+    for(const folder of dFolders) {
+      try {
+        const res = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${folder.googleFolderId}?supportsAllDrives=true`,
+          { method:'PATCH', headers:{'Authorization':`Bearer ${at}`,'Content-Type':'application/json'}, body:JSON.stringify({trashed:false}) }
+        );
+        if(res.ok) { totalRestored++; }
+        else { totalFailed++; }
+      } catch(e) { totalFailed++; }
+    }
+  }
+
+  return J({ok:true, restored:totalRestored, failed:totalFailed,
+    message:`Restored ${totalRestored} folder(s) from Google Drive Trash. ${totalFailed} failed (may not have been trashed).`
+  });
+}
+
+
 
 // ─── Drive Root Purge: list & delete ALL files directly in a drive's root folder on Google Drive ───
 
@@ -2205,6 +2254,7 @@ export async function onRequest({request,env}){
     if(p==='admin/init'&&m==='POST')return hInit(request,env);
     if(p==='admin/drive-root-purge'&&m==='POST')return hDriveRootPurge(request,env);
     if(p==='admin/dedup-folders'&&m==='POST')return hDedupFolders(request,env);
+    if(p==='admin/restore-drive-folders'&&m==='POST')return hRestoreDriveFolders(request,env);
     return J({error:'Not found',path:p},404);
   }catch(e){return J({error:e.message||'Server error'},500);}
 }

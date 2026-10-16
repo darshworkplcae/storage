@@ -61,7 +61,8 @@ function renderSettingsPage() {
             '</div>' +
             '<div style="margin-top:.4rem;display:flex;gap:6px">' +
               '<button class="btn-danger xs" style="flex:1;font-size:.74rem" onclick="purgeGDriveRootFiles(\''+d.id+'\',\''+esc(d.name)+'\')" title="DANGER: Permanently deletes ALL loose files directly in TeleDrive root folder on Google Drive. Folders (ok, pdfs, tera etc) are safe. Frees storage for duplicate/stray files."><i class="fas fa-fire"></i> Purge Stray Root Files</button>' +
-              '<button class="btn-warning xs" style="flex:1;font-size:.74rem" onclick="dedupFolders(\''+d.id+'\',\''+esc(d.name)+'\')" title="Find and merge duplicate folders (same name+parent) in this drive. Re-parents all files to the winning folder."><i class="fas fa-code-merge"></i> Dedup Folders</button>' +
+              '<button class="btn-warning xs" style="flex:1;font-size:.74rem" onclick="dedupFolders(\''+d.id+'\',\''+esc(d.name)+'\')" title="Find and merge duplicate folders by name. Only fixes the DB — never touches Google Drive folders."><i class="fas fa-code-merge"></i> Dedup Folders</button>' +
+              '<button class="btn-primary xs" style="flex:1;font-size:.74rem" onclick="restoreDriveFolders(\''+d.id+'\',\''+esc(d.name)+'\')" title="Untrash all folders tracked in DB from Google Drive. Use this to recover folders accidentally trashed by dedup."><i class="fas fa-trash-arrow-up"></i> Restore Folders</button>' +
             '</div>' +
           '</div>';
         }).join('') + '</div>',
@@ -845,15 +846,15 @@ async function dedupFolders(driveId, driveName) {
     return;
   }
 
-  var groups    = dryRes.duplicateGroups   || 0;
-  var willMove  = dryRes.wouldMoveFiles    || 0;
-  var trashLosers = window.confirm(
+  var groups   = dryRes.duplicateGroups   || 0;
+  var willMove = dryRes.wouldMoveFiles    || 0;
+
+  if (!window.confirm(
     'Found ' + groups + ' duplicate folder group(s) in "' + driveName + '".\n\n' +
     '• ' + willMerge + ' duplicate folder record(s) will be removed from DB\n' +
     '• ' + willMove + ' file(s) will be re-linked to the correct folder\n\n' +
-    'Also trash the duplicate Google Drive folders? (Recommended — frees storage)\n\nClick OK to also trash losers on Drive, Cancel to only fix the DB.'
-  );
-  if (!window.confirm('Proceed with dedup' + (trashLosers ? ' + trash losers on Google Drive' : ' (DB fix only)') + '?')) {
+    'Google Drive folders are NOT touched — only the TeleDrive database is fixed.\n\nProceed?'
+  )) {
     toast('Dedup cancelled.', 'info');
     return;
   }
@@ -861,19 +862,45 @@ async function dedupFolders(driveId, driveName) {
   toast('Merging duplicate folders…', 'info');
   var res = await apiFetch('admin/dedup-folders', {
     method: 'POST',
-    body: JSON.stringify({ driveId: driveId, dryRun: false, trashLosers: trashLosers })
+    body: JSON.stringify({ driveId: driveId, dryRun: false })
   }).catch(function() { return null; });
 
   if (!res || res.error) {
     toast(res ? res.error : 'Dedup failed', 'error');
     return;
-}
+  }
 
   toast('✅ Dedup done! Merged ' + res.merged + ' folder(s), moved ' + res.movedFiles + ' file(s). Refreshing…', 'success', 8000);
   S.db = await apiFetchDB();
   renderSettingsPage();
   renderSidebarStorage();
   renderFilesPage();
+}
+
+
+async function restoreDriveFolders(driveId, driveName) {
+  if (!window.confirm(
+    'Restore Drive Folders for "' + driveName + '"?\n\n' +
+    'This will untrash ALL folders tracked in the TeleDrive database from Google Drive.\n' +
+    'Use this if folders were accidentally trashed by the Dedup tool.\n\n' +
+    'Folders already not in trash will not be affected.\n\nProceed?'
+  )) return;
+
+  toast('Restoring folders from Google Drive Trash…', 'info', 15000);
+  var res = await apiFetch('admin/restore-drive-folders', {
+    method: 'POST',
+    body: JSON.stringify({ driveId: driveId })
+  }).catch(function() { return null; });
+
+  if (!res || res.error) {
+    toast(res ? res.error : 'Restore failed — check connection', 'error');
+    return;
+  }
+
+  toast('✅ ' + res.message, 'success', 10000);
+  S.db = await apiFetchDB();
+  renderSettingsPage();
+  renderSidebarStorage();
 }
 
 
