@@ -11,8 +11,49 @@ const COR={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET
 function J(d,s){return new Response(JSON.stringify(d),{status:s||200,headers:{...COR,'Content-Type':'application/json'}});}
 let _memDBCache = null;
 let _memDBCacheVer = 0; // write-version counter; incremented on every uSet('td:db')
+let _lastGDriveCheck = 0;
+let _gdriveDbFileId = '1io5JlFLOzrB2J8UoVIYjGVeRMh3jqNFn';
 const _memSesCache = new Map();
 function getKV(env){return env.TELEDRIVE_KV||env.KV||env.STORAGE||env.DB_KV||null;}
+
+async function makeSignedToken(roleOrUserId, secret) {
+  const ts = Date.now().toString(36);
+  const data = `${roleOrUserId}.${ts}`;
+  const sig = await sha256(`tdses:${data}:${secret}`);
+  return `tds_${data}.${sig.slice(0, 32)}`;
+}
+
+async function verifySignedToken(token, secret) {
+  if (!token || typeof token !== 'string' || !token.startsWith('tds_')) return null;
+  const parts = token.slice(4).split('.');
+  if (parts.length !== 3) return null;
+  const [roleOrId, tsStr, sig] = parts;
+  const ts = parseInt(tsStr, 36);
+  if (isNaN(ts) || Date.now() - ts > 7 * 86400 * 1000) return null;
+  const expectedSig = (await sha256(`tdses:${roleOrId}.${tsStr}:${secret}`)).slice(0, 32);
+  if (sig === expectedSig) return roleOrId;
+  return null;
+}
+
+async function makeDriveToken(driveId, secret) {
+  const ts = Date.now().toString(36);
+  const data = `${driveId}.${ts}`;
+  const sig = await sha256(`tddtk:${data}:${secret}`);
+  return `dtk_${data}.${sig.slice(0, 32)}`;
+}
+
+async function verifyDriveToken(token, driveId, secret) {
+  if (!token || typeof token !== 'string' || !token.startsWith('dtk_')) return false;
+  const parts = token.slice(4).split('.');
+  if (parts.length !== 3) return false;
+  const [tDriveId, tsStr, sig] = parts;
+  if (tDriveId !== driveId) return false;
+  const ts = parseInt(tsStr, 36);
+  if (isNaN(ts) || Date.now() - ts > 30 * 86400 * 1000) return false;
+  const expectedSig = (await sha256(`tddtk:${tDriveId}.${tsStr}:${secret}`)).slice(0, 32);
+  return sig === expectedSig;
+}
+
 async function uGet(env,key){
   const kv=getKV(env);
   if(kv){
@@ -20,12 +61,28 @@ async function uGet(env,key){
       const raw=await kv.get(key,'text');
       if(raw!==null&&raw!==undefined){
         try{
-          const p = JSON.parse(raw);
+          let p = JSON.parse(raw);
           if (key==='td:db') {
             const kvVer = p._dbVer || 0;
             // If our in-memory cache is from a NEWER write than what KV returned,
             // trust the in-memory version (same worker-instance handled the write)
             if (_memDBCache && _memDBCacheVer > kvVer) {
+              return _memDBCache;
+            }
+            // Check Google Drive durable backup when KV might be stale or writes were blocked
+            const now = Date.now();
+            if ((!_memDBCache || now - _lastGDriveCheck > 8000) && p && p.drives && p.drives.length) {
+              _lastGDriveCheck = now;
+              try {
+                const gdb = await loadDBFromGDrive(env, p.drives[0]);
+                if (gdb && (gdb._dbVer || 0) > kvVer) {
+                  _memDBCache = gdb;
+                  _memDBCacheVer = gdb._dbVer || 0;
+                  return gdb;
+                }
+              } catch(e) { console.error('GDrive backup load error in uGet:', e); }
+            }
+            if (_memDBCache && _memDBCacheVer >= kvVer) {
               return _memDBCache;
             }
             // KV is current (same or newer version) — only merge VERY RECENT
@@ -133,6 +190,11 @@ function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2
 async function vSes(req,env,role){
   const tok=(req.headers.get('Authorization')||'').replace('Bearer ','').trim();
   if(!tok)return role?false:null;
+  const signedUser = await verifySignedToken(tok, gEK(env));
+  if (signedUser) {
+    if (role) return signedUser === role;
+    return signedUser;
+  }
   if(_memSesCache.has(tok)){
     const c=_memSesCache.get(tok);
     if(role) return c===role;
@@ -166,7 +228,6 @@ async function mkDir(at,n,pid){const q=`name='${n}' and mimeType='application/vn
 
 // ─── Google Drive DB Persistence Backup ───
 // When Cloudflare KV exceeds daily put limits, Google Drive is our reliable storage.
-let _gdriveDbFileId = null;
 async function saveDBToGDrive(env, db) {
   try {
     const drv = (db.drives||[])[0];
@@ -245,6 +306,10 @@ async function loadDBFromGDrive(env, fallbackDrv) {
         headers: { Authorization: `Bearer ${at}` }
       });
     }
+    if (dlResp.status === 404) {
+      _gdriveDbFileId = null;
+      return null;
+    }
     if (!dlResp.ok) return null;
     return await dlResp.json();
   } catch(e) { console.error('loadDBFromGDrive error:', e); }
@@ -267,7 +332,7 @@ async function hAL(req,env){
     }
   }
   if(await sha256(password)!==db.adminHash)return J({error:'Wrong password'},401);
-  const t=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b=>b.toString(16).padStart(2,'0')).join('');
+  const t = await makeSignedToken('admin', gEK(env));
   _memSesCache.set(t,'admin');
   try{ await uSet(env,`td:ses:${t}`,'admin',604800); }catch(e){}
   return J({token:t,role:'admin'});
@@ -281,7 +346,7 @@ async function hUL(req,env){
   }
   const u=(db&&db.users||[]).find(x=>x.username===username);
   if(!u||await sha256(password)!==u.passwordHash)return J({error:'Wrong username or password'},401);
-  const t=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b=>b.toString(16).padStart(2,'0')).join('');
+  const t = await makeSignedToken(u.id, gEK(env));
   _memSesCache.set(t,u.id);
   try{ await uSet(env,`td:ses:${t}`,u.id,604800); }catch(e){}
   return J({token:t,role:'user',userId:u.id,username:u.username,allowedDrives:u.allowedDrives||'all'});
@@ -332,6 +397,7 @@ async function vDriveToken(req, env, driveId){
   if (multiTokensHeader) multiTokensHeader.split(',').map(t=>t.trim()).filter(Boolean).forEach(t=>tokens.push(t));
 
   for (const token of tokens) {
+    if (await verifyDriveToken(token, driveId, gEK(env))) return true;
     if (_memSesCache.has('dtk:' + token)) {
       if (_memSesCache.get('dtk:' + token) === driveId) return true;
     }
@@ -554,21 +620,30 @@ async function hScanDrive(req,env,driveId){
       if (teleDriveGoogleFolderIds.has(gf.id)) {
         let localId = gFolderToLocalId.get(gf.id);
         if (!localId) {
-          localId = uid();
           const parentGoogleId = (gf.parents && gf.parents[0]) || rootId;
           const parentLocalId = (parentGoogleId === rootId) ? null : (gFolderToLocalId.get(parentGoogleId) || null);
-          const newFold = {
-            id: localId,
-            driveId,
-            parentId: parentLocalId,
-            name: gf.name || 'Untitled Folder',
-            googleFolderId: gf.id,
-            date: gf.createdTime || new Date().toISOString(),
-            createdBy: 'admin'
-          };
-          db.folders.push(newFold);
-          gFolderToLocalId.set(gf.id, localId);
-          addedFolders++;
+          const gfName = (gf.name || 'Untitled Folder').trim();
+          // Safety: avoid duplicate folders with matching name under the same parent
+          const existingByName = db.folders.find(f => f.driveId === driveId && f.parentId === parentLocalId && (f.name||'').trim().toLowerCase() === gfName.toLowerCase() && !f.trashed);
+          if (existingByName) {
+            localId = existingByName.id;
+            if (!existingByName.googleFolderId) existingByName.googleFolderId = gf.id;
+            gFolderToLocalId.set(gf.id, localId);
+          } else {
+            localId = uid();
+            const newFold = {
+              id: localId,
+              driveId,
+              parentId: parentLocalId,
+              name: gfName,
+              googleFolderId: gf.id,
+              date: gf.createdTime || new Date().toISOString(),
+              createdBy: 'admin'
+            };
+            db.folders.push(newFold);
+            gFolderToLocalId.set(gf.id, localId);
+            addedFolders++;
+          }
         }
       }
     }
@@ -1603,6 +1678,22 @@ async function hDebugDB(req, env) {
     });
   }
 
+  if (action === 'read-gdrive-db') {
+    const drv = (db.drives||[])[0];
+    const gdb = await loadDBFromGDrive(env, drv);
+    const gTeraFolders = gdb ? (gdb.folders||[]).filter(f => f.parentId === 'mv73d3n3g2wy8') : [];
+    const gTeraFiles = gdb ? (gdb.files||[]).filter(f => f.folderId === 'mv73d3n3g2wy8') : [];
+    return J({
+      ok: !!gdb,
+      _dbVer: gdb ? gdb._dbVer : null,
+      gDriveFileId: _gdriveDbFileId,
+      foldersCount: gTeraFolders.length,
+      filesCount: gTeraFiles.length,
+      folders: gTeraFolders.map(f => f.name),
+      files: gTeraFiles.map(f => f.name)
+    });
+  }
+
   if (action === 'auto-clean-tera') {
     // Step 1: Remove exact duplicate objects by folder ID
     const seenFolderIds = new Set();
@@ -2433,10 +2524,10 @@ async function hUnlockDrive(req,env){
     return J({error:'Incorrect drive password', ok:false}, 403);
   }
 
-  // Generate 5-hour access token (18,000s)
-  const token = uid() + uid();
+  // Generate 5-hour signed access token (18,000s)
+  const token = await makeDriveToken(driveId, gEK(env));
   _memSesCache.set('dtk:' + token, driveId);
-  await uSet(env, 'td:dtk:' + token, driveId, 18000);
+  try { await uSet(env, 'td:dtk:' + token, driveId, 18000); } catch(e){}
   return J({ok:true, unlocked:true, token, expiresIn:18000});
 }
 
