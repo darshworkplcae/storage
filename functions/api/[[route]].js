@@ -69,6 +69,36 @@ async function uGet(env,key){
           let p = JSON.parse(raw);
           if (key==='td:db') {
             const kvVer = p._dbVer || 0;
+            // Check edge cache for a newer version (in case KV put was blocked)
+            try {
+              const edgeCached = await caches.default.match('https://tobichan.pages.dev/api/__internal_db_cache__');
+              if (edgeCached) {
+                const edb = await edgeCached.json();
+                if (edb && (edb._dbVer || 0) > kvVer) {
+                  _memDBCache = edb;
+                  _memDBCacheVer = edb._dbVer;
+                  return edb;
+                }
+              }
+            } catch(e) {}
+
+            // If KV version is older than known GDrive durable backup version (31), load once from GDrive backup
+            if (kvVer < 31 && p.drives && p.drives.length) {
+              try {
+                const gdb = await loadDBFromGDrive(env, p.drives[0]);
+                if (gdb && (gdb._dbVer || 0) > kvVer) {
+                  _memDBCache = gdb;
+                  _memDBCacheVer = gdb._dbVer;
+                  try {
+                    caches.default.put('https://tobichan.pages.dev/api/__internal_db_cache__', new Response(JSON.stringify(gdb), {
+                      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=86400, s-maxage=86400' }
+                    })).catch(()=>{});
+                  } catch(e) {}
+                  return gdb;
+                }
+              } catch(e) {}
+            }
+
             if (_memDBCache && _memDBCacheVer >= kvVer) {
               return _memDBCache;
             }
@@ -112,10 +142,15 @@ async function uSet(env,key,val,ttl){
   if(key==='td:db') {
     // Stamp a write-version so uGet can detect in-memory cache is newer than stale KV
     if(val && typeof val === 'object') {
-      val._dbVer = (_memDBCacheVer || 0) + 1;
+      val._dbVer = Math.max((_memDBCacheVer || 0), (val._dbVer || 0)) + 1;
       _memDBCacheVer = val._dbVer;
     }
     _memDBCache = val;
+    try {
+      caches.default.put('https://tobichan.pages.dev/api/__internal_db_cache__', new Response(JSON.stringify(val), {
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=86400, s-maxage=86400' }
+      })).catch(()=>{});
+    } catch(e) {}
     // Persist to Google Drive in background (non-blocking for ultra-fast uploads)
     const now = Date.now();
     if (_globalCtx && typeof _globalCtx.waitUntil === 'function') {
