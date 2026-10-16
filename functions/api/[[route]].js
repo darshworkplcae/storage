@@ -251,13 +251,24 @@ async function saveDBToGDrive(env, db) {
     }
     const bodyStr = JSON.stringify(db);
     if (fileId) {
-      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`, {
+      let pResp = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${at}`, 'Content-Type': 'application/json' },
         body: bodyStr
       });
-      return fileId;
-    } else {
+      if (pResp.status === 401) {
+        at = await gAT(env, drv.encToken, true);
+        pResp = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${at}`, 'Content-Type': 'application/json' },
+          body: bodyStr
+        });
+      }
+      if (pResp.ok) return fileId;
+      console.error('saveDBToGDrive PATCH failed:', pResp.status);
+      if (pResp.status === 404) fileId = null;
+    }
+    if (!fileId) {
       const boundary = 'td_backup_boundary';
       const meta = JSON.stringify({ name: '__teledrive_db__.json', parents: [drv.rootFolderId] });
       const multipart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${bodyStr}\r\n--${boundary}--`;
@@ -1783,10 +1794,9 @@ async function hDebugDB(req, env) {
 
     db.folders = (db.folders||[]).filter(f => !toRemoveIds.has(f.id));
 
-    if (_memDBCache) {
-      _memDBCache.folders = db.folders;
-      _memDBCache.files = db.files;
-    }
+    db._dbVer = Math.max((_memDBCacheVer || 0), (db._dbVer || 0)) + 1;
+    _memDBCacheVer = db._dbVer;
+    _memDBCache = db;
     await uSet(env, 'td:db', db);
     const gDriveBackupId = await saveDBToGDrive(env, db);
 
