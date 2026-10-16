@@ -84,6 +84,7 @@ async function uSet(env,key,val,ttl){
       _memDBCacheVer = val._dbVer;
     }
     _memDBCache = val;
+    try { await saveDBToGDrive(env, val); } catch(e){}
   }
   const kv=getKV(env);
   if(kv){
@@ -162,6 +163,94 @@ async function gAT(env,rt,forceRefresh=false){
 }
 async function gDQ(at){return(await fetch('https://www.googleapis.com/drive/v3/about?fields=storageQuota,user',{headers:{Authorization:`Bearer ${at}`}})).json();}
 async function mkDir(at,n,pid){const q=`name='${n}' and mimeType='application/vnd.google-apps.folder' and trashed=false${pid?` and '${pid}' in parents`:''}`;const s=await(await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,{headers:{Authorization:`Bearer ${at}`}})).json();if(s.files&&s.files.length)return s.files[0].id;const c=await(await fetch('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{Authorization:`Bearer ${at}`,'Content-Type':'application/json'},body:JSON.stringify({name:n,mimeType:'application/vnd.google-apps.folder',...(pid?{parents:[pid]}:{})})})).json();return c.id;}
+
+// ─── Google Drive DB Persistence Backup ───
+// When Cloudflare KV exceeds daily put limits, Google Drive is our reliable storage.
+let _gdriveDbFileId = null;
+async function saveDBToGDrive(env, db) {
+  try {
+    const drv = (db.drives||[])[0];
+    if (!drv || !drv.encToken || !drv.rootFolderId) return null;
+    let at = await gAT(env, drv.encToken);
+    let fileId = _gdriveDbFileId;
+    if (!fileId) {
+      const q = `name='__teledrive_db__.json' and trashed=false and '${drv.rootFolderId}' in parents`;
+      let sResp = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&supportsAllDrives=true`, {
+        headers: { Authorization: `Bearer ${at}` }
+      });
+      if (sResp.status === 401) {
+        at = await gAT(env, drv.encToken, true);
+        sResp = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&supportsAllDrives=true`, {
+          headers: { Authorization: `Bearer ${at}` }
+        });
+      }
+      const sData = await sResp.json();
+      fileId = (sData.files && sData.files[0]) ? sData.files[0].id : null;
+      if (fileId) _gdriveDbFileId = fileId;
+    }
+    const bodyStr = JSON.stringify(db);
+    if (fileId) {
+      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${at}`, 'Content-Type': 'application/json' },
+        body: bodyStr
+      });
+      return fileId;
+    } else {
+      const boundary = 'td_backup_boundary';
+      const meta = JSON.stringify({ name: '__teledrive_db__.json', parents: [drv.rootFolderId] });
+      const multipart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${bodyStr}\r\n--${boundary}--`;
+      const cResp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${at}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+        body: multipart
+      });
+      const cData = await cResp.json();
+      if (cData && cData.id) {
+        _gdriveDbFileId = cData.id;
+        return cData.id;
+      }
+    }
+  } catch(e) { console.error('saveDBToGDrive error:', e); }
+  return null;
+}
+
+async function loadDBFromGDrive(env, fallbackDrv) {
+  try {
+    if (!fallbackDrv || !fallbackDrv.encToken || !fallbackDrv.rootFolderId) return null;
+    let at = await gAT(env, fallbackDrv.encToken);
+    let fileId = _gdriveDbFileId;
+    if (!fileId) {
+      const q = `name='__teledrive_db__.json' and trashed=false and '${fallbackDrv.rootFolderId}' in parents`;
+      let sResp = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&supportsAllDrives=true`, {
+        headers: { Authorization: `Bearer ${at}` }
+      });
+      if (sResp.status === 401) {
+        at = await gAT(env, fallbackDrv.encToken, true);
+        sResp = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&supportsAllDrives=true`, {
+          headers: { Authorization: `Bearer ${at}` }
+        });
+      }
+      const sData = await sResp.json();
+      fileId = (sData.files && sData.files[0]) ? sData.files[0].id : null;
+      if (fileId) _gdriveDbFileId = fileId;
+    }
+    if (!fileId) return null;
+    let dlResp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {
+      headers: { Authorization: `Bearer ${at}` }
+    });
+    if (dlResp.status === 401) {
+      at = await gAT(env, fallbackDrv.encToken, true);
+      dlResp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {
+        headers: { Authorization: `Bearer ${at}` }
+      });
+    }
+    if (!dlResp.ok) return null;
+    return await dlResp.json();
+  } catch(e) { console.error('loadDBFromGDrive error:', e); }
+  return null;
+}
+
 
 async function hAL(req,env){
   const{password=''}=await req.json().catch(()=>({}));
@@ -269,6 +358,17 @@ async function hDB(req,env){
       db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};
       try{ await uSet(env,'td:db',db); }catch(e){}
     }
+  }
+  // Check if Google Drive holds a more recent database backup (handles KV put limit exceeded)
+  if (db && db.drives && db.drives.length) {
+    try {
+      const gdb = await loadDBFromGDrive(env, db.drives[0]);
+      if (gdb && (gdb._dbVer || 0) > (db._dbVer || 0)) {
+        db = gdb;
+        _memDBCache = gdb;
+        _memDBCacheVer = gdb._dbVer || 0;
+      }
+    } catch(e) {}
   }
   const policy = {
     allowUserDownload: db.policy ? db.policy.allowUserDownload !== false : true,
@@ -1597,6 +1697,7 @@ async function hDebugDB(req, env) {
       _memDBCache.files = db.files;
     }
     await uSet(env, 'td:db', db);
+    const gDriveBackupId = await saveDBToGDrive(env, db);
 
     const finalTeraFolders = (db.folders||[]).filter(f => f.parentId === teraId && !f.trashed);
     const finalTeraFiles   = (db.files||[]).filter(f => f.folderId === teraId && !f.trashed);
@@ -1604,6 +1705,7 @@ async function hDebugDB(req, env) {
     return J({
       ok: true,
       mergedCount,
+      gDriveBackupId,
       teraFolderId: teraId,
       foldersCount: finalTeraFolders.length,
       filesCount: finalTeraFiles.length,
