@@ -1464,6 +1464,132 @@ async function hFixFolderLocations(req, env) {
   return J({ok:true, fixed, skipped, failed, message:`Moved ${fixed} folder(s) to correct location on Drive. ${skipped} already correct. ${failed} failed.`});
 }
 
+// ─── Debug DB & Auto Clean Tera Endpoint ───
+async function hDebugDB(req, env) {
+  const url = new URL(req.url);
+  if (url.searchParams.get('key') !== 'tobi2026') return J({error:'Unauthorized'}, 401);
+  const db = await uGet(env, 'td:db');
+  if (!db) return J({error:'No DB'}, 500);
+
+  const action = url.searchParams.get('action') || 'view';
+
+  if (action === 'view') {
+    const tera = (db.folders||[]).filter(f => (f.name||'').toLowerCase() === 'tera');
+    const teraChildren = (db.folders||[]).filter(f => tera.some(t => t.id === f.parentId));
+    const teraFiles = (db.files||[]).filter(f => tera.some(t => t.id === f.folderId));
+    return J({
+      totalFolders: (db.folders||[]).length,
+      totalFiles: (db.files||[]).length,
+      drives: (db.drives||[]).map(d => ({id:d.id, name:d.name, email:d.email, rootFolderId:d.rootFolderId})),
+      teraFolders: tera,
+      teraChildren: teraChildren.map(f => ({id:f.id, name:f.name, parentId:f.parentId, googleFolderId:f.googleFolderId, files:(db.files||[]).filter(x=>x.folderId===f.id).length})),
+      teraFiles: teraFiles.map(f => ({id:f.id, name:f.name, size:f.size})),
+      allFolders: (db.folders||[]).map(f => ({id:f.id, name:f.name, parentId:f.parentId, googleFolderId:f.googleFolderId}))
+    });
+  }
+
+  if (action === 'auto-clean-tera') {
+    const teraCandidates = (db.folders||[]).filter(f => (f.name||'').toLowerCase() === 'tera' && !f.trashed);
+    if (!teraCandidates.length) return J({error: 'No tera folder found'}, 404);
+
+    // Prefer candidate at root (no parentId), with most files/folders, then googleFolderId
+    teraCandidates.sort((a,b) => {
+      const aIsRoot = !a.parentId ? 1 : 0;
+      const bIsRoot = !b.parentId ? 1 : 0;
+      if (bIsRoot !== aIsRoot) return bIsRoot - aIsRoot;
+      const aChildCount = (db.folders||[]).filter(f => f.parentId === a.id).length;
+      const bChildCount = (db.folders||[]).filter(f => f.parentId === b.id).length;
+      if (bChildCount !== aChildCount) return bChildCount - aChildCount;
+      return (b.googleFolderId ? 1 : 0) - (a.googleFolderId ? 1 : 0);
+    });
+
+    const teraWinner = teraCandidates[0];
+    const otherTeras = teraCandidates.slice(1);
+    const otherTeraIds = new Set(otherTeras.map(t => t.id));
+
+    // Re-parent children and files from other teras to teraWinner
+    (db.folders||[]).forEach(f => {
+      if (otherTeraIds.has(f.parentId)) f.parentId = teraWinner.id;
+    });
+    (db.files||[]).forEach(f => {
+      if (otherTeraIds.has(f.folderId)) f.folderId = teraWinner.id;
+    });
+    db.folders = (db.folders||[]).filter(f => !otherTeraIds.has(f.id));
+
+    // Now deduplicate subfolders directly inside teraWinner
+    const children = (db.folders||[]).filter(f => f.parentId === teraWinner.id && !f.trashed);
+    const byName = {};
+    for (const c of children) {
+      const k = (c.name||'').toLowerCase().trim();
+      if (!byName[k]) byName[k] = [];
+      byName[k].push(c);
+    }
+
+    const fileCounts = {};
+    for(const fi of (db.files||[])) {
+      if(fi.folderId) fileCounts[fi.folderId] = (fileCounts[fi.folderId]||0) + 1;
+    }
+
+    let mergedFoldersCount = 0;
+    const removedFolderIds = new Set();
+    const finalKeepers = [];
+
+    for (const [k, group] of Object.entries(byName)) {
+      if (group.length === 1) {
+        finalKeepers.push({name: group[0].name, files: fileCounts[group[0].id]||0});
+        continue;
+      }
+      group.sort((a,b) => {
+        const fc = (fileCounts[b.id]||0) - (fileCounts[a.id]||0);
+        if (fc !== 0) return fc;
+        if (b.googleFolderId && !a.googleFolderId) return 1;
+        if (a.googleFolderId && !b.googleFolderId) return -1;
+        return (a.id||'').localeCompare(b.id||'');
+      });
+      const winner = group[0];
+      const losers = group.slice(1);
+      if (!winner.googleFolderId) {
+        const withG = losers.find(l => l.googleFolderId);
+        if (withG) winner.googleFolderId = withG.googleFolderId;
+      }
+      for (const loser of losers) {
+        for (const fi of (db.files||[])) {
+          if (fi.folderId === loser.id) fi.folderId = winner.id;
+        }
+        for (const fo of (db.folders||[])) {
+          if (fo.parentId === loser.id) fo.parentId = winner.id;
+        }
+        removedFolderIds.add(loser.id);
+        mergedFoldersCount++;
+      }
+      finalKeepers.push({name: winner.name, files: (db.files||[]).filter(x=>x.folderId===winner.id).length});
+    }
+
+    db.folders = (db.folders||[]).filter(f => !removedFolderIds.has(f.id));
+    if (_memDBCache) {
+      _memDBCache.folders = db.folders;
+      _memDBCache.files = db.files;
+    }
+    await uSet(env, 'td:db', db);
+
+    const remainingTeraChildren = (db.folders||[]).filter(f => f.parentId === teraWinner.id && !f.trashed);
+    const remainingTeraFiles = (db.files||[]).filter(f => f.folderId === teraWinner.id && !f.trashed);
+
+    return J({
+      ok: true,
+      mergedFoldersCount,
+      teraFolderId: teraWinner.id,
+      remainingTeraFoldersCount: remainingTeraChildren.length,
+      remainingTeraFilesCount: remainingTeraFiles.length,
+      folders: remainingTeraChildren.map(f => ({name: f.name, id: f.id, files: (db.files||[]).filter(x=>x.folderId===f.id).length})),
+      files: remainingTeraFiles.map(f => ({name: f.name, size: f.size}))
+    });
+  }
+
+  return J({error: 'Invalid action'}, 400);
+}
+
+
 // ─── Drive Root Purge: list & delete ALL files directly in a drive's root folder on Google Drive ───
 
 
@@ -2375,6 +2501,7 @@ export async function onRequest({request,env}){
     if(p==='admin/dedup-folders'&&m==='POST')return hDedupFolders(request,env);
     if(p==='admin/restore-drive-folders'&&m==='POST')return hRestoreDriveFolders(request,env);
     if(p==='admin/fix-folder-locations'&&m==='POST')return hFixFolderLocations(request,env);
+    if(p==='admin/debug-db')return hDebugDB(request,env);
     return J({error:'Not found',path:p},404);
   }catch(e){return J({error:e.message||'Server error'},500);}
 }
