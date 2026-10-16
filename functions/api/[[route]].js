@@ -16,6 +16,7 @@ let _lastGDriveSave = 0;
 let _globalCtx = null;
 let _gdriveDbFileId = '1io5JlFLOzrB2J8UoVIYjGVeRMh3jqNFn';
 const _memSesCache = new Map();
+const _memThumbCache = new Map();
 function getKV(env){return env.TELEDRIVE_KV||env.KV||env.STORAGE||env.DB_KV||null;}
 
 async function makeSignedToken(roleOrUserId, secret) {
@@ -1029,9 +1030,24 @@ async function hDL(req,env,gId){
 async function hThumb(req,env,gId){
   const url=new URL(req.url);
   const reqSz = url.searchParams.get('sz') || 's360';
-  const cacheKey = new Request(`https://${url.hostname}/api/__cf_thumb__/${gId}?sz=${reqSz}`, { method: 'GET' });
+  const memKey = `${gId}:${reqSz}`;
+
+  // 1. Instant RAM Cache hit (0ms)
+  if (_memThumbCache.has(memKey)) {
+    const item = _memThumbCache.get(memKey);
+    return new Response(item.buf, {
+      status: 200,
+      headers: {
+        ...COR,
+        'Content-Type': item.ct,
+        'Cache-Control': 'public, max-age=604800, s-maxage=604800, immutable'
+      }
+    });
+  }
+
+  // 2. Cloudflare Edge Cache hit (2ms)
   try {
-    const cached = await caches.default.match(cacheKey);
+    const cached = await caches.default.match(req);
     if (cached) return cached;
   } catch(e) {}
 
@@ -1104,8 +1120,14 @@ async function hThumb(req,env,gId){
       headers: { Authorization: `Bearer ${at}` }
     });
     if(tResp.ok){
+      const buf = await tResp.arrayBuffer();
       const ct = tResp.headers.get('Content-Type') || 'image/jpeg';
-      const thumbResp = new Response(tResp.body,{
+      if (_memThumbCache.size > 400) {
+        const first = _memThumbCache.keys().next().value;
+        _memThumbCache.delete(first);
+      }
+      _memThumbCache.set(memKey, { ct, buf });
+      const thumbResp = new Response(buf,{
         status:200,
         headers:{
           ...COR,
@@ -1115,9 +1137,9 @@ async function hThumb(req,env,gId){
       });
       try {
         if (_globalCtx && typeof _globalCtx.waitUntil === 'function') {
-          _globalCtx.waitUntil(caches.default.put(cacheKey, thumbResp.clone()));
+          _globalCtx.waitUntil(caches.default.put(req, thumbResp.clone()));
         } else {
-          caches.default.put(cacheKey, thumbResp.clone()).catch(()=>{});
+          caches.default.put(req, thumbResp.clone()).catch(()=>{});
         }
       } catch(e) {}
       return thumbResp;
@@ -1131,9 +1153,15 @@ async function hThumb(req,env,gId){
       headers: { Authorization: `Bearer ${at}` }
     });
     if(imgResp.ok){
+      const buf = await imgResp.arrayBuffer();
       let ct = imgResp.headers.get('Content-Type') || (fileObj ? fileObj.mimeType : 'image/jpeg');
       if (ct === 'application/octet-stream') ct = 'image/jpeg';
-      const imgThumbResp = new Response(imgResp.body, {
+      if (_memThumbCache.size > 400) {
+        const first = _memThumbCache.keys().next().value;
+        _memThumbCache.delete(first);
+      }
+      _memThumbCache.set(memKey, { ct, buf });
+      const imgThumbResp = new Response(buf, {
         status: 200,
         headers: {
           ...COR,
@@ -1143,9 +1171,9 @@ async function hThumb(req,env,gId){
       });
       try {
         if (_globalCtx && typeof _globalCtx.waitUntil === 'function') {
-          _globalCtx.waitUntil(caches.default.put(cacheKey, imgThumbResp.clone()));
+          _globalCtx.waitUntil(caches.default.put(req, imgThumbResp.clone()));
         } else {
-          caches.default.put(cacheKey, imgThumbResp.clone()).catch(()=>{});
+          caches.default.put(req, imgThumbResp.clone()).catch(()=>{});
         }
       } catch(e) {}
       return imgThumbResp;
