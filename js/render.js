@@ -499,13 +499,66 @@ function openFolderTarget(driveId, folderId){
 function handleFolderCardClick(driveId, folderId, event){
   if (event.ctrlKey || event.metaKey || event.shiftKey) {
     toggleFileSelect(folderId);
+    // Auto-select duplicates (same name, same parent) when Ctrl+clicking a folder
+    autoSelectDuplicatesOf(folderId);
     return;
   }
   if (S.selectedFiles && S.selectedFiles.size > 0) {
     toggleFileSelect(folderId);
+    // Auto-select duplicates when in multiselect mode
+    autoSelectDuplicatesOf(folderId);
     return;
   }
   openFolderTarget(driveId, folderId);
+}
+
+// Auto-selects any other folders in the current view that are duplicates
+// (same name + same parentId + same driveId) of the given folderId.
+// Called after selecting a folder card so the user can see/delete duplicates easily.
+function autoSelectDuplicatesOf(folderId) {
+  if (!S.db || !S.selectedFiles) return;
+  var folder = (S.db.folders || []).find(function(f) { return f.id === folderId; });
+  if (!folder) return;
+  var nameLower = (folder.name || '').toLowerCase().trim();
+  var dupes = (S.db.folders || []).filter(function(f) {
+    return f.id !== folderId &&
+           !f.trashed &&
+           f.driveId === folder.driveId &&
+           (f.parentId || null) === (folder.parentId || null) &&
+           (f.name || '').toLowerCase().trim() === nameLower;
+  });
+  if (dupes.length > 0) {
+    dupes.forEach(function(d) { S.selectedFiles.add(d.id); });
+    updateSelectionUI();
+    if (dupes.length === 1) {
+      toast('Also selected duplicate: "' + folder.name + '" — delete one of them', 'info', 3000);
+    }
+  }
+}
+
+// Selects duplicates of ALL currently selected folders (for the "Select Dupes" button)
+function selectDuplicatesOfSelected() {
+  if (!S.db || !S.selectedFiles || S.selectedFiles.size === 0) return;
+  var added = 0;
+  var selectedIds = Array.from(S.selectedFiles);
+  selectedIds.forEach(function(id) {
+    var folder = (S.db.folders || []).find(function(f) { return f.id === id; });
+    if (!folder) return;
+    var nameLower = (folder.name || '').toLowerCase().trim();
+    (S.db.folders || []).forEach(function(f) {
+      if (f.id !== id && !f.trashed &&
+          f.driveId === folder.driveId &&
+          (f.parentId || null) === (folder.parentId || null) &&
+          (f.name || '').toLowerCase().trim() === nameLower &&
+          !S.selectedFiles.has(f.id)) {
+        S.selectedFiles.add(f.id);
+        added++;
+      }
+    });
+  });
+  updateSelectionUI();
+  if (added > 0) toast('Selected ' + added + ' more duplicate(s)', 'info', 2500);
+  else toast('No unselected duplicates found in current view', 'info', 2500);
 }
 
 // ─── Folder / File cards ───────────────────────────────

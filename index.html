@@ -206,6 +206,7 @@
       <div class="ms-actions">
         <button class="btn-ghost sm" onclick="selectAllCurrentFiles()" title="Select All Items (Ctrl+A)"><i class="fas fa-check-double"></i> All</button>
         <button class="btn-ghost sm" onclick="selectFilesOnly()" title="Select only files, keep folders safe"><i class="fas fa-file"></i> Files Only</button>
+        <button class="btn-ghost sm" onclick="selectDuplicatesOfSelected()" title="Also select duplicate folders (same name) of currently selected folders"><i class="fas fa-clone"></i> +Dupes</button>
         <button class="btn-ghost sm" onclick="showCopyDialog(Array.from(S.selectedFiles))"><i class="fas fa-copy"></i> Copy</button>
         <button class="btn-ghost sm" onclick="clearFileSelection()"><i class="fas fa-times"></i> Clear</button>
         <button class="btn-danger sm" onclick="deleteSelectedFiles()" title="Move selected to Recycle Bin"><i class="fas fa-trash-alt"></i> To Trash</button>
