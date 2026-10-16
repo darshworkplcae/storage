@@ -1460,6 +1460,11 @@ video::-internal-media-controls-download-button {
   border-radius: 40px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.75), 0 0 20px rgba(78, 134, 245, 0.25);
   animation: slideUpBar 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+  transition: bottom 0.25s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+/* Push multiselect bar above the upload bar when upload is running */
+body.has-active-upload .multi-select-bar {
+  bottom: 110px;
 }
 @keyframes slideUpBar {
   from { opacity: 0; transform: translate(-50%, 20px); }
@@ -1769,6 +1774,9 @@ body.has-active-upload .mobile-fab-wrap {
     padding: 0.35rem 0.55rem;
     font-size: 0.76rem;
   }
+  body.has-active-upload .multi-select-bar {
+    bottom: 100px;
+  }
 }
 
 /* ═══════════════ MODALS & 3D DIALOGS ═══════════════ */
@@ -1784,6 +1792,10 @@ body.has-active-upload .mobile-fab-wrap {
   justify-content: center;
   padding: 1rem;
   animation: modalFadeIn 0.2s ease-out;
+}
+/* Shift modal up when upload bar is floating at bottom */
+body.has-active-upload .modal-backdrop {
+  padding-bottom: 110px;
 }
 @keyframes modalFadeIn {
   from { opacity: 0; }

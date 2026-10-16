@@ -451,14 +451,16 @@ async function processFolderFiles(files) {
     if (upOverallLabel) {
       var remaining = _batchTotal - _batchDone;
       var etaStr = '';
-      if (speed > 0 && _batchTotalBytes > _batchBytes) {
-        etaStr = ' · ' + fmtEta(_batchTotalBytes - _batchBytes, speed);
-      } else if (_batchDone > 1) {
-        var elapsed = (Date.now() - _batchStartTs) / 1000;
-        var avgRate = _batchBytes / elapsed;
-        if (avgRate > 0 && _batchTotalBytes > _batchBytes) etaStr = ' · ' + fmtEta(_batchTotalBytes - _batchBytes, avgRate);
+      // Use wall-clock time-per-file for ETA — accurate even for tiny files
+      // because API round-trips dominate, not bytes transferred
+      if (_batchDone >= 3) {
+        var elapsed = (Date.now() - _batchStartTs) / 1000; // seconds
+        var secPerFile = elapsed / _batchDone;
+        var etaSec = Math.round(secPerFile * remaining);
+        if (etaSec > 0) etaStr = ' · ' + fmtEtaSec(etaSec);
       }
-      upOverallLabel.textContent = 'File ' + _batchDone + ' / ' + _batchTotal + (remaining > 0 ? ' · ' + remaining + ' left' : '') + etaStr;
+      upOverallLabel.textContent = 'File ' + _batchDone + ' / ' + _batchTotal +
+        (remaining > 0 ? ' · ' + remaining + ' left' : ' · Done!') + etaStr;
     }
   }
 

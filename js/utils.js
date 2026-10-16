@@ -23,6 +23,19 @@ function fmtEta(remainingBytes, speedBps) {
   min = min % 60;
   return hrs + 'h ' + (min > 0 ? min + 'm ' : '') + 'left';
 }
+// fmtEtaSec: format raw seconds directly (for wall-clock batch ETA)
+function fmtEtaSec(sec) {
+  if (!sec || sec <= 0) return '';
+  sec = Math.round(sec);
+  if (sec < 60) return sec + 's left';
+  var min = Math.floor(sec / 60);
+  var s = sec % 60;
+  if (min < 60) return min + 'm ' + (s > 0 ? s + 's ' : '') + 'left';
+  var hrs = Math.floor(min / 60);
+  min = min % 60;
+  return hrs + 'h ' + (min > 0 ? min + 'm ' : '') + 'left';
+}
+
 function fmtDate(iso) {
   if (!iso) return '—';
   try { return new Date(iso).toLocaleDateString(); } catch(e) { return iso; }
