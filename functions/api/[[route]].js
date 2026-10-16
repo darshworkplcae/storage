@@ -1706,42 +1706,48 @@ async function hDebugDB(req, env) {
   }
 
   if (action === 'auto-clean-tera') {
+    const drv = (db.drives||[])[0];
+    let gdb = null;
+    if (drv) {
+      try { gdb = await loadDBFromGDrive(env, drv); } catch(e){}
+    }
+    const targetDb = gdb || db;
+
     // Step 1: Remove exact duplicate objects by folder ID
     const seenFolderIds = new Set();
     const uniqueFolders = [];
-    for (const f of (db.folders || [])) {
+    for (const f of (targetDb.folders || [])) {
       if (f && f.id && !seenFolderIds.has(f.id)) {
         seenFolderIds.add(f.id);
         uniqueFolders.push(f);
       }
     }
-    db.folders = uniqueFolders;
+    targetDb.folders = uniqueFolders;
 
     // Step 2: Canonical tera folder is mv73d3n3g2wy8 (or the one named 'tera' at root)
-    let canonicalTera = (db.folders||[]).find(f => f.id === 'mv73d3n3g2wy8');
+    let canonicalTera = (targetDb.folders||[]).find(f => f.id === 'mv73d3n3g2wy8');
     if (!canonicalTera) {
-      canonicalTera = (db.folders||[]).find(f => (f.name||'').toLowerCase() === 'tera' && !f.parentId && !f.trashed);
+      canonicalTera = (targetDb.folders||[]).find(f => (f.name||'').toLowerCase() === 'tera' && !f.parentId && !f.trashed);
     }
     if (!canonicalTera) return J({error: 'Canonical tera folder not found'}, 404);
 
     const teraId = canonicalTera.id;
 
     // Step 3: Any OTHER folder named 'tera' at root is a duplicate -> merge into canonicalTera
-    const duplicateTeras = (db.folders||[]).filter(f => (f.name||'').toLowerCase() === 'tera' && f.id !== teraId);
+    const duplicateTeras = (targetDb.folders||[]).filter(f => (f.name||'').toLowerCase() === 'tera' && f.id !== teraId);
     for (const dt of duplicateTeras) {
-      // Re-parent subfolders and files to canonicalTera
-      (db.folders||[]).forEach(f => {
+      (targetDb.folders||[]).forEach(f => {
         if (f.parentId === dt.id) f.parentId = teraId;
       });
-      (db.files||[]).forEach(f => {
+      (targetDb.files||[]).forEach(f => {
         if (f.folderId === dt.id) f.folderId = teraId;
       });
     }
     const dupTeraIds = new Set(duplicateTeras.map(t => t.id));
-    db.folders = (db.folders||[]).filter(f => !dupTeraIds.has(f.id));
+    targetDb.folders = (targetDb.folders||[]).filter(f => !dupTeraIds.has(f.id));
 
     // Step 4: Safely deduplicate children directly inside canonicalTera by name
-    const children = (db.folders||[]).filter(f => f.parentId === teraId && !f.trashed);
+    const children = (targetDb.folders||[]).filter(f => f.parentId === teraId);
     const byName = {};
     for (const c of children) {
       const k = (c.name||'').toLowerCase().trim();
@@ -1750,7 +1756,7 @@ async function hDebugDB(req, env) {
     }
 
     const fileCounts = {};
-    for (const fi of (db.files||[])) {
+    for (const fi of (targetDb.files||[])) {
       if (fi.folderId) fileCounts[fi.folderId] = (fileCounts[fi.folderId]||0) + 1;
     }
 
@@ -1760,13 +1766,13 @@ async function hDebugDB(req, env) {
     for (const [k, group] of Object.entries(byName)) {
       if (group.length <= 1) continue;
 
-      // Sort by file count desc, then googleFolderId, then oldest
+      // Sort: most files desc, then has googleFolderId, then newest ID (mvap > mv7 > mv3)
       group.sort((a, b) => {
         const fc = (fileCounts[b.id]||0) - (fileCounts[a.id]||0);
         if (fc !== 0) return fc;
         if (b.googleFolderId && !a.googleFolderId) return 1;
         if (a.googleFolderId && !b.googleFolderId) return -1;
-        return (a.id||'').localeCompare(b.id||'');
+        return (b.id||'').localeCompare(a.id||''); // Newest ID wins
       });
 
       const winner = group[0];
@@ -1778,13 +1784,11 @@ async function hDebugDB(req, env) {
       }
 
       for (const loser of losers) {
-        if (loser.id === winner.id) continue; // Safety guard: never mark winner as loser
-        // Re-parent files
-        for (const fi of (db.files||[])) {
+        if (loser.id === winner.id) continue;
+        for (const fi of (targetDb.files||[])) {
           if (fi.folderId === loser.id) fi.folderId = winner.id;
         }
-        // Re-parent child folders
-        for (const fo of (db.folders||[])) {
+        for (const fo of (targetDb.folders||[])) {
           if (fo.parentId === loser.id) fo.parentId = winner.id;
         }
         toRemoveIds.add(loser.id);
@@ -1792,16 +1796,16 @@ async function hDebugDB(req, env) {
       }
     }
 
-    db.folders = (db.folders||[]).filter(f => !toRemoveIds.has(f.id));
+    targetDb.folders = (targetDb.folders||[]).filter(f => !toRemoveIds.has(f.id) && !f.trashed);
 
-    db._dbVer = Math.max((_memDBCacheVer || 0), (db._dbVer || 0)) + 1;
-    _memDBCacheVer = db._dbVer;
-    _memDBCache = db;
-    await uSet(env, 'td:db', db);
-    const gDriveBackupId = await saveDBToGDrive(env, db);
+    targetDb._dbVer = Math.max((_memDBCacheVer || 0), (targetDb._dbVer || 0)) + 10;
+    _memDBCacheVer = targetDb._dbVer;
+    _memDBCache = targetDb;
+    await uSet(env, 'td:db', targetDb);
+    const gDriveBackupId = await saveDBToGDrive(env, targetDb);
 
-    const finalTeraFolders = (db.folders||[]).filter(f => f.parentId === teraId && !f.trashed);
-    const finalTeraFiles   = (db.files||[]).filter(f => f.folderId === teraId && !f.trashed);
+    const finalTeraFolders = (targetDb.folders||[]).filter(f => f.parentId === teraId && !f.trashed);
+    const finalTeraFiles   = (targetDb.files||[]).filter(f => f.folderId === teraId && !f.trashed);
 
     return J({
       ok: true,
@@ -1814,7 +1818,7 @@ async function hDebugDB(req, env) {
         id: f.id,
         name: f.name,
         googleFolderId: f.googleFolderId,
-        files: (db.files||[]).filter(x => x.folderId === f.id).length
+        files: (targetDb.files||[]).filter(x => x.folderId === f.id).length
       })),
       files: finalTeraFiles.map(f => ({ name: f.name, size: f.size }))
     });
