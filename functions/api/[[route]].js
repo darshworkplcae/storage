@@ -1923,6 +1923,61 @@ async function hDebugDB(req, env) {
     });
   }
 
+  if (action === 'clean-stray-tera-folders') {
+    const drv = (db.drives||[])[0];
+    let gdb = null;
+    if (drv) {
+      try { gdb = await loadDBFromGDrive(env, drv); } catch(e){}
+    }
+    const targetDb = gdb || db;
+    const canonicalNames = new Set([
+      'act class', 'b.y vlogs', 'build', 'clg crazy videos!',
+      'close friends photos', 'days', 'dcim', 'group photos',
+      'imagine', 'old backup', 'one plus', 'photos 111',
+      'screen recorder', 'singing', 'steaxs filters pack - charlie',
+      't', 'trip', 'well its'
+    ]);
+    const tera = (targetDb.folders||[]).find(f => f.id === 'mv73d3n3g2wy8');
+    if (!tera) return J({error:'Tera folder not found'}, 404);
+
+    const strays = (targetDb.folders||[]).filter(f => f.parentId === tera.id && !canonicalNames.has((f.name||'').toLowerCase().trim()));
+    const strayIds = new Set(strays.map(s => s.id));
+
+    if (drv && drv.encToken && strays.length > 0) {
+      try {
+        const at = await gAT(env, drv.encToken);
+        for (const s of strays) {
+          if (s.googleFolderId) {
+            await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(s.googleFolderId)}?supportsAllDrives=true`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${at}` }
+            }).catch(()=>{});
+          }
+        }
+      } catch(e){}
+    }
+
+    targetDb.folders = (targetDb.folders||[]).filter(f => !strayIds.has(f.id));
+    targetDb._dbVer = Math.max((_memDBCacheVer || 0), (targetDb._dbVer || 0)) + 10;
+    _memDBCacheVer = targetDb._dbVer;
+    _memDBCache = targetDb;
+    await uSet(env, 'td:db', targetDb);
+    const gDriveBackupId = await saveDBToGDrive(env, targetDb);
+
+    const remainingFolders = (targetDb.folders||[]).filter(f => f.parentId === tera.id && !f.trashed);
+    const remainingFiles = (targetDb.files||[]).filter(f => f.folderId === tera.id && !f.trashed);
+
+    return J({
+      ok: true,
+      removedStrays: strays.map(s => ({ id: s.id, name: s.name, googleFolderId: s.googleFolderId })),
+      remainingFoldersCount: remainingFolders.length,
+      remainingFilesCount: remainingFiles.length,
+      totalTeraItems: remainingFolders.length + remainingFiles.length,
+      folders: remainingFolders.map(f => f.name),
+      gDriveBackupId
+    });
+  }
+
   if (action === 'inspect-folder') {
     const targetFolderId = url.searchParams.get('folderId');
     const folderFiles = (db.files||[]).filter(f => f.folderId === targetFolderId && !f.trashed);

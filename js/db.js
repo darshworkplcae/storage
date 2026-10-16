@@ -233,6 +233,7 @@ function tmDone(id, ok, errorMsg) {
     if(ok) {
       item.uploaded = item.size;
       delete item.error;
+      window._uploadSessionBytesDone = (window._uploadSessionBytesDone || 0) + (item.size || 0);
     } else if (errorMsg) {
       item.error = String(errorMsg);
     }

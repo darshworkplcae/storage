@@ -464,12 +464,21 @@ async function processFolderFiles(files) {
       parts.push('\u2191 ' + _batchUploaded + ' / ' + _estUploads + ' uploaded');
       if (_batchSkipped > 0) parts.push('\u26a1 ' + _batchSkipped + ' skipped');
 
-      // Byte-accurate ETA based on remaining un-uploaded bytes and rolling speed
+      // Realistic ETA based on sustained file rate and batch byte throughput
       var remBytes = Math.max(0, _estUploadBytes - _uploadedBatchBytes);
       var etaStr = '';
-      var activeSpeed = (window._rollingUploadSpeed || 0);
-      if (activeSpeed > 2048 && remBytes > 0 && uploadsLeft > 0) {
-        var etaSec = Math.round(remBytes / activeSpeed);
+      if (_batchUploaded >= 3 && uploadsLeft > 0) {
+        var elapsed = (Date.now() - _batchStartTs) / 1000;
+        var secPerUpload = elapsed / _batchUploaded;
+        var fileEtaSec = Math.round(secPerUpload * uploadsLeft);
+
+        var sustainedByteRate = elapsed > 0 ? (_uploadedBatchBytes / elapsed) : 0;
+        var byteEtaSec = (sustainedByteRate > 20480 && remBytes > 0) ? Math.round(remBytes / sustainedByteRate) : 0;
+
+        var etaSec = (byteEtaSec > 0 && Math.abs(byteEtaSec - fileEtaSec) < fileEtaSec * 2.5)
+          ? Math.round(byteEtaSec * 0.45 + fileEtaSec * 0.55)
+          : fileEtaSec;
+
         if (etaSec > 0 && etaSec < 86400 * 2) {
           etaStr = ' · ~' + fmtEtaSec(etaSec);
         }
@@ -532,6 +541,9 @@ async function processFolderFiles(files) {
   if (curFolderObj && curFolderObj.name.toLowerCase() === rootFolder.toLowerCase()) {
     folderMap[rootFolder] = batchFolderId;
     if (curFolderObj.googleFolderId) folderGoogleMap[rootFolder] = curFolderObj.googleFolderId;
+  } else if (_existingRootFolder && !folderMap[rootFolder]) {
+    folderMap[rootFolder] = _existingRootFolder.id;
+    if (_existingRootFolder.googleFolderId) folderGoogleMap[rootFolder] = _existingRootFolder.googleFolderId;
   }
 
   files.forEach(function (f) {
@@ -563,8 +575,37 @@ async function processFolderFiles(files) {
       var pParts = currentPath.split('/');
       var parentAcc = pParts.slice(0, -1).join('/');
       var fName = pParts[pParts.length - 1];
+
+      // Safely resolve parentAcc hierarchy from S.db.folders if not yet mapped
+      if (parentAcc && !folderMap[parentAcc] && S.db && Array.isArray(S.db.folders)) {
+        var accParts = parentAcc.split('/');
+        var walkParent = batchFolderId || null;
+        for (var ap = 0; ap < accParts.length; ap++) {
+          var pName = accParts[ap];
+          var walkedPath = accParts.slice(0, ap + 1).join('/');
+          if (folderMap[walkedPath]) {
+            walkParent = folderMap[walkedPath];
+            continue;
+          }
+          var match = S.db.folders.find(function(f) {
+            return f.driveId === batchDriveId && f.parentId === walkParent && f.name.toLowerCase() === pName.toLowerCase() && !f.trashed;
+          });
+          if (match) {
+            walkParent = match.id;
+            folderMap[walkedPath] = match.id;
+            if (match.googleFolderId) folderGoogleMap[walkedPath] = match.googleFolderId;
+          }
+        }
+      }
+
       var curParentId = parentAcc ? folderMap[parentAcc] : (batchFolderId || null);
       var curParentGoogleId = parentAcc ? folderGoogleMap[parentAcc] : (curFolderObj ? curFolderObj.googleFolderId : null);
+
+      // Safety: Never dump subfolders into root if parentAcc failed to resolve
+      if (parentAcc && !curParentId) {
+        console.warn('Skipping orphan folder creation for unresolved parent:', currentPath);
+        continue;
+      }
 
       var existing = (S.db && S.db.folders || []).find(function (f) {
         return f.driveId === batchDriveId && f.parentId === curParentId && f.name.toLowerCase() === fName.toLowerCase() && !f.trashed;

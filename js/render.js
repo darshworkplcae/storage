@@ -725,7 +725,7 @@ function folderCard(f){
   const canRename = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserRename !== false;
   const isAdminOnly = !!f.adminOnly;
   const isCustomAccess = Array.isArray(f.allowedUsers) && f.allowedUsers.length > 0;
-  const subCount = (S.db && S.db.files ? S.db.files.filter(x => x.folderId === f.id && !x.isTrash).length : 0) + (S.db && S.db.folders ? S.db.folders.filter(x => x.parentId === f.id && !x.isTrash).length : 0);
+  const subCount = (S.db && S.db.files ? S.db.files.filter(x => x.folderId === f.id && !x.trashed && !x.destroyed && (!x.driveId || x.driveId === f.driveId)).length : 0) + (S.db && S.db.folders ? S.db.folders.filter(x => x.parentId === f.id && !x.trashed && !x.destroyed && (!x.driveId || x.driveId === f.driveId)).length : 0);
 
   return `<div class="fg-card folder-card ${isSelected ? 'is-selected' : ''} ${isLocked ? 'is-locked-folder' : ''} ${isAdminOnly ? 'is-admin-only' : ''}" data-item-id="${esc(f.id)}" ondblclick="openFolderTarget('${esc(f.driveId)}','${esc(f.id)}')" onclick="handleFolderCardClick('${esc(f.driveId)}','${esc(f.id)}', event)" title="${esc(f.name)}">
     <div class="card-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select folder">
@@ -1200,18 +1200,55 @@ function renderTM(){
     return sum + Math.max(0, fSize - fUploaded);
   }, 0);
 
-  // Smooth rolling speed to prevent jumpy ETAs
-  if (totalSpeed > 0) {
+  // Track upload session for steady batch ETA
+  if (active.length > 0) {
+    if (!window._uploadSessionStartTime) {
+      window._uploadSessionStartTime = Date.now();
+      window._uploadSessionInitialDone = done.length;
+      window._uploadSessionBytesDone = 0;
+    }
+  } else {
+    window._uploadSessionStartTime = null;
+    window._uploadSessionInitialDone = 0;
+    window._uploadSessionBytesDone = 0;
+  }
+
+  // Smooth rolling speed to prevent jumpy ETAs (only update during active transfer > 50 KB/s)
+  if (totalSpeed > 50 * 1024) {
     window._rollingUploadSpeed = window._rollingUploadSpeed 
-      ? (window._rollingUploadSpeed * 0.75 + totalSpeed * 0.25)
+      ? (window._rollingUploadSpeed * 0.8 + totalSpeed * 0.2)
       : totalSpeed;
   }
-  const effectiveSpeed = (window._rollingUploadSpeed && window._rollingUploadSpeed > 1024) ? window._rollingUploadSpeed : totalSpeed;
+
   let queueEtaStr = '';
-  if (effectiveSpeed > 1024 && remainingBytes > 0 && active.length > 0) {
-    const sec = Math.round(remainingBytes / effectiveSpeed);
-    if (sec > 0 && sec < 86400 * 2) {
-      queueEtaStr = fmtEtaSec(sec);
+  if (active.length > 0) {
+    const elapsed = window._uploadSessionStartTime ? (Date.now() - window._uploadSessionStartTime) / 1000 : 0;
+    const filesDoneInSession = done.length - (window._uploadSessionInitialDone || 0);
+
+    // If batch uploading (3+ files completed in session), use realistic sustained rate
+    if (filesDoneInSession >= 3 && elapsed > 5) {
+      const secPerFile = elapsed / filesDoneInSession;
+      const fileEtaSec = Math.round(secPerFile * active.length);
+
+      const bytesPerSec = (window._uploadSessionBytesDone && elapsed > 0) ? (window._uploadSessionBytesDone / elapsed) : 0;
+      const byteEtaSec = (bytesPerSec > 20480 && remainingBytes > 0) ? Math.round(remainingBytes / bytesPerSec) : 0;
+
+      const etaSec = (byteEtaSec > 0 && Math.abs(byteEtaSec - fileEtaSec) < fileEtaSec * 2.5)
+        ? Math.round(byteEtaSec * 0.45 + fileEtaSec * 0.55)
+        : fileEtaSec;
+
+      if (etaSec > 0 && etaSec < 86400 * 2) {
+        queueEtaStr = fmtEtaSec(etaSec);
+      }
+    } else {
+      // Single file or early in session: use rolling transfer speed
+      const effectiveSpeed = (window._rollingUploadSpeed && window._rollingUploadSpeed > 1024) ? window._rollingUploadSpeed : totalSpeed;
+      if (effectiveSpeed > 1024 && remainingBytes > 0) {
+        const sec = Math.round(remainingBytes / effectiveSpeed);
+        if (sec > 0 && sec < 86400 * 2) {
+          queueEtaStr = fmtEtaSec(sec);
+        }
+      }
     }
   }
 
