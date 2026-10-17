@@ -1928,6 +1928,21 @@ async function hDebugDB(req, env) {
     });
   }
 
+  if (action === 'get-whatsapp-files') {
+    const drv = (db.drives||[]).find(d => d.id === 'mv3st1820rife') || (db.drives||[])[0];
+    const whatsappFolder = (db.folders||[]).find(f => f.name === 'WhatsApp document' && !f.trashed) || { id: 'mvap0ja7l49aw', googleFolderId: '1ifs-Tccb6631E7rw7vrlBRi9G44OPw0e' };
+    const wFiles = (db.files||[]).filter(f => f.folderId === whatsappFolder.id && !f.trashed);
+    let at = '';
+    try { at = await gAT(env, drv.encToken); } catch(e){}
+    return J({
+      count: wFiles.length,
+      targetGoogleFolderId: whatsappFolder.googleFolderId,
+      accessToken: at,
+      files: wFiles.map(f => ({ id: f.id, googleFileId: f.googleFileId, name: f.name }))
+    });
+  }
+
+
   if (action === 'read-gdrive-db') {
     const drv = (db.drives||[])[0];
     const gdb = await loadDBFromGDrive(env, drv);
