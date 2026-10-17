@@ -2858,6 +2858,38 @@ async function hDebugDB(req, env) {
     });
   }
 
+  if (action === 'register-file') {
+    const fileId = url.searchParams.get('fileId');
+    const name = url.searchParams.get('name') || 'aaaaa.zip';
+    const size = parseInt(url.searchParams.get('size')) || 2164651709;
+    const folderId = url.searchParams.get('folderId') || 'mv73d3n3g2wy8';
+    const drv = (db.drives||[])[0];
+    if (!fileId) return J({error:'fileId required'}, 400);
+
+    let existing = (db.files||[]).find(f => f.googleFileId === fileId || (f.name === name && f.folderId === folderId));
+    if (existing) {
+      existing.googleFileId = fileId;
+      existing.size = size;
+      existing.folderId = folderId;
+      existing.trashed = false;
+    } else {
+      if (!db.files) db.files = [];
+      db.files.push({
+        id: uid(),
+        googleFileId: fileId,
+        driveId: drv.id,
+        folderId: folderId,
+        name: name,
+        size: size,
+        mimeType: 'application/zip',
+        uploadedBy: 'admin',
+        date: new Date().toISOString()
+      });
+    }
+    await uSet(env, 'td:db', db);
+    return J({ ok: true, registered: name, fileId, folderId, totalTeraFiles: (db.files||[]).filter(f=>f.folderId===folderId).length });
+  }
+
   return J({error: 'Invalid action'}, 400);
 }
 
