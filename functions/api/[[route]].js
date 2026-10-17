@@ -2842,6 +2842,22 @@ async function hDebugDB(req, env) {
     });
   }
 
+  if (action === 'sync-quota') {
+    const drv = (db.drives||[]).find(d => d.id === 'mv3st1820rife') || (db.drives||[])[0];
+    if (!drv) return J({error:'No drive found'}, 404);
+    const at = await gAT(env, drv.encToken);
+    const q = await gDQ(at);
+    drv.capacity = parseInt(q.storageQuota && q.storageQuota.limit) || drv.capacity || 0;
+    drv.usedBytes = parseInt(q.storageQuota && q.storageQuota.usage) || drv.usedBytes || 0;
+    await uSet(env, 'td:db', db);
+    return J({
+      ok: true,
+      driveName: drv.name,
+      usedGB: (drv.usedBytes / (1024**3)).toFixed(2),
+      capacityGB: (drv.capacity / (1024**3)).toFixed(2)
+    });
+  }
+
   return J({error: 'Invalid action'}, 400);
 }
 
