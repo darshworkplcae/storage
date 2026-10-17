@@ -2504,7 +2504,7 @@ async function hDebugDB(req, env) {
     if (drv) {
       try { gdb = await loadDBFromGDrive(env, drv); } catch(e){}
     }
-    const targetDb = gdb || db;
+    const targetDb = (gdb && (gdb._dbVer || 0) > (db._dbVer || 0)) ? gdb : db;
     if (!targetDb.files) targetDb.files = [];
 
     // Group all non-trashed files by: folderId::lowercaseName::size
