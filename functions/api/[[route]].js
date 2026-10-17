@@ -615,11 +615,11 @@ async function hScanDrive(req,env,driveId){
       folderFetches++;
     } while (fPageToken && folderFetches < 5);
 
-    // Phase 2: Resolve or recreate root 'TeleDrive' folder
+    // Phase 2: Identify root 'TeleDrive' folders
     let rootId = drv.rootFolderId;
     let rootExists = rootId && allGoogleFolders.some(f => f.id === rootId);
     if (!rootExists) {
-      const teleFolder = allGoogleFolders.find(f => f.name === 'TeleDrive');
+      const teleFolder = allGoogleFolders.find(f => (f.name||'').trim().toLowerCase() === 'teledrive');
       if (teleFolder) {
         rootId = teleFolder.id;
       } else {
@@ -629,40 +629,58 @@ async function hScanDrive(req,env,driveId){
       drv.rootFolderId = rootId;
     }
 
-    // Phase 3: In-memory folder tree resolution (0 subrequests!)
-    // Find all folders that are direct or indirect descendants of rootId
-    const teleDriveGoogleFolderIds = new Set([rootId]);
-    let addedAny;
-    do {
-      addedAny = false;
-      for (const gf of allGoogleFolders) {
-        if (!teleDriveGoogleFolderIds.has(gf.id)) {
-          if (gf.parents && gf.parents.some(p => teleDriveGoogleFolderIds.has(p))) {
-            teleDriveGoogleFolderIds.add(gf.id);
-            addedAny = true;
-          }
-        }
+    // Collect all TeleDrive root Google IDs
+    const teleDriveRootGIds = new Set();
+    if (rootId) teleDriveRootGIds.add(rootId);
+    for (const gf of allGoogleFolders) {
+      if ((gf.name || '').trim().toLowerCase() === 'teledrive') {
+        teleDriveRootGIds.add(gf.id);
       }
-    } while (addedAny);
+    }
 
+    // Phase 3: In-memory folder tree resolution (0 subrequests!)
     // Map googleFolderId -> local folder ID in db.folders
     const gFolderToLocalId = new Map();
-    gFolderToLocalId.set(rootId, null);
-
+    for (const rGId of teleDriveRootGIds) {
+      gFolderToLocalId.set(rGId, null);
+    }
     for (const f of db.folders) {
       if (f.driveId === curDriveId && f.googleFolderId) {
         gFolderToLocalId.set(f.googleFolderId, f.id);
       }
     }
 
+    // Build the set of all Google folder IDs that belong to TeleDrive
+    const validGoogleFolderIds = new Set(teleDriveRootGIds);
+    for (const f of db.folders) {
+      if (f.driveId === curDriveId && f.googleFolderId) {
+        validGoogleFolderIds.add(f.googleFolderId);
+      }
+    }
+
+    let addedAny;
+    do {
+      addedAny = false;
+      for (const gf of allGoogleFolders) {
+        if (!validGoogleFolderIds.has(gf.id)) {
+          const hasValidParent = gf.parents && gf.parents.some(p => validGoogleFolderIds.has(p));
+          const isTopLevelInDrive = !gf.parents || !gf.parents.length || !allGoogleFolders.some(other => other.id === gf.parents[0]);
+          if (hasValidParent || isTopLevelInDrive) {
+            validGoogleFolderIds.add(gf.id);
+            addedAny = true;
+          }
+        }
+      }
+    } while (addedAny);
+
     let addedFolders = 0;
     for (const gf of allGoogleFolders) {
-      if (gf.id === rootId) continue;
-      if (teleDriveGoogleFolderIds.has(gf.id)) {
+      if (teleDriveRootGIds.has(gf.id)) continue;
+      if (validGoogleFolderIds.has(gf.id)) {
         let localId = gFolderToLocalId.get(gf.id);
         if (!localId) {
-          const parentGoogleId = (gf.parents && gf.parents[0]) || rootId;
-          const parentLocalId = (parentGoogleId === rootId) ? null : (gFolderToLocalId.get(parentGoogleId) || null);
+          const parentGoogleId = (gf.parents && gf.parents.find(p => validGoogleFolderIds.has(p))) || null;
+          const parentLocalId = (parentGoogleId && !teleDriveRootGIds.has(parentGoogleId)) ? (gFolderToLocalId.get(parentGoogleId) || null) : null;
           const gfName = (gf.name || 'Untitled Folder').trim();
           // Safety: avoid duplicate folders with matching name under the same parent
           const existingByName = db.folders.find(f => f.driveId === curDriveId && f.parentId === parentLocalId && (f.name||'').trim().toLowerCase() === gfName.toLowerCase() && !f.trashed);
@@ -691,13 +709,13 @@ async function hScanDrive(req,env,driveId){
 
     // Update parentId for existing folders if necessary
     for (const gf of allGoogleFolders) {
-      if (gf.id === rootId) continue;
-      if (teleDriveGoogleFolderIds.has(gf.id)) {
+      if (teleDriveRootGIds.has(gf.id)) continue;
+      if (validGoogleFolderIds.has(gf.id)) {
         const curLocalId = gFolderToLocalId.get(gf.id);
         const ef = db.folders.find(f => f.id === curLocalId);
         if (ef) {
-          const parentGoogleId = (gf.parents && gf.parents[0]) || rootId;
-          const targetParentLocalId = (parentGoogleId === rootId) ? null : (gFolderToLocalId.get(parentGoogleId) || null);
+          const parentGoogleId = (gf.parents && gf.parents.find(p => validGoogleFolderIds.has(p))) || null;
+          const targetParentLocalId = (parentGoogleId && !teleDriveRootGIds.has(parentGoogleId)) ? (gFolderToLocalId.get(parentGoogleId) || null) : null;
           if (ef.parentId !== targetParentLocalId) ef.parentId = targetParentLocalId;
         }
       }
@@ -728,11 +746,28 @@ async function hScanDrive(req,env,driveId){
       if (res.files) {
         for (const item of res.files) {
           if (item.name === '__teledrive_db__.json') continue;
-          if (!item.parents || !item.parents.some(p => teleDriveGoogleFolderIds.has(p))) {
-            continue; // Skip non-TeleDrive files
+          
+          let parentLocalId = null;
+          let isBelongingToTeleDrive = false;
+
+          if (item.parents && item.parents.length) {
+            const matchedParentGId = item.parents.find(p => gFolderToLocalId.has(p));
+            if (matchedParentGId) {
+              isBelongingToTeleDrive = true;
+              parentLocalId = gFolderToLocalId.get(matchedParentGId);
+            } else {
+              const isUnderOtherGFolder = item.parents.some(p => allGoogleFolders.some(gf => gf.id === p));
+              if (!isUnderOtherGFolder) {
+                isBelongingToTeleDrive = true;
+                parentLocalId = null;
+              }
+            }
+          } else {
+            isBelongingToTeleDrive = true;
+            parentLocalId = null;
           }
-          const parentGoogleId = item.parents.find(p => teleDriveGoogleFolderIds.has(p));
-          const parentLocalId = (parentGoogleId === rootId) ? null : (gFolderToLocalId.get(parentGoogleId) || null);
+
+          if (!isBelongingToTeleDrive) continue;
 
           let eFile = existingGoogleFileIds.get(item.id);
           if (!eFile) {
@@ -1862,6 +1897,68 @@ async function hDebugDB(req, env) {
       teraFiles: teraFiles.map(f => ({id:f.id, name:f.name, size:f.size})),
       allFolders: (db.folders||[]).map(f => ({id:f.id, name:f.name, parentId:f.parentId, googleFolderId:f.googleFolderId}))
     });
+  if (action === 'kenjalgad-detail') {
+    const kenjFolders = (db.folders||[]).filter(f => (f.name||'').toLowerCase().includes('kenj'));
+    const kenjFiles = (db.files||[]).filter(f => kenjFolders.some(k => k.id === f.folderId));
+    const allDrive2Files = (db.files||[]).filter(f => f.driveId === 'mv3txae19acz2');
+    const allDrive2Folders = (db.folders||[]).filter(f => f.driveId === 'mv3txae19acz2');
+    
+    // Also fetch files from Google Drive under both Kenjalgad folders to see what GDrive has
+    const gdResults = {};
+    for (const kf of kenjFolders) {
+      const drv = (db.drives||[]).find(d => d.id === kf.driveId) || (db.drives||[])[0];
+      if (drv && drv.encToken && kf.googleFolderId) {
+        try {
+          const at = await gAT(env, drv.encToken);
+          const u = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${kf.googleFolderId}' in parents and trashed = false`)}&fields=files(id,name,mimeType,size)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+          const r = await fetch(u, { headers: { Authorization: `Bearer ${at}` } });
+          const d = await r.json();
+          gdResults[kf.name + ' (' + kf.googleFolderId + ')'] = d.files || d;
+        } catch(e) {
+          gdResults[kf.name] = { error: e.message };
+        }
+      }
+    }
+
+    return J({
+      kenjFolders,
+      kenjFilesCount: kenjFiles.length,
+      kenjFilesSample: kenjFiles.slice(0, 10).map(f => ({ id: f.id, name: f.name, folderId: f.folderId, driveId: f.driveId })),
+      drive2: {
+        id: 'mv3txae19acz2',
+        totalFolders: allDrive2Folders.length,
+        totalFiles: allDrive2Files.length,
+        rootFiles: allDrive2Files.filter(f => !f.folderId).length,
+        folders: allDrive2Folders.map(f => ({ id: f.id, name: f.name, parentId: f.parentId, googleFolderId: f.googleFolderId, files: allDrive2Files.filter(fi => fi.folderId === f.id).length }))
+      },
+      gdResults
+    });
+  }
+
+  if (action === 'drives-summary') {
+    const summary = (db.drives||[]).map(d => {
+      const dFolders = (db.folders||[]).filter(f => f.driveId === d.id && !f.trashed);
+      const dFiles = (db.files||[]).filter(f => f.driveId === d.id && !f.trashed);
+      const rootFiles = dFiles.filter(f => !f.folderId);
+      const folderBreakdown = dFolders.map(f => ({
+        id: f.id,
+        name: f.name,
+        parentId: f.parentId,
+        googleFolderId: f.googleFolderId,
+        filesCount: dFiles.filter(fi => fi.folderId === f.id).length
+      }));
+      return {
+        id: d.id,
+        name: d.name,
+        email: d.email,
+        rootFolderId: d.rootFolderId,
+        totalFolders: dFolders.length,
+        totalFiles: dFiles.length,
+        rootFilesCount: rootFiles.length,
+        folders: folderBreakdown
+      };
+    });
+    return J({ drives: summary });
   }
 
   if (action === 'analyze-tera-status') {
@@ -4356,16 +4453,108 @@ async function hTripAPI(req, env, subpath, method) {
     // 11. Admin trip users panel: GET /api/trip/admin-users
   if (subpath === 'admin-users' && method === 'GET') {
     if (!adminSes) return J({ error: 'Admin only' }, 401);
-    return J({
-      users: (db.tripUsers || []).map(u => ({
+
+    // Compute lifetime statistics across all trips in db.tripData
+    const lifetimeStats = {};
+    (db.tripUsers || []).forEach(u => {
+      const un = u.username.toLowerCase();
+      lifetimeStats[un] = {
+        lifetimePaid: 0,
+        lifetimeShare: 0,
+        lifetimeSettledDelta: 0,
+        billsCreatedCount: 0
+      };
+    });
+
+    const tripFoldersList = [];
+    let totalLifetimeExpenses = 0;
+    let totalLifetimeSettled = 0;
+
+    Object.keys(db.tripData || {}).forEach(folderId => {
+      const trip = db.tripData[folderId];
+      if (!trip) return;
+      const folderObj = (db.folders || []).find(f => f.id === folderId);
+      const tripTitle = trip.tripName || (folderObj ? folderObj.name : 'Trip ' + folderId);
+      let tripTotal = 0;
+      let tripSettled = 0;
+
+      (trip.bills || []).forEach(b => {
+        const amt = parseFloat(b.amount) || 0;
+        tripTotal += amt;
+        const payerUn = (b.paidBy || '').toLowerCase();
+        if (lifetimeStats[payerUn]) {
+          lifetimeStats[payerUn].lifetimePaid += amt;
+          lifetimeStats[payerUn].billsCreatedCount++;
+        }
+        const splits = (b.splitMembers || (db.tripUsers || []).map(x => x.username)).map(x => x.toLowerCase());
+        const perHead = amt / (splits.length || 1);
+        splits.forEach(memberUn => {
+          if (lifetimeStats[memberUn]) {
+            lifetimeStats[memberUn].lifetimeShare += perHead;
+          }
+        });
+      });
+
+      (trip.settlements || []).forEach(s => {
+        if (s.status === 'verified') {
+          const amt = parseFloat(s.amount) || 0;
+          tripSettled += amt;
+          const fromUn = (s.fromUser || '').toLowerCase();
+          const toUn = (s.toUser || '').toLowerCase();
+          if (lifetimeStats[fromUn]) lifetimeStats[fromUn].lifetimeSettledDelta += amt;
+          if (lifetimeStats[toUn]) lifetimeStats[toUn].lifetimeSettledDelta -= amt;
+        }
+      });
+
+      (trip.concessions || []).forEach(c => {
+        const amt = parseFloat(c.amount) || 0;
+        const forUn = (c.forUser || '').toLowerCase();
+        const byUn = (c.byUser || '').toLowerCase();
+        if (lifetimeStats[forUn]) lifetimeStats[forUn].lifetimeSettledDelta += amt;
+        if (lifetimeStats[byUn]) lifetimeStats[byUn].lifetimeSettledDelta -= amt;
+      });
+
+      totalLifetimeExpenses += tripTotal;
+      totalLifetimeSettled += tripSettled;
+
+      tripFoldersList.push({
+        folderId,
+        name: tripTitle,
+        totalExpenses: Math.round(tripTotal),
+        totalSettled: Math.round(tripSettled),
+        remainingDue: Math.max(0, Math.round(tripTotal - tripSettled)),
+        billsCount: (trip.bills || []).length
+      });
+    });
+
+    const usersWithStats = (db.tripUsers || []).map(u => {
+      const un = u.username.toLowerCase();
+      const st = lifetimeStats[un] || { lifetimePaid: 0, lifetimeShare: 0, lifetimeSettledDelta: 0, billsCreatedCount: 0 };
+      const net = (st.lifetimePaid - st.lifetimeShare) + st.lifetimeSettledDelta;
+      return {
         id: u.id,
         name: u.name,
         username: u.username,
-        passwordHint: u.rawPasswordHint || '(custom)',
+        password: u.rawPasswordHint || u.username.toUpperCase(),
         upiId: u.upiId || '',
         hasQr: !!u.qrDataUrl,
-        dateCreated: u.dateCreated
-      }))
+        lifetimePaid: Math.round(st.lifetimePaid),
+        lifetimeShare: Math.round(st.lifetimeShare),
+        lifetimeNet: Math.round(net),
+        lifetimeStatus: net > 1 ? 'gets' : (net < -1 ? 'owes' : 'settled'),
+        billsCreatedCount: st.billsCreatedCount
+      };
+    });
+
+    return J({
+      users: usersWithStats,
+      trips: tripFoldersList,
+      summary: {
+        totalLifetimeExpenses: Math.round(totalLifetimeExpenses),
+        totalLifetimeSettled: Math.round(totalLifetimeSettled),
+        totalLifetimeDue: Math.max(0, Math.round(totalLifetimeExpenses - totalLifetimeSettled)),
+        usersCount: usersWithStats.length
+      }
     });
   }
 

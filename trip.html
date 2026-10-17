@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
   <title>TripSplit — Trip Bills & UPI Expense Splitter</title>
   <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -28,6 +28,20 @@
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       -webkit-tap-highlight-color: transparent;
+      padding-bottom: env(safe-area-inset-bottom, 24px);
+    }
+    /* Mobile responsive input adjustments (prevent iOS auto-zoom) */
+    @media (max-width: 640px) {
+      input, select, textarea {
+        font-size: 16px !important;
+      }
+    }
+    .snap-carousel {
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+    }
+    .snap-item {
+      scroll-snap-align: start;
     }
     .tap-active:active {
       transform: scale(0.97);
@@ -197,7 +211,7 @@
         </div>
 
         <!-- Clean Straight Horizontal Member Row -->
-        <div id="membersHorizontalRow" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 overflow-x-auto custom-scroll pb-1">
+        <div id="membersHorizontalRow" class="flex items-center gap-2 overflow-x-auto pb-2 custom-scroll snap-carousel sm:grid sm:grid-cols-4 lg:grid-cols-7">
           <!-- Injected dynamically: Darshan (Gets), Amar (Gets), Soham (Owes), Omakr (Owes), Rohit (Owes), Nikhil (Owes), Bhushan (Owes) -->
         </div>
       </div>
@@ -312,7 +326,7 @@
 
   <!-- MODAL: LOGIN -->
   <div id="loginModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-4 sm:p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll my-auto">
       <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
         <div class="flex items-center gap-2">
           <span class="w-7 h-7 rounded-lg bg-[#c96b32]/20 text-[#e0834a] flex items-center justify-center text-xs font-bold"><i class="fas fa-user-lock"></i></span>
@@ -348,7 +362,7 @@
 
   <!-- MODAL: RESET PASSWORD -->
   <div id="resetPasswordModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-4 sm:p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll my-auto">
       <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
         <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
           <i class="fas fa-key text-[var(--amber)]"></i> Reset Your Password
@@ -381,7 +395,7 @@
 
   <!-- MODAL: PAY VIA UPI QR -->
   <div id="payModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-4 sm:p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll my-auto">
       <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
         <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
           <i class="fas fa-qrcode text-emerald-400"></i> Pay <span id="payeeNameText">Friend</span>
@@ -430,7 +444,7 @@
 
   <!-- MODAL: ADD BILL -->
   <div id="addBillModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll my-auto">
       <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
         <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
           <i class="fas fa-file-circle-plus text-[var(--clay-light)]"></i> Add Trip Bill
@@ -490,7 +504,7 @@
 
   <!-- MODAL: FREE AI RECEIPT SCANNER -->
   <div id="aiScanModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-4 sm:p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll my-auto">
       <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
         <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
           <i class="fas fa-wand-magic-sparkles text-[var(--amber)]"></i> Free AI Receipt Scanner
@@ -535,7 +549,7 @@
 
   <!-- MODAL: PROFILE & UPI QR -->
   <div id="profileModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-4 sm:p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll my-auto">
       <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
         <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
           <i class="fas fa-qrcode text-emerald-400"></i> My UPI QR & Settings
@@ -570,7 +584,7 @@
 
   <!-- MODAL: CONCESSION / CASH SETTLEMENT -->
   <div id="concessionModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-4 sm:p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll my-auto">
       <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
         <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
           <i class="fas fa-hand-holding-dollar text-[var(--amber)]"></i> Record Cash / Concession
@@ -893,7 +907,7 @@
         var card = document.createElement('div');
         
         var borderClass = isMe ? 'border-[#c96b32] bg-[#c96b32]/15 shadow-md' : 'border-[var(--border)] bg-[var(--bg)]/90 hover:border-[#c96b32]/50';
-        card.className = 'tap-active p-2.5 rounded-2xl border transition flex items-center gap-2 cursor-pointer ' + borderClass;
+        card.className = 'tap-active p-2.5 rounded-2xl border transition flex items-center gap-2 cursor-pointer min-w-[130px] sm:min-w-0 sm:flex-1 shrink-0 snap-item ' + borderClass;
         
         var avatarBg = m.status === 'gets' ? 'bg-emerald-600' : (m.status === 'owes' ? 'bg-[#c96b32]' : 'bg-stone-700');
         var statusBadge = '';

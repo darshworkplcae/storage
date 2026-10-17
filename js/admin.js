@@ -168,6 +168,13 @@ function renderSettingsPage() {
     '</div>',
     '</div>',
 
+    // TripSplit Accounts & Lifetime Ledgers
+    '<div class="settings-section" id="tripAdminSection">',
+    '<div class="sect-hd"><i class="fas fa-receipt" style="color:#e0834a"></i><div><h3>TripSplit — Trip Expenses & Member Lifetime Ledgers</h3><p>View member plain passwords, lifetime amount paid vs owed, and all trip expense folders.</p></div>',
+    '<a href="/trip" target="_blank" class="btn-primary sm" style="background:linear-gradient(135deg,#c96b32,#a34c1b);border:none;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="fas fa-external-link-alt"></i> Open TripSplit</a></div>',
+    '<div id="tripAdminContainer"><div class="empty-small"><i class="fas fa-spinner fa-spin" style="color:#e0834a"></i><p>Loading trip members and lifetime ledgers…</p></div></div>',
+    '</div>',
+
     // Database Maintenance & Backup
     '<div class="settings-section">',
     '<h3 class="sect-title"><i class="fas fa-database" style="color:var(--primary)"></i> Database Backup & Restore</h3>',
@@ -192,6 +199,7 @@ function renderSettingsPage() {
   loadAdminFolderVisibility();
   loadAdminLockedFolders();
   loadAdminDestroyedFolders();
+  loadAdminTripSplitPanel();
 }
 
 async function loadAdminFolderVisibility() {
@@ -1059,5 +1067,164 @@ async function submitPastedDBBackup() {
     }
   } catch(e) {
     toast('Invalid JSON syntax: ' + e.message, 'error');
+  }
+}
+
+// ─── TripSplit Admin Panel & Lifetime Ledgers ────────────────────────────────
+async function loadAdminTripSplitPanel() {
+  var el = document.getElementById('tripAdminContainer');
+  if (!el) return;
+
+  try {
+    var res = await apiFetch('trip/admin-users', { method: 'GET' });
+    if (!res || !res.users) {
+      el.innerHTML = '<div class="empty-small"><i class="fas fa-circle-exclamation" style="color:var(--danger)"></i><p>' + (res && res.error ? res.error : 'Failed to load trip data') + '</p></div>';
+      return;
+    }
+
+    var users = res.users || [];
+    var trips = res.trips || [];
+    var sum = res.summary || {};
+
+    var summaryHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:1.2rem">' +
+      '<div style="background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center">' +
+      '<div style="font-size:0.75rem;color:var(--text3);text-transform:uppercase;font-weight:600">Lifetime Expenses</div>' +
+      '<div style="font-size:1.25rem;font-weight:800;color:var(--text1);margin-top:2px">₹' + (sum.totalLifetimeExpenses || 0).toLocaleString() + '</div>' +
+      '</div>' +
+      '<div style="background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center">' +
+      '<div style="font-size:0.75rem;color:var(--text3);text-transform:uppercase;font-weight:600">Lifetime Settled</div>' +
+      '<div style="font-size:1.25rem;font-weight:800;color:#30d158;margin-top:2px">₹' + (sum.totalLifetimeSettled || 0).toLocaleString() + '</div>' +
+      '</div>' +
+      '<div style="background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center">' +
+      '<div style="font-size:0.75rem;color:var(--text3);text-transform:uppercase;font-weight:600">Remaining Due</div>' +
+      '<div style="font-size:1.25rem;font-weight:800;color:#ff9f0a;margin-top:2px">₹' + (sum.totalLifetimeDue || 0).toLocaleString() + '</div>' +
+      '</div>' +
+      '<div style="background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center">' +
+      '<div style="font-size:0.75rem;color:var(--text3);text-transform:uppercase;font-weight:600">Active Friends</div>' +
+      '<div style="font-size:1.25rem;font-weight:800;color:#64d2ff;margin-top:2px">' + users.length + ' Users</div>' +
+      '</div>' +
+      '</div>';
+
+    var usersTable = '<div class="table-wrap" style="margin-bottom:1.4rem;overflow-x:auto">' +
+      '<table class="data-table" style="width:100%">' +
+      '<thead><tr>' +
+      '<th>Member</th>' +
+      '<th>Plain Password</th>' +
+      '<th>UPI / QR</th>' +
+      '<th style="text-align:right">Lifetime Paid</th>' +
+      '<th style="text-align:right">Lifetime Share</th>' +
+      '<th>Lifetime Balance</th>' +
+      '<th>Action</th>' +
+      '</tr></thead><tbody>' +
+      users.map(function(u) {
+        var statusPill = u.lifetimeStatus === 'gets'
+          ? '<span class="badge" style="background:rgba(48,209,88,0.18);color:#30d158;font-weight:700">+₹' + u.lifetimeNet.toLocaleString() + ' (Gets)</span>'
+          : u.lifetimeStatus === 'owes'
+          ? '<span class="badge" style="background:rgba(255,159,10,0.18);color:#ff9f0a;font-weight:700">-₹' + Math.abs(u.lifetimeNet).toLocaleString() + ' (Owes)</span>'
+          : '<span class="badge" style="background:rgba(255,255,255,0.08);color:var(--text3)">Settled ✅</span>';
+
+        var qrBadge = u.hasQr
+          ? '<span class="badge sm" style="background:rgba(48,209,88,0.15);color:#30d158" title="QR Code Uploaded"><i class="fas fa-qrcode"></i> QR Set</span>'
+          : '<span class="badge sm" style="background:rgba(255,255,255,0.06);color:var(--text3)">No QR</span>';
+
+        return '<tr>' +
+          '<td>' +
+          '<div style="display:flex;align-items:center;gap:8px">' +
+          '<div style="width:28px;height:28px;border-radius:50%;background:#c96b32;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.75rem">' + esc(u.name)[0] + '</div>' +
+          '<div><div style="font-weight:700;font-size:0.86rem;color:var(--text1)">' + esc(u.name) + '</div><div style="font-size:0.72rem;color:var(--text3)">@' + esc(u.username) + '</div></div>' +
+          '</div>' +
+          '</td>' +
+          '<td>' +
+          '<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,0,0,0.3);padding:3px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.08)">' +
+          '<span id="tripPassVal_' + u.id + '" style="font-family:monospace;font-size:0.82rem;letter-spacing:1px;color:#ffd60a">••••••••</span>' +
+          '<button class="icon-btn xs" onclick="toggleTripPlainPass(\'' + u.id + '\', \'' + esc(u.password).replace(/'/g, "\\'") + '\')" title="Show / Hide Plain Password"><i class="fas fa-eye" id="tripPassIco_' + u.id + '"></i></button>' +
+          '<button class="icon-btn xs" onclick="copyTripPass(\'' + esc(u.password).replace(/'/g, "\\'") + '\')" title="Copy Password"><i class="fas fa-copy"></i></button>' +
+          '</div>' +
+          '</td>' +
+          '<td>' +
+          '<div style="font-size:0.78rem">' + (u.upiId ? '<span style="font-family:monospace;color:var(--text2)">' + esc(u.upiId) + '</span> ' : '') + qrBadge + '</div>' +
+          '</td>' +
+          '<td style="text-align:right;font-weight:700;color:var(--text1)">₹' + u.lifetimePaid.toLocaleString() + ' <span style="font-size:0.7rem;color:var(--text3);font-weight:normal">(' + u.billsCreatedCount + ' bills)</span></td>' +
+          '<td style="text-align:right;font-weight:700;color:var(--text2)">₹' + u.lifetimeShare.toLocaleString() + '</td>' +
+          '<td>' + statusPill + '</td>' +
+          '<td>' +
+          '<button class="btn-ghost xs" onclick="adminQuickResetTripPass(\'' + esc(u.username) + '\', \'' + esc(u.name).replace(/'/g, "\\'") + '\')"><i class="fas fa-key"></i> Reset Pass</button>' +
+          '</td>' +
+          '</tr>';
+      }).join('') +
+      '</tbody></table></div>';
+
+    var tripsHtml = '';
+    if (trips.length > 0) {
+      tripsHtml = '<h4 style="font-size:0.86rem;margin-bottom:0.6rem;color:#e0834a;display:flex;align-items:center;gap:6px"><i class="fas fa-map-location-dot"></i> Connected Trip Expense Folders (' + trips.length + ')</h4>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px">' +
+        trips.map(function(t) {
+          return '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-direction:column;justify-content:space-between;gap:8px">' +
+            '<div><div style="font-weight:700;font-size:0.92rem;color:var(--text1)">🏖️ ' + esc(t.name) + '</div>' +
+            '<div style="font-size:0.75rem;color:var(--text3);margin-top:2px">' + t.billsCount + ' bills · Total: <b style="color:var(--text1)">₹' + t.totalExpenses.toLocaleString() + '</b></div>' +
+            '<div style="font-size:0.75rem;color:var(--text3)">Settled: <b style="color:#30d158">₹' + t.totalSettled.toLocaleString() + '</b> · Due: <b style="color:#ff9f0a">₹' + t.remainingDue.toLocaleString() + '</b></div></div>' +
+            '<div style="display:flex;gap:6px">' +
+            '<a href="/trip?folder=' + encodeURIComponent(t.folderId) + '" target="_blank" class="btn-primary xs" style="background:#c96b32;border:none;flex:1;text-align:center;text-decoration:none"><i class="fas fa-arrow-up-right-from-square"></i> Open TripSplit</a>' +
+            '</div></div>';
+        }).join('') +
+        '</div>';
+    }
+
+    el.innerHTML = summaryHtml + usersTable + tripsHtml;
+  } catch(e) {
+    el.innerHTML = '<div class="empty-small"><i class="fas fa-triangle-exclamation" style="color:var(--danger)"></i><p>Error: ' + e.message + '</p></div>';
+  }
+}
+
+function toggleTripPlainPass(userId, plainPass) {
+  var span = document.getElementById('tripPassVal_' + userId);
+  var ico = document.getElementById('tripPassIco_' + userId);
+  if (!span) return;
+  if (span.textContent === '••••••••') {
+    span.textContent = plainPass;
+    span.style.color = '#30d158';
+    if (ico) ico.className = 'fas fa-eye-slash';
+  } else {
+    span.textContent = '••••••••';
+    span.style.color = '#ffd60a';
+    if (ico) ico.className = 'fas fa-eye';
+  }
+}
+
+function copyTripPass(pass) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(pass).then(function() {
+      toast('Password copied: ' + pass, 'success');
+    }).catch(function() {
+      prompt('Copy password:', pass);
+    });
+  } else {
+    prompt('Copy password:', pass);
+  }
+}
+
+async function adminQuickResetTripPass(username, name) {
+  var newPass = prompt('Enter new password for ' + name + ' (@' + username + '):');
+  if (!newPass || !newPass.trim()) return;
+  if (newPass.trim().length < 3) return toast('Password must be at least 3 characters', 'warning');
+
+  toast('Updating password…', 'info');
+  try {
+    var res = await apiFetch('trip/admin-users', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: name,
+        username: username,
+        password: newPass.trim()
+      })
+    });
+    if (res && res.ok) {
+      toast('Password updated for ' + name + '!', 'success');
+      loadAdminTripSplitPanel();
+    } else {
+      toast(res ? (res.error || 'Failed') : 'Error', 'error');
+    }
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
   }
 }
