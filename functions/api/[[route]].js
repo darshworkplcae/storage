@@ -149,13 +149,16 @@ async function uSet(env,key,val,ttl){
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=86400, s-maxage=86400' }
       })).catch(()=>{});
     } catch(e) {}
-    // Persist to Google Drive in background (non-blocking for ultra-fast uploads)
+    // Persist to Google Drive in background — strictly throttled to at most once per 60s
+    // to prevent saturating Cloudflare subrequests and memory during batch uploads
     const now = Date.now();
-    if (_globalCtx && typeof _globalCtx.waitUntil === 'function') {
-      _globalCtx.waitUntil(saveDBToGDrive(env, val));
-    } else if (now - _lastGDriveSave > 15000) {
+    if (now - _lastGDriveSave > 60000 && !_isGDriveSaving) {
       _lastGDriveSave = now;
-      saveDBToGDrive(env, val).catch(() => {});
+      if (_globalCtx && typeof _globalCtx.waitUntil === 'function') {
+        _globalCtx.waitUntil(saveDBToGDrive(env, val));
+      } else {
+        saveDBToGDrive(env, val).catch(() => {});
+      }
     }
   }
   const kv=getKV(env);
@@ -243,7 +246,10 @@ async function mkDir(at,n,pid){const q=`name='${n}' and mimeType='application/vn
 
 // ─── Google Drive DB Persistence Backup ───
 // When Cloudflare KV exceeds daily put limits, Google Drive is our reliable storage.
+let _isGDriveSaving = false;
 async function saveDBToGDrive(env, db) {
+  if (_isGDriveSaving) return null;
+  _isGDriveSaving = true;
   try {
     const drv = (db.drives||[])[0];
     if (!drv || !drv.encToken || !drv.rootFolderId) return null;
@@ -299,6 +305,7 @@ async function saveDBToGDrive(env, db) {
       }
     }
   } catch(e) { console.error('saveDBToGDrive error:', e); }
+  finally { _isGDriveSaving = false; }
   return null;
 }
 
@@ -845,6 +852,9 @@ async function hUI(req,env){
   let ir = await reqInit(at, pid);
   if (ir.status === 401) {
     at = await gAT(env, drv.encToken, true);
+    ir = await reqInit(at, pid);
+  } else if (ir.status === 429 || ir.status >= 500) {
+    await new Promise(r => setTimeout(r, 1200));
     ir = await reqInit(at, pid);
   }
   if (ir.status === 404 && pid !== drv.rootFolderId) {

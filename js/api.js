@@ -101,7 +101,11 @@ async function apiFetch(path, opts) {
     var ct = r.headers.get('Content-Type') || '';
     if (!ct.includes('application/json')) {
       var raw = await r.text().catch(function(){return '';});
-      return { ok: r.ok, status: r.status, error: r.ok ? null : ('Server error (' + r.status + '): ' + (raw.slice(0, 120) || 'Unexpected response')), _raw: raw };
+      var errMsg = 'Server temporarily busy (HTTP ' + r.status + ')';
+      if (r.status === 503) errMsg = 'Server busy / rate limit (503) — cooling down';
+      else if (r.status === 429) errMsg = 'Rate limit (429) — cooling down';
+      else if (raw && !raw.includes('<html') && !raw.includes('<!DOCTYPE')) errMsg = 'Server error (' + r.status + '): ' + raw.slice(0, 120);
+      return { ok: r.ok, status: r.status, error: r.ok ? null : errMsg, _raw: raw };
     }
     return await r.json();
   } catch(e) { return { error: e.message }; }

@@ -227,7 +227,13 @@ async function uploadFiles(fileList, targetFolderId) {
         await new Promise(function(r) { setTimeout(r, 0); });
       }
       var res = await uploadOne(fileItems[j].file, destFolder, fileItems[j].tId, null, targetDrive);
-      if (res && res.ok) uploadedCount++;
+      if (res && res.ok) {
+        uploadedCount++;
+      } else if (res && res.error && (res.error.includes('503') || res.error.includes('Server') || res.error.includes('busy') || res.error.includes('cooling'))) {
+        var st = $('upStatus');
+        if (st) st.textContent = 'Server cooling down (2.5s) before next file…';
+        await new Promise(function(r) { setTimeout(r, 2500); });
+      }
       if (window.TeleDriveMobileBg) {
         var pct = Math.round((j + 1) / fileItems.length * 100);
         window.TeleDriveMobileBg.updateProgress({
@@ -766,6 +772,11 @@ async function processFolderFiles(files) {
         updateOverallBar('upload', file.size);
       } else {
         updateOverallBar('fail', 0); // failed — still count toward progress
+        if (res && res.error && (res.error.includes('503') || res.error.includes('Server') || res.error.includes('busy') || res.error.includes('cooling'))) {
+          var st = $('upStatus');
+          if (st) st.textContent = 'Server cooling down (2.5s) before next item…';
+          await new Promise(function(r) { setTimeout(r, 2500); });
+        }
       }
     }
 
@@ -920,7 +931,7 @@ async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId
   tmAdd(tId, file.name, file.size);
   poolUploadFiles([{ file: file, tId: tId }], resolvedDriveId, targetFolderId);
 
-  var maxRetries = 2;
+  var maxRetries = 4;
   var lastErr = null;
 
   try {
@@ -1033,8 +1044,12 @@ async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId
         lastErr = e;
         if (_cancelSignal && _cancelSignal.cancelled || e.message === 'Cancelled') break;
         if (attempt < maxRetries) {
-          if (upStatus) upStatus.textContent = 'Connection glitch · Auto-retrying (' + attempt + '/' + maxRetries + ') in 1.5s…';
-          await new Promise(function(r){ setTimeout(r, 1500); });
+          var is503 = (e.message && (e.message.includes('503') || e.message.includes('Server') || e.message.includes('rate') || e.message.includes('busy') || e.message.includes('cooling')));
+          var delayMs = is503 ? Math.min(12000, 2500 * Math.pow(1.8, attempt - 1)) : 2000;
+          if (upStatus) {
+            upStatus.textContent = (is503 ? 'Server cooling down' : 'Connection glitch · Auto-retrying') + ' (' + attempt + '/' + maxRetries + ') in ' + (delayMs / 1000).toFixed(1) + 's…';
+          }
+          await new Promise(function(r){ setTimeout(r, delayMs); });
         }
       }
     }
@@ -1171,7 +1186,13 @@ async function retryAllFailedUploads() {
       var destFolder = pair.pooled.folderId || _folderId || null;
       var retryDriveId = pair.pooled.driveId || (destFolder && S.db && Array.isArray(S.db.folders) ? (S.db.folders.find(function(f){ return f.id === destFolder; })||{}).driveId : null) || _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : null);
       var res = await uploadOne(pair.pooled.file, destFolder, pair.item.id, null, retryDriveId);
-      if (res && res.ok) successCount++;
+      if (res && res.ok) {
+        successCount++;
+      } else if (res && res.error && (res.error.includes('503') || res.error.includes('Server') || res.error.includes('busy') || res.error.includes('cooling'))) {
+        var st = $('upStatus');
+        if (st) st.textContent = 'Server cooling down (2.5s) before next retry item…';
+        await new Promise(function(r) { setTimeout(r, 2500); });
+      }
       if (window.TeleDriveMobileBg) {
         var pct = Math.round((i + 1) / canRetry.length * 100);
         window.TeleDriveMobileBg.updateProgress({
