@@ -1894,6 +1894,56 @@ async function hDebugDB(req, env) {
     });
   }
 
+  if (action === 'dedup-files') {
+    if (!db.files) db.files = [];
+    const seenGoogleIds = new Set();
+    const seenKeys = new Set();
+    const cleanFiles = [];
+    let dupsRemoved = 0;
+
+    for (const f of db.files) {
+      if (!f) continue;
+      if (f.googleFileId) {
+        if (seenGoogleIds.has(f.googleFileId)) {
+          dupsRemoved++;
+          continue;
+        }
+        seenGoogleIds.add(f.googleFileId);
+      }
+      const k = (f.folderId || '') + '::' + (f.name || '').toLowerCase().trim() + '::' + (f.size || 0);
+      if (seenKeys.has(k)) {
+        dupsRemoved++;
+        continue;
+      }
+      seenKeys.add(k);
+      cleanFiles.push(f);
+    }
+    db.files = cleanFiles;
+    await uSet(env, 'td:db', db);
+
+    const tera = (db.folders||[]).find(f => (f.name||'').toLowerCase() === 'tera');
+    const subtreeFolderIds = new Set(tera ? [tera.id] : []);
+    let added = true;
+    while(added) {
+      added = false;
+      (db.folders||[]).forEach(f => {
+        if (!subtreeFolderIds.has(f.id) && f.parentId && subtreeFolderIds.has(f.parentId)) {
+          subtreeFolderIds.add(f.id);
+          added = true;
+        }
+      });
+    }
+
+    const teraSubtreeFiles = cleanFiles.filter(f => subtreeFolderIds.has(f.folderId));
+    return J({
+      totalFilesBefore: cleanFiles.length + dupsRemoved,
+      dupsRemoved,
+      totalFilesNow: cleanFiles.length,
+      teraSubtreeFoldersCount: subtreeFolderIds.size,
+      teraSubtreeFilesCount: teraSubtreeFiles.length
+    });
+  }
+
   if (action === 'auto-clean-tera') {
     const drv = (db.drives||[])[0];
     let gdb = null;
