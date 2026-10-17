@@ -1829,6 +1829,14 @@ async function hDebugDB(req, env) {
     });
   }
 
+  if (action === 'root-files') {
+    const rootFiles = (db.files||[]).filter(f => !f.folderId && !f.trashed && f.driveId === 'mv3st1820rife');
+    return J({
+      count: rootFiles.length,
+      files: rootFiles.map(f => ({ id: f.id, googleFileId: f.googleFileId, name: f.name, size: f.size }))
+    });
+  }
+
   if (action === 'read-gdrive-db') {
     const drv = (db.drives||[])[0];
     const gdb = await loadDBFromGDrive(env, drv);
