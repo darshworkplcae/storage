@@ -1855,6 +1855,68 @@ async function hDebugDB(req, env) {
     });
   }
 
+  if (action === 'analyze-tera-status') {
+    const drvId = 'mv3st1820rife';
+    const tera = (db.folders||[]).find(f => (f.name||'').toLowerCase() === 'tera' && f.driveId === drvId);
+    const subtreeFolderIds = new Set();
+    if (tera) {
+      subtreeFolderIds.add(tera.id);
+      let added;
+      do {
+        added = false;
+        for (const sf of (db.folders||[])) {
+          if (sf.driveId === drvId && !sf.trashed && sf.parentId && subtreeFolderIds.has(sf.parentId)) {
+            if (!subtreeFolderIds.has(sf.id)) {
+              subtreeFolderIds.add(sf.id);
+              added = true;
+            }
+          }
+        }
+      } while (added);
+    }
+
+    const folderMap = new Map();
+    (db.folders||[]).forEach(f => folderMap.set(f.id, f));
+
+    const folderCounts = {};
+    let filesInSubtree = 0;
+    let filesNotInSubtree = 0;
+    let filesInRoot = 0;
+    let aaaaaZip = null;
+
+    for (const f of (db.files||[])) {
+      if (f.trashed || f.driveId !== drvId) continue;
+      if (f.name && f.name.includes('aaaaa')) {
+        aaaaaZip = f;
+      }
+      if (!f.folderId) {
+        filesInRoot++;
+      } else if (subtreeFolderIds.has(f.folderId)) {
+        filesInSubtree++;
+        const fld = folderMap.get(f.folderId);
+        const fldName = fld ? fld.name : f.folderId;
+        folderCounts[fldName] = (folderCounts[fldName] || 0) + 1;
+      } else {
+        filesNotInSubtree++;
+        const fld = folderMap.get(f.folderId);
+        const fldName = fld ? fld.name : f.folderId;
+        folderCounts['OTHER: ' + fldName] = (folderCounts['OTHER: ' + fldName] || 0) + 1;
+      }
+    }
+
+    return J({
+      teraFolderId: tera ? tera.id : null,
+      teraGoogleFolderId: tera ? tera.googleFolderId : null,
+      subtreeFoldersCount: subtreeFolderIds.size,
+      totalFilesInDrive: (db.files||[]).filter(f => f.driveId === drvId && !f.trashed).length,
+      filesInSubtree,
+      filesNotInSubtree,
+      filesInRoot,
+      folderCounts,
+      aaaaaZip
+    });
+  }
+
   if (action === 'root-files') {
     const rootFiles = (db.files||[]).filter(f => !f.folderId && !f.trashed && f.driveId === 'mv3st1820rife');
     return J({
