@@ -661,7 +661,7 @@ async function hScanDrive(req,env,driveId){
           const existingByName = db.folders.find(f => f.driveId === driveId && f.parentId === parentLocalId && (f.name||'').trim().toLowerCase() === gfName.toLowerCase() && !f.trashed);
           if (existingByName) {
             localId = existingByName.id;
-            if (!existingByName.googleFolderId) existingByName.googleFolderId = gf.id;
+            existingByName.googleFolderId = gf.id;
             gFolderToLocalId.set(gf.id, localId);
           } else {
             localId = uid();
@@ -720,6 +720,7 @@ async function hScanDrive(req,env,driveId){
       const res = await fResp.json();
       if (res.files) {
         for (const item of res.files) {
+          if (item.name === '__teledrive_db__.json') continue;
           if (!item.parents || !item.parents.some(p => teleDriveGoogleFolderIds.has(p))) {
             continue; // Skip non-TeleDrive files
           }
@@ -1941,6 +1942,158 @@ async function hDebugDB(req, env) {
       files: wFiles.map(f => ({ id: f.id, googleFileId: f.googleFileId, name: f.name }))
     });
   }
+
+  if (action === 'reconcile-tera-tree') {
+    const drv = (db.drives||[]).find(d => d.id === 'mv3st1820rife') || (db.drives||[])[0];
+    if (!drv || !drv.encToken) return J({error:'No drive'}, 400);
+    const at = await gAT(env, drv.encToken);
+
+    // 1. Fetch all folders from Google Drive
+    const allGDFolders = [];
+    let fPageToken = '';
+    do {
+      const u = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and trashed = false")}&fields=nextPageToken,files(id,name,parents)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true${fPageToken ? `&pageToken=${fPageToken}` : ''}`;
+      const fResp = await fetch(u, { headers: { Authorization: `Bearer ${at}` } });
+      const fData = await fResp.json();
+      if (fData.files) allGDFolders.push(...fData.files);
+      fPageToken = fData.nextPageToken || '';
+    } while (fPageToken);
+
+    const teraRootGId = '1okbyFLXY5lhbBp6_WKqntwBZNrIjqERf';
+    const teraLocalId = 'mv73d3n3g2wy8';
+
+    // 2. Build map of real Google Drive folder paths under tera
+    const gFolderMap = new Map();
+    allGDFolders.forEach(gf => gFolderMap.set(gf.id, gf));
+
+    function getGDPath(gId) {
+      if (gId === teraRootGId) return 'tera';
+      const gf = gFolderMap.get(gId);
+      if (!gf || !gf.parents || !gf.parents[0]) return null;
+      const parentPath = getGDPath(gf.parents[0]);
+      if (!parentPath) return null;
+      return parentPath + '/' + gf.name.trim();
+    }
+
+    const gdPathToGId = new Map();
+    const realSubtreeGIds = new Set([teraRootGId]);
+    for (const gf of allGDFolders) {
+      const p = getGDPath(gf.id);
+      if (p) {
+        gdPathToGId.set(p.toLowerCase(), gf.id);
+        realSubtreeGIds.add(gf.id);
+      }
+    }
+
+    // 3. Match and repair db.folders
+    function getDBPath(fId) {
+      if (fId === teraLocalId) return 'tera';
+      const f = (db.folders||[]).find(x => x.id === fId);
+      if (!f || !f.parentId) return null;
+      const parentPath = getDBPath(f.parentId);
+      if (!parentPath) return null;
+      return parentPath + '/' + f.name.trim();
+    }
+
+    let foldersRepaired = 0;
+    const realGIdToLocalId = new Map();
+    realGIdToLocalId.set(teraRootGId, teraLocalId);
+
+    for (const f of (db.folders||[])) {
+      if (f.id === teraLocalId) {
+        f.googleFolderId = teraRootGId;
+        continue;
+      }
+      const p = getDBPath(f.id);
+      if (p) {
+        const matchingGId = gdPathToGId.get(p.toLowerCase());
+        if (matchingGId) {
+          if (f.googleFolderId !== matchingGId) {
+            f.googleFolderId = matchingGId;
+            foldersRepaired++;
+          }
+          realGIdToLocalId.set(matchingGId, f.id);
+        }
+      }
+    }
+
+    // 4. Fetch all files from Google Drive
+    const allGDFiles = [];
+    let filePageToken = '';
+    let fileFetches = 0;
+    do {
+      const u = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType != 'application/vnd.google-apps.folder' and trashed = false")}&fields=nextPageToken,files(id,name,size,mimeType,parents,createdTime)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true${filePageToken ? `&pageToken=${filePageToken}` : ''}`;
+      const resp = await fetch(u, { headers: { Authorization: `Bearer ${at}` } });
+      const data = await resp.json();
+      if (data.files) allGDFiles.push(...data.files);
+      filePageToken = data.nextPageToken || '';
+      fileFetches++;
+    } while (filePageToken && fileFetches < 10);
+
+    // 5. Reconcile all files in db.files
+    const existingFileByGId = new Map();
+    for (const f of (db.files||[])) {
+      if (f.googleFileId) existingFileByGId.set(f.googleFileId, f);
+    }
+
+    let filesReconciled = 0;
+    let filesAdded = 0;
+    const cleanFiles = [];
+
+    for (const gf of allGDFiles) {
+      if (gf.name === '__teledrive_db__.json') continue;
+      if (!gf.parents || !gf.parents.some(p => realSubtreeGIds.has(p))) continue;
+      const parentGId = gf.parents.find(p => realSubtreeGIds.has(p));
+      const targetLocalFolderId = realGIdToLocalId.get(parentGId) || teraLocalId;
+
+      let ef = existingFileByGId.get(gf.id);
+      if (ef) {
+        if (ef.folderId !== targetLocalFolderId) {
+          ef.folderId = targetLocalFolderId;
+          filesReconciled++;
+        }
+        cleanFiles.push(ef);
+      } else {
+        const newFile = {
+          id: uid(),
+          googleFileId: gf.id,
+          driveId: drv.id,
+          folderId: targetLocalFolderId,
+          name: gf.name,
+          size: parseInt(gf.size) || 0,
+          mimeType: gf.mimeType || 'application/octet-stream',
+          uploadedBy: 'tree-reconcile',
+          date: gf.createdTime || new Date().toISOString()
+        };
+        cleanFiles.push(newFile);
+        existingFileByGId.set(gf.id, newFile);
+        filesAdded++;
+      }
+    }
+
+    // Keep non-tera files as well
+    for (const f of (db.files||[])) {
+      if (f.name === '__teledrive_db__.json') continue;
+      if (f.googleFileId && existingFileByGId.has(f.googleFileId)) continue;
+      cleanFiles.push(f);
+    }
+
+    db.files = cleanFiles;
+    await uSet(env, 'td:db', db);
+
+    return J({
+      ok: true,
+      totalGDFolders: allGDFolders.length,
+      teraRealSubtreeFolders: realSubtreeGIds.size,
+      foldersRepaired,
+      totalGDFilesInTera: allGDFiles.filter(f => f.parents && f.parents.some(p => realSubtreeGIds.has(p))).length,
+      filesReconciled,
+      filesAdded,
+      totalFilesInDB: db.files.length,
+      filesInRootNow: db.files.filter(f => !f.folderId && !f.trashed && f.driveId === drv.id).length
+    });
+  }
+
 
 
   if (action === 'read-gdrive-db') {
