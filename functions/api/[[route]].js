@@ -584,6 +584,12 @@ async function hScanDrive(req,env,driveId){
   if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);
   const db=await uGet(env,'td:db');
   if(!db)return J({error:'Database not found'},404);
+  const url = new URL(req.url);
+  const pageToken = url.searchParams.get('pageToken') || '';
+  return doScanDrive(env, driveId, pageToken, db);
+}
+
+async function doScanDrive(env, driveId, initialPageToken, db){
   if(!db.folders)db.folders=[];
   if(!db.files)db.files=[];
 
@@ -592,6 +598,7 @@ async function hScanDrive(req,env,driveId){
 
   let totalAddedFiles = 0;
   let totalAddedFolders = 0;
+  let lastNextPageToken = '';
 
   try {
     for (const drv of drivesToScan) {
@@ -722,8 +729,7 @@ async function hScanDrive(req,env,driveId){
     }
 
     // Phase 4: Fetch files in bulk pages with strict subrequest safety limit
-    const url = new URL(req.url);
-    let filePageToken = url.searchParams.get('pageToken') || '';
+    let filePageToken = initialPageToken || '';
     let addedFiles = 0;
     let fileFetches = 0;
     const MAX_FILE_FETCHES = 25; // Safely below Cloudflare 50 subrequest limit!
@@ -797,6 +803,7 @@ async function hScanDrive(req,env,driveId){
     } while (filePageToken && fileFetches < MAX_FILE_FETCHES);
 
     const isPartial = !!filePageToken;
+    lastNextPageToken = filePageToken;
 
     // Refresh quota when complete
     if (!isPartial) {
@@ -818,6 +825,8 @@ async function hScanDrive(req,env,driveId){
     ok: true,
     addedFiles: totalAddedFiles,
     addedFolders: totalAddedFolders,
+    nextPageToken: lastNextPageToken,
+    partial: !!lastNextPageToken,
     totalFiles: db.files.length,
     totalFolders: db.folders.length
   });
@@ -1935,6 +1944,12 @@ async function hDebugDB(req, env) {
       },
       gdResults
     });
+  }
+
+  if (action === 'run-scan') {
+    const drvId = url.searchParams.get('driveId') || 'mv3txae19acz2';
+    const pageToken = url.searchParams.get('pageToken') || '';
+    return doScanDrive(env, drvId, pageToken, db);
   }
 
   if (action === 'drives-summary') {
