@@ -829,15 +829,40 @@ async function hUI(req,env){
       return J({error:'Google Drive token error: ' + (e2.message||e.message)}, 500);
     }
   }
-  let pid=drv.rootFolderId;
-  if(googleFolderId && googleFolderId.length > 10){
-    pid = googleFolderId;
-  } else if(folderId){
+  let pid = drv.rootFolderId;
+  if (folderId) {
     const allFolders = (db.folders||[]).concat((_memDBCache&&_memDBCache.folders)||[]);
-    const f=allFolders.find(x=>x.id===folderId || x.googleFolderId===folderId);
-    if(f&&f.googleFolderId) pid=f.googleFolderId;
-    else if(folderId.length > 20 && !folderId.includes('-')) pid=folderId;
+    const f = allFolders.find(x => x.id === folderId || x.googleFolderId === folderId);
+    if (f && f.googleFolderId) {
+      pid = f.googleFolderId;
+    } else if (f && f.name) {
+      let parentGId = drv.rootFolderId;
+      if (f.parentId) {
+        const pf = allFolders.find(x => x.id === f.parentId);
+        if (pf && pf.googleFolderId) parentGId = pf.googleFolderId;
+      }
+      try {
+        const newGId = await mkDir(at, f.name, parentGId);
+        if (newGId) {
+          f.googleFolderId = newGId;
+          pid = newGId;
+          (db.folders||[]).forEach(x => { if (x.id === f.id) x.googleFolderId = newGId; });
+          await uSet(env, 'td:db', db);
+        }
+      } catch (err) {
+        console.error('Failed to create target folder for upload:', err);
+      }
+    } else if (googleFolderId && googleFolderId.length > 10) {
+      pid = googleFolderId;
+    } else if (folderId.length > 20 && !folderId.includes('-')) {
+      pid = folderId;
+    } else {
+      return J({ error: 'Target folder is being prepared. Retrying...', retryFolder: true }, 409);
+    }
+  } else if (googleFolderId && googleFolderId.length > 10) {
+    pid = googleFolderId;
   }
+
   const reqInit = (token, targetPid) => fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name',{
     method:'POST',
     headers:{
@@ -1834,6 +1859,72 @@ async function hDebugDB(req, env) {
     return J({
       count: rootFiles.length,
       files: rootFiles.map(f => ({ id: f.id, googleFileId: f.googleFileId, name: f.name, size: f.size }))
+    });
+  }
+
+  if (action === 'relocate-root-files') {
+    const drv = (db.drives||[]).find(d => d.id === 'mv3st1820rife') || (db.drives||[])[0];
+    if (!drv) return J({error:'No drive'}, 400);
+
+    const videoNames = new Set([
+      "iphone 1797.MOV", "iphone 1768.MOV", "iphone 1759.MOV", "iphone 1753.MOV",
+      "iphone 1752.MOV", "iphone 1750.MOV", "iphone 1648.MP4", "iphone 1647.MOV",
+      "iphone 1644.MOV", "iphone 1643.MOV"
+    ]);
+
+    const whatsappFolder = (db.folders||[]).find(f => f.name === 'WhatsApp document' && !f.trashed) || { id: 'mvap0ja7l49aw', googleFolderId: '1ifs-Tccb6631E7rw7vrlBRi9G44OPw0e' };
+    const videoFolder = (db.folders||[]).find(f => f.name === 'Videos' && !f.trashed) || { id: 'mv7ehyiuz8udd', googleFolderId: '1Ez5Ck-9jo1OdmcoC1BVepKnYTNyinX0I' };
+
+    let toWhatsApp = 0;
+    let toVideos = 0;
+    let removedDbJson = 0;
+    const cleanFiles = [];
+    const filesToMoveOnGDrive = [];
+
+    for (const f of (db.files||[])) {
+      if (!f) continue;
+      if (f.name === '__teledrive_db__.json') {
+        removedDbJson++;
+        continue;
+      }
+      if (!f.folderId && !f.trashed && f.driveId === drv.id) {
+        if (videoNames.has(f.name)) {
+          f.folderId = videoFolder.id;
+          toVideos++;
+          filesToMoveOnGDrive.push({
+            id: f.id,
+            googleFileId: f.googleFileId,
+            name: f.name,
+            targetGoogleFolderId: videoFolder.googleFolderId
+          });
+        } else {
+          f.folderId = whatsappFolder.id;
+          toWhatsApp++;
+          filesToMoveOnGDrive.push({
+            id: f.id,
+            googleFileId: f.googleFileId,
+            name: f.name,
+            targetGoogleFolderId: whatsappFolder.googleFolderId
+          });
+        }
+      }
+      cleanFiles.push(f);
+    }
+
+    db.files = cleanFiles;
+    await uSet(env, 'td:db', db);
+
+    let at = '';
+    try { at = await gAT(env, drv.encToken); } catch(e){}
+
+    return J({
+      ok: true,
+      relocatedToWhatsApp: toWhatsApp,
+      relocatedToVideos: toVideos,
+      removedDbJson,
+      rootFolderId: drv.rootFolderId,
+      accessToken: at,
+      filesToMoveOnGDrive
     });
   }
 
