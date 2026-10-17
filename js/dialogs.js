@@ -1026,18 +1026,45 @@ async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId
           } catch(e) {}
         }
 
-        // Step 3: Save metadata to our DB
+        // Step 3: Save metadata to our DB with guaranteed retry loop
         if (upStatus) upStatus.textContent = 'Saving…';
         var activeDriveId = resolvedDriveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : null);
-        await apiUploadComplete({
-          fileLocalId: init.fileLocalId,
-          googleFileId: result.googleFileId,
-          driveId: activeDriveId,
-          folderId: destFolder,
-          name: file.name,
-          size: file.size,
-          mimeType: file.type || 'application/octet-stream'
-        });
+        var saveOk = false;
+        var saveAttempts = 0;
+        var maxSaveAttempts = 5;
+        var lastSaveErr = null;
+
+        while (!saveOk && saveAttempts < maxSaveAttempts) {
+          saveAttempts++;
+          try {
+            var saveRes = await apiUploadComplete({
+              fileLocalId: init.fileLocalId,
+              googleFileId: result.googleFileId,
+              driveId: activeDriveId,
+              folderId: destFolder,
+              name: file.name,
+              size: file.size,
+              mimeType: file.type || 'application/octet-stream'
+            });
+            if (saveRes && saveRes.ok) {
+              saveOk = true;
+              break;
+            } else {
+              lastSaveErr = saveRes ? (saveRes.error || 'Server busy') : 'Empty response';
+            }
+          } catch(e) {
+            lastSaveErr = e.message;
+          }
+
+          if (saveAttempts < maxSaveAttempts) {
+            if (upStatus) upStatus.textContent = 'Server cooling down… retrying (' + saveAttempts + '/' + maxSaveAttempts + ')';
+            await new Promise(function(r) { setTimeout(r, 1200 * saveAttempts); });
+          }
+        }
+
+        if (!saveOk) {
+          throw new Error('File uploaded to Google Drive, but database registration failed: ' + (lastSaveErr || 'Server 503 limit. Retrying later.'));
+        }
 
         tmDone(tId, true);
         toast(file.name + ' uploaded!', 'success');

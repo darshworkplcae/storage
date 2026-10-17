@@ -222,7 +222,7 @@ async function syncCurrentDrive() {
   icons.forEach(function(ic) { ic.classList.add('fa-spin'); });
   try {
     toast('Syncing with Google Drive…', 'info', 2000);
-    S.db = await apiFetchDB();
+    S.db = await apiFetch('db?refresh=gdrive');
     if (typeof cacheDBLocally === 'function' && S.db) cacheDBLocally(S.db);
     if (S.db && S.db.files && typeof tmSyncWithServer === 'function') tmSyncWithServer(S.db.files);
     syncLiveQuota();

@@ -978,7 +978,7 @@ async function hUC(req,env){
   if(drv && typeof size === 'number') drv.usedBytes = (drv.usedBytes || 0) + size;
   if(!db.activityLog) db.activityLog=[];
   db.activityLog.unshift({id:uid(),type:'upload',name,size,driveId,driveLetter:drv?drv.email:'?',ts:new Date().toISOString()});
-  if(db.activityLog.length>500) db.activityLog=db.activityLog.slice(0,500);
+  if(db.activityLog.length>100) db.activityLog=db.activityLog.slice(0,100);
   await uSet(env,'td:db',db);
   return J({ok:true});
 }
