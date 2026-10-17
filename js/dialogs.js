@@ -1990,19 +1990,121 @@ async function downloadFile(fileLocalId) {
 async function openMedia(fileLocalId) {
   var f = (S.db && S.db.files || []).find(function (x) { return x.id === fileLocalId; });
   if (!f) return;
-  var isAdmin = S.ses && S.ses.role === 'admin';
-  var canDownload = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDownload !== false;
-  var driveId = f.driveId || _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : '');
-  var mediaUrl = getFileDownloadUrl(f.googleFileId, driveId, true);
-  var dlUrl = getFileDownloadUrl(f.googleFileId, driveId, false);
-  var cfg = ftCfg(f.name, f.mimeType);
-  var isHeic = /\.(heic|heif)$/i.test(f.name) || (f.mimeType && f.mimeType.toLowerCase().includes('heic'));
-  var displayImgUrl = isHeic ? (mediaUrl + '&thumb=1&sz=s2048') : mediaUrl;
-  var ov = document.createElement('div'); ov.className = 'media-ov';
-  var dlBtnHtml = canDownload ? '<a href="' + dlUrl + '" class="icon-btn" title="Download" download><i class="fas fa-download"></i></a>' : '';
-  var noDlAttrs = !canDownload ? ' controlsList="nodownload noplaybackrate" disablePictureInPicture oncontextmenu="return false;" ' : ' controlsList="nodownload" ';
-  ov.innerHTML = '<div class="media-hd"><div class="media-title"><i class="fas ' + cfg.icon + '" style="color:' + cfg.col + '"></i> ' + esc(f.name) + '</div><div style="display:flex;gap:.5rem">' + dlBtnHtml + '<button class="icon-btn" onclick="this.closest(\'.media-ov\').remove()"><i class="fas fa-times"></i></button></div></div><div class="media-body">' + (cfg.cat === 'image' ? '<img class="media-img" src="' + displayImgUrl + '" alt="' + esc(f.name) + '" data-fallback="' + mediaUrl + '" onerror="if(this.src!==this.dataset.fallback&&!this.dataset.triedFallback){this.dataset.triedFallback=\'1\';this.src=this.dataset.fallback;}" oncontextmenu="' + (!canDownload ? 'return false;' : '') + '">' : cfg.cat === 'video' ? '<video class="media-vid" src="' + mediaUrl + '" controls' + noDlAttrs + 'autoplay playsinline></video>' : cfg.cat === 'audio' ? '<audio src="' + mediaUrl + '" controls' + noDlAttrs + 'autoplay style="width:80%;max-width:500px"></audio>' : '<div style="text-align:center;padding:2rem"><i class="fas fa-file" style="font-size:3rem;color:var(--text2)"></i><p style="margin:1rem 0">Preview not available for this file type</p>' + (canDownload ? '<a href="' + dlUrl + '" class="btn-primary"><i class="fas fa-download"></i> Download File</a>' : '') + '</div>') + '</div>';
-  ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
+
+  // Collect all files currently visible in the active folder/drive context
+  var allContextFiles = (S.db && S.db.files || []).filter(function (x) {
+    if (x.trashed) return false;
+    if (_folderId) return x.folderId === _folderId && x.driveId === (f.driveId || _driveId);
+    return (!x.folderId) && x.driveId === (f.driveId || _driveId);
+  });
+  if (!allContextFiles.length) allContextFiles = [f];
+
+  // Apply current sort order matching the UI
+  var sortKey = (typeof S !== 'undefined' && S.sort) || 'name';
+  allContextFiles.sort(function (a, b) {
+    return sortKey === 'size' ? (b.size || 0) - (a.size || 0) :
+           sortKey === 'date' ? new Date(b.date) - new Date(a.date) :
+           (a.name || '').localeCompare(b.name || '');
+  });
+
+  var curIdx = allContextFiles.findIndex(function (x) { return x.id === fileLocalId; });
+  if (curIdx === -1) {
+    allContextFiles.unshift(f);
+    curIdx = 0;
+  }
+
+  var existingOv = document.querySelector('.media-ov');
+  if (existingOv) existingOv.remove();
+
+  var ov = document.createElement('div');
+  ov.className = 'media-ov';
+
+  function renderCurrentFile(index) {
+    if (index < 0 || index >= allContextFiles.length) return;
+    curIdx = index;
+    var curFile = allContextFiles[curIdx];
+
+    var isAdmin = S.ses && S.ses.role === 'admin';
+    var canDownload = isAdmin || !S.db || !S.db.policy || S.db.policy.allowUserDownload !== false;
+    var driveId = curFile.driveId || _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : '');
+    var mediaUrl = getFileDownloadUrl(curFile.googleFileId, driveId, true);
+    var dlUrl = getFileDownloadUrl(curFile.googleFileId, driveId, false);
+    var cfg = ftCfg(curFile.name, curFile.mimeType);
+    var isHeic = /\.(heic|heif)$/i.test(curFile.name) || (curFile.mimeType && curFile.mimeType.toLowerCase().includes('heic'));
+    var displayImgUrl = isHeic ? (mediaUrl + '&thumb=1&sz=s2048') : mediaUrl;
+
+    var dlBtnHtml = canDownload ? '<a href="' + dlUrl + '" class="icon-btn" title="Download ' + esc(curFile.name) + '" download><i class="fas fa-download"></i></a>' : '';
+    var noDlAttrs = !canDownload ? ' controlsList="nodownload noplaybackrate" disablePictureInPicture oncontextmenu="return false;" ' : ' controlsList="nodownload" ';
+
+    var counterHtml = allContextFiles.length > 1 ? '<span class="media-counter-pill">' + (curIdx + 1) + ' / ' + allContextFiles.length + '</span>' : '';
+
+    var prevBtnHtml = allContextFiles.length > 1 ? '<button class="media-nav-btn media-prev" title="Previous File (Left Arrow)" style="' + (curIdx <= 0 ? 'display:none;' : '') + '" onclick="window._mediaNavPrev()"><i class="fas fa-chevron-left"></i></button>' : '';
+    var nextBtnHtml = allContextFiles.length > 1 ? '<button class="media-nav-btn media-next" title="Next File (Right Arrow)" style="' + (curIdx >= allContextFiles.length - 1 ? 'display:none;' : '') + '" onclick="window._mediaNavNext()"><i class="fas fa-chevron-right"></i></button>' : '';
+
+    var bodyContent = '';
+    if (cfg.cat === 'image') {
+      bodyContent = '<img class="media-img" src="' + displayImgUrl + '" alt="' + esc(curFile.name) + '" data-fallback="' + mediaUrl + '" onerror="if(this.src!==this.dataset.fallback&&!this.dataset.triedFallback){this.dataset.triedFallback=\'1\';this.src=this.dataset.fallback;}" oncontextmenu="' + (!canDownload ? 'return false;' : '') + '">';
+    } else if (cfg.cat === 'video') {
+      bodyContent = '<video class="media-vid" src="' + mediaUrl + '" controls' + noDlAttrs + 'autoplay playsinline></video>';
+    } else if (cfg.cat === 'audio') {
+      bodyContent = '<audio src="' + mediaUrl + '" controls' + noDlAttrs + 'autoplay style="width:80%;max-width:500px"></audio>';
+    } else {
+      bodyContent = '<div style="text-align:center;padding:2rem"><i class="fas fa-file" style="font-size:3rem;color:var(--text2)"></i><p style="margin:1rem 0">Preview not available for this file type</p>' + (canDownload ? '<a href="' + dlUrl + '" class="btn-primary"><i class="fas fa-download"></i> Download File</a>' : '') + '</div>';
+    }
+
+    ov.innerHTML = '<div class="media-hd">' +
+      '<div class="media-title">' +
+      '<i class="fas ' + cfg.icon + '" style="color:' + cfg.col + '"></i> ' +
+      '<span class="truncate" style="max-width:calc(100vw - 230px)">' + esc(curFile.name) + '</span>' +
+      counterHtml +
+      '</div>' +
+      '<div style="display:flex;gap:.5rem;align-items:center">' +
+      dlBtnHtml +
+      '<button class="icon-btn" onclick="window._closeMediaOverlay()"><i class="fas fa-times"></i></button>' +
+      '</div></div>' +
+      '<div class="media-body" style="position:relative">' +
+      prevBtnHtml +
+      bodyContent +
+      nextBtnHtml +
+      '</div>';
+  }
+
+  window._mediaNavPrev = function() {
+    if (curIdx > 0) renderCurrentFile(curIdx - 1);
+  };
+  window._mediaNavNext = function() {
+    if (curIdx < allContextFiles.length - 1) renderCurrentFile(curIdx + 1);
+  };
+  window._closeMediaOverlay = function() {
+    window.removeEventListener('keydown', handleMediaKey);
+    ov.remove();
+  };
+
+  function handleMediaKey(e) {
+    if (!document.body.contains(ov)) {
+      window.removeEventListener('keydown', handleMediaKey);
+      return;
+    }
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      window._mediaNavPrev();
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      window._mediaNavNext();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      window._closeMediaOverlay();
+    }
+  }
+
+  window.addEventListener('keydown', handleMediaKey);
+  ov.addEventListener('click', function (e) {
+    if (e.target === ov || e.target.classList.contains('media-body')) {
+      window._closeMediaOverlay();
+    }
+  });
+
+  renderCurrentFile(curIdx);
   document.body.appendChild(ov);
 }
 

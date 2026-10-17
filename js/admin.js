@@ -29,7 +29,7 @@ function renderSettingsPage() {
 
     // Connected drives
     '<div class="settings-section">',
-    '<h3 class="sect-title"><i class="fas fa-database"></i> Connected Drives</h3>',
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:8px"><h3 class="sect-title" style="margin-bottom:0"><i class="fas fa-database"></i> Connected Drives</h3><button class="btn-ghost sm" onclick="scanDriveFiles(\'all\')" title="Scan all connected Google Drives for any new folders and files"><i class="fas fa-rotate"></i> Sync All Drives</button></div>',
     drives.length===0
       ? '<div class="empty-small"><i class="fas fa-hard-drive"></i><p>No drives connected yet</p></div>'
       : '<div class="drives-grid">' + drives.map(function(d){

@@ -518,10 +518,10 @@ async function hDB(req,env){
   const guestDrives = allDrives;
   const guestDriveIds = guestDrives.map(d => d.id);
 
-  // Check which guest drives are unlocked (either have no password, or token valid)
+  // Check which guest drives are unlocked (either open, have no password, or token valid)
   const unlockedDriveIds = new Set();
   for (const d of guestDrives) {
-    if (!d.hasPassword) {
+    if (!d.hasPassword || openIds.includes(d.id)) {
       unlockedDriveIds.add(d.id);
     } else {
       const isUnlocked = await vDriveToken(req, env, d.id);
@@ -584,13 +584,20 @@ async function hScanDrive(req,env,driveId){
   if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);
   const db=await uGet(env,'td:db');
   if(!db)return J({error:'Database not found'},404);
-  const drv=(db.drives||[]).find(d=>d.id===driveId);
-  if(!drv)return J({error:'Drive not found'},404);
-  const at=await gAT(env,drv.encToken);
   if(!db.folders)db.folders=[];
   if(!db.files)db.files=[];
 
+  const drivesToScan = (driveId === 'all' || !driveId) ? (db.drives||[]) : (db.drives||[]).filter(d=>d.id===driveId);
+  if(!drivesToScan.length)return J({error:'Drive not found'},404);
+
+  let totalAddedFiles = 0;
+  let totalAddedFolders = 0;
+
   try {
+    for (const drv of drivesToScan) {
+      if (!drv || !drv.encToken) continue;
+      const at = await gAT(env, drv.encToken);
+      const curDriveId = drv.id;
     // Phase 1: Fetch all folders from Google Drive in bulk (pageSize=1000 uses only 1-2 subrequests!)
     const allGoogleFolders = [];
     let fPageToken = '';
@@ -643,7 +650,7 @@ async function hScanDrive(req,env,driveId){
     gFolderToLocalId.set(rootId, null);
 
     for (const f of db.folders) {
-      if (f.driveId === driveId && f.googleFolderId) {
+      if (f.driveId === curDriveId && f.googleFolderId) {
         gFolderToLocalId.set(f.googleFolderId, f.id);
       }
     }
@@ -658,7 +665,7 @@ async function hScanDrive(req,env,driveId){
           const parentLocalId = (parentGoogleId === rootId) ? null : (gFolderToLocalId.get(parentGoogleId) || null);
           const gfName = (gf.name || 'Untitled Folder').trim();
           // Safety: avoid duplicate folders with matching name under the same parent
-          const existingByName = db.folders.find(f => f.driveId === driveId && f.parentId === parentLocalId && (f.name||'').trim().toLowerCase() === gfName.toLowerCase() && !f.trashed);
+          const existingByName = db.folders.find(f => f.driveId === curDriveId && f.parentId === parentLocalId && (f.name||'').trim().toLowerCase() === gfName.toLowerCase() && !f.trashed);
           if (existingByName) {
             localId = existingByName.id;
             existingByName.googleFolderId = gf.id;
@@ -667,7 +674,7 @@ async function hScanDrive(req,env,driveId){
             localId = uid();
             const newFold = {
               id: localId,
-              driveId,
+              driveId: curDriveId,
               parentId: parentLocalId,
               name: gfName,
               googleFolderId: gf.id,
@@ -732,7 +739,7 @@ async function hScanDrive(req,env,driveId){
             eFile = {
               id: uid(),
               googleFileId: item.id,
-              driveId,
+              driveId: curDriveId,
               folderId: parentLocalId,
               name: item.name || 'Untitled',
               size: parseInt(item.size, 10) || 0,
@@ -744,7 +751,7 @@ async function hScanDrive(req,env,driveId){
             existingGoogleFileIds.set(item.id, eFile);
             addedFiles++;
           } else {
-            if (eFile.driveId !== driveId) eFile.driveId = driveId;
+            if (eFile.driveId !== curDriveId) eFile.driveId = curDriveId;
             if (eFile.folderId !== parentLocalId) eFile.folderId = parentLocalId;
             if (typeof item.size === 'string' && !eFile.size) eFile.size = parseInt(item.size, 10) || 0;
           }
@@ -767,16 +774,18 @@ async function hScanDrive(req,env,driveId){
       } catch(e) {}
     }
 
-    await uSet(env, 'td:db', db);
-    return J({
-      ok: true,
-      partial: isPartial,
-      nextPageToken: filePageToken,
-      addedFiles,
-      addedFolders,
-      totalFiles: db.files.length,
-      totalFolders: db.folders.length
-    });
+    totalAddedFiles += addedFiles;
+    totalAddedFolders += addedFolders;
+  } // end of drivesToScan loop
+
+  await uSet(env, 'td:db', db);
+  return J({
+    ok: true,
+    addedFiles: totalAddedFiles,
+    addedFolders: totalAddedFolders,
+    totalFiles: db.files.length,
+    totalFolders: db.folders.length
+  });
   } catch(err) {
     return J({ error: 'Scan failed: ' + (err.message || 'Google Drive API error') }, 500);
   }
@@ -2176,50 +2185,68 @@ async function hDebugDB(req, env) {
   }
 
   if (action === 'scan-gdrive') {
-    const drv = (db.drives||[])[0];
-    if (!drv || !drv.encToken) return J({error:'No drive token'}, 400);
-    const at = await gAT(env, drv.encToken);
-    let pageToken = '';
-    const fetchedGoogleFiles = [];
-    let pageCount = 0;
-    do {
-      const u = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType != 'application/vnd.google-apps.folder' and trashed = false")}&fields=nextPageToken,files(id,name,size,mimeType,parents,createdTime)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true${pageToken ? `&pageToken=${pageToken}` : ''}`;
-      const resp = await fetch(u, { headers: { Authorization: `Bearer ${at}` } });
-      const data = await resp.json();
-      if (data.files) fetchedGoogleFiles.push(...data.files);
-      pageToken = data.nextPageToken || '';
-      pageCount++;
-    } while (pageToken && pageCount < 10);
+    if (!db.drives || !db.drives.length) return J({error:'No drives connected'}, 400);
+    if (!db.files) db.files = [];
+    if (!db.folders) db.folders = [];
 
+    let totalFetched = 0;
+    let missingImportedCount = 0;
     const existingGIds = new Set((db.files||[]).map(f => f.googleFileId).filter(Boolean));
-    const missingInDB = fetchedGoogleFiles.filter(gf => !existingGIds.has(gf.id));
 
-    if (missingInDB.length > 0) {
-      if (!db.files) db.files = [];
-      const gToLocalFold = new Map();
-      (db.folders||[]).forEach(f => { if (f.googleFolderId) gToLocalFold.set(f.googleFolderId, f.id); });
-      missingInDB.forEach(gf => {
-        const parentGId = (gf.parents && gf.parents[0]) || null;
-        const localFoldId = parentGId ? (gToLocalFold.get(parentGId) || null) : null;
-        db.files.push({
-          id: uid(),
-          googleFileId: gf.id,
-          driveId: drv.id,
-          folderId: localFoldId,
-          name: gf.name,
-          size: parseInt(gf.size) || 0,
-          mimeType: gf.mimeType || 'application/octet-stream',
-          uploadedBy: 'sync-recovery',
-          date: gf.createdTime || new Date().toISOString()
-        });
-      });
+    for (const drv of db.drives) {
+      if (!drv || !drv.encToken) continue;
+      try {
+        const at = await gAT(env, drv.encToken);
+        let pageToken = '';
+        const fetchedGoogleFiles = [];
+        let pageCount = 0;
+        do {
+          const u = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType != 'application/vnd.google-apps.folder' and trashed = false")}&fields=nextPageToken,files(id,name,size,mimeType,parents,createdTime)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true${pageToken ? `&pageToken=${pageToken}` : ''}`;
+          const resp = await fetch(u, { headers: { Authorization: `Bearer ${at}` } });
+          if (!resp.ok) break;
+          const data = await resp.json();
+          if (data.files) fetchedGoogleFiles.push(...data.files);
+          pageToken = data.nextPageToken || '';
+          pageCount++;
+        } while (pageToken && pageCount < 10);
+
+        totalFetched += fetchedGoogleFiles.length;
+        const missingInDB = fetchedGoogleFiles.filter(gf => !existingGIds.has(gf.id));
+
+        if (missingInDB.length > 0) {
+          const gToLocalFold = new Map();
+          (db.folders||[]).forEach(f => { if (f.googleFolderId && f.driveId === drv.id) gToLocalFold.set(f.googleFolderId, f.id); });
+          missingInDB.forEach(gf => {
+            const parentGId = (gf.parents && gf.parents[0]) || null;
+            const localFoldId = parentGId ? (gToLocalFold.get(parentGId) || null) : null;
+            const newF = {
+              id: uid(),
+              googleFileId: gf.id,
+              driveId: drv.id,
+              folderId: localFoldId,
+              name: gf.name,
+              size: parseInt(gf.size) || 0,
+              mimeType: gf.mimeType || 'application/octet-stream',
+              uploadedBy: 'sync-recovery',
+              date: gf.createdTime || new Date().toISOString()
+            };
+            db.files.push(newF);
+            existingGIds.add(gf.id);
+          });
+          missingImportedCount += missingInDB.length;
+        }
+      } catch(e) {
+        console.error('scan-gdrive drive error:', drv.id, e);
+      }
+    }
+
+    if (missingImportedCount > 0) {
       await uSet(env, 'td:db', db);
     }
 
     return J({
-      totalOnGoogleDrive: fetchedGoogleFiles.length,
-      previouslyInDB: (db.files||[]).length - missingInDB.length,
-      missingImportedCount: missingInDB.length,
+      totalOnGoogleDrive: totalFetched,
+      missingImportedCount: missingImportedCount,
       nowInDB: (db.files||[]).length
     });
   }

@@ -968,7 +968,7 @@
       }
     }
 
-    // ─── TAB 1: WHO PAYS WHOM (CLEAN STRAIGHT LIST) ───────────────────────────
+    // ─── TAB 1: WHO PAYS WHOM (EXPANDABLE TREE SETTLEMENTS) ───────────────────
     function renderSettlementsList() {
       var container = $('settlementsList');
       container.innerHTML = '';
@@ -980,48 +980,143 @@
         return;
       }
 
+      // Group by debtor (fromUser) so each debtor only appears ONCE
+      var debtorMap = {};
+      var debtorOrder = [];
       list.forEach(function(s) {
-        var row = document.createElement('div');
-        var isMeDebtor = state.currentUser && state.currentUser.username.toLowerCase() === s.fromUser.toLowerCase();
-        var isMeCreditor = state.currentUser && state.currentUser.username.toLowerCase() === s.toUser.toLowerCase();
+        var debtor = s.fromUser;
+        if (!debtorMap[debtor]) {
+          debtorMap[debtor] = {
+            debtor: debtor,
+            totalDue: 0,
+            payments: []
+          };
+          debtorOrder.push(debtor);
+        }
+        debtorMap[debtor].totalDue += (s.amount || 0);
+        debtorMap[debtor].payments.push(s);
+      });
 
-        var borderCol = isMeDebtor ? 'border-[#c96b32]/60 bg-[#c96b32]/10 shadow-sm' : 'border-[var(--border)] bg-[var(--card)]';
-        row.className = 'p-3 sm:p-3.5 rounded-xl border transition flex items-center justify-between gap-3 text-xs ' + borderCol;
+      debtorOrder.forEach(function(debtorKey, groupIndex) {
+        var group = debtorMap[debtorKey];
+        var fromUserObj = state.users.find(function(u) { return u.username.toLowerCase() === group.debtor.toLowerCase(); });
+        var fromName = fromUserObj ? fromUserObj.name : group.debtor;
+        var isMeDebtor = state.currentUser && state.currentUser.username.toLowerCase() === group.debtor.toLowerCase();
 
-        var fromUserObj = state.users.find(u => u.username === s.fromUser);
-        var toUserObj = state.users.find(u => u.username === s.toUser);
-        var fromName = fromUserObj ? fromUserObj.name : s.fromUser;
-        var toName = toUserObj ? toUserObj.name : s.toUser;
-
-        var pendingItem = (state.tripData.settlements || []).find(function(x) {
-          return x.fromUser === s.fromUser && x.toUser === s.toUser && x.status === 'pending';
+        // Check if any payment in this group has pending verification
+        var hasPending = group.payments.some(function(s) {
+          return (state.tripData.settlements || []).some(function(x) {
+            return x.fromUser.toLowerCase() === s.fromUser.toLowerCase() &&
+                   x.toUser.toLowerCase() === s.toUser.toLowerCase() &&
+                   x.status === 'pending';
+          });
         });
 
-        // Left info
-        var left = '<div class="flex items-center gap-2.5 min-w-0">' +
+        var cardWrapper = document.createElement('div');
+        var borderCol = isMeDebtor ? 'border-[#c96b32]/60 bg-[#c96b32]/10 shadow-sm' : 'border-[var(--border)] bg-[var(--card)]';
+        cardWrapper.className = 'rounded-2xl border transition overflow-hidden ' + borderCol;
+
+        var treeId = 'debtorTree_' + groupIndex;
+        var arrowId = 'debtorArrow_' + groupIndex;
+        // Auto-expand if only 1 debtor, or if user is this debtor, or if has pending verification
+        var isAutoExpanded = isMeDebtor || hasPending;
+
+        // Debtor Main Header
+        var header = document.createElement('div');
+        header.className = 'p-3.5 sm:p-4 flex items-center justify-between gap-3 cursor-pointer hover:bg-[var(--card-hover)] transition select-none';
+        header.onclick = function() {
+          toggleDebtorTree(treeId, arrowId);
+        };
+
+        var left = '<div class="flex items-center gap-3 min-w-0">' +
+          '<div class="w-6 h-6 rounded-lg bg-[var(--bg-surface)] border border-[var(--border)] flex items-center justify-center text-[var(--clay-light)] shrink-0 transition-transform duration-200 ' + (isAutoExpanded ? 'rotate-90' : '') + '" id="' + arrowId + '">' +
+          '<i class="fas fa-chevron-right text-[11px]"></i>' +
+          '</div>' +
           '<div class="w-8 h-8 rounded-full bg-[var(--bg-surface)] border border-[var(--border)] flex items-center justify-center font-bold text-white text-xs shrink-0">' + fromName[0] + '</div>' +
-          '<div class="min-w-0"><div class="font-bold text-white truncate text-xs sm:text-sm">' + fromName + (isMeDebtor ? ' <b class="text-[#e0834a]">(You)</b>' : '') + ' owes <span class="text-[var(--clay-light)] font-bold">' + toName + (isMeCreditor ? ' (You)' : '') + '</span></div>' +
-          '<div class="text-[11px] text-[var(--text-muted)] font-mono truncate">' + (s.payeeUpi ? 'UPI: ' + s.payeeUpi : 'No UPI set') + '</div></div></div>';
+          '<div class="min-w-0">' +
+          '<div class="font-bold text-white text-xs sm:text-sm truncate flex items-center gap-1.5">' +
+          fromName + (isMeDebtor ? ' <span class="text-[#e0834a] text-xs font-bold">(You)</span>' : '') +
+          '</div>' +
+          '<div class="text-[11px] text-[var(--text-muted)] flex items-center gap-1.5">' +
+          '<span>' + (group.payments.length === 1 ? '1 settlement' : group.payments.length + ' settlements') + '</span>' +
+          (hasPending ? '<span class="text-amber-400 font-semibold">· Verification Pending</span>' : '') +
+          '</div>' +
+          '</div></div>';
 
-        // Right info: Clean amount + action
-        var right = '<div class="flex items-center gap-2.5 shrink-0">' +
-          '<span class="text-sm sm:text-base font-black text-amber-400">₹' + s.amount.toLocaleString() + '</span>';
+        var right = '<div class="flex items-center gap-3 shrink-0">' +
+          '<div class="text-right">' +
+          '<div class="text-xs text-[var(--text-muted)]">Total Due</div>' +
+          '<span class="text-sm sm:text-base font-black text-amber-400">₹' + group.totalDue.toLocaleString() + '</span>' +
+          '</div>' +
+          '</div>';
 
-        if (pendingItem) {
-          right += '<span class="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-semibold flex items-center gap-1"><i class="fas fa-clock text-xs"></i> Verification Pending</span>';
-        } else if (isMeDebtor) {
-          // Logged in user actually owes this money: Show Pay button!
-          right += '<button onclick="openPayDialog(\'' + s.toUser + '\', \'' + toName + '\', ' + s.amount + ', \'' + (s.payeeUpi || '') + '\', \'' + (s.payeeQr || '') + '\')" class="tap-active px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20"><i class="fas fa-qrcode"></i> Pay via QR</button>';
-        } else if (!state.currentUser) {
-          // Not logged in: Show neutral info or login
-          right += '<button onclick="openLoginForUser(\'' + s.fromUser + '\')" class="tap-active px-2.5 py-1 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--card-hover)] text-[var(--text-muted)] hover:text-white border border-[var(--border)] text-[11px]">Login to Pay</button>';
-        }
+        header.innerHTML = left + right;
+        cardWrapper.appendChild(header);
 
-        right += '</div>';
+        // Sub-tree for payments
+        var tree = document.createElement('div');
+        tree.id = treeId;
+        tree.className = 'px-3.5 pb-3.5 pt-1 space-y-2 border-t border-[var(--border-subtle)] ' + (isAutoExpanded ? '' : 'hidden');
 
-        row.innerHTML = left + right;
-        container.appendChild(row);
+        group.payments.forEach(function(s) {
+          var toUserObj = state.users.find(function(u) { return u.username.toLowerCase() === s.toUser.toLowerCase(); });
+          var toName = toUserObj ? toUserObj.name : s.toUser;
+          var isMeCreditor = state.currentUser && state.currentUser.username.toLowerCase() === s.toUser.toLowerCase();
+
+          var pendingItem = (state.tripData.settlements || []).find(function(x) {
+            return x.fromUser.toLowerCase() === s.fromUser.toLowerCase() &&
+                   x.toUser.toLowerCase() === s.toUser.toLowerCase() &&
+                   x.status === 'pending';
+          });
+
+          var subRow = document.createElement('div');
+          subRow.className = 'p-3 rounded-xl bg-[var(--bg-surface)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs';
+
+          var subLeft = '<div class="flex items-center gap-2.5 min-w-0">' +
+            '<span class="text-[var(--clay-light)] font-bold text-sm shrink-0">↳</span>' +
+            '<div class="min-w-0">' +
+            '<div class="text-white text-xs sm:text-sm font-semibold truncate">' +
+            'Pay to <b class="text-[var(--clay-light)] font-bold">' + toName + '</b>' + (isMeCreditor ? ' <span class="text-emerald-400 font-bold">(You)</span>' : '') +
+            '</div>' +
+            '<div class="text-[11px] text-[var(--text-muted)] font-mono truncate">' + (s.payeeUpi ? 'UPI: ' + s.payeeUpi : 'No UPI set') + '</div>' +
+            '</div></div>';
+
+          var subRight = '<div class="flex items-center gap-2.5 justify-between sm:justify-end shrink-0">' +
+            '<span class="text-xs sm:text-sm font-black text-amber-400">₹' + s.amount.toLocaleString() + '</span>';
+
+          if (pendingItem) {
+            subRight += '<span class="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-semibold flex items-center gap-1"><i class="fas fa-clock text-xs"></i> Verification Pending</span>';
+          } else if (isMeDebtor) {
+            subRight += '<button onclick="openPayDialog(\'' + s.toUser + '\', \'' + toName + '\', ' + s.amount + ', \'' + (s.payeeUpi || '') + '\', \'' + (s.payeeQr || '') + '\')" class="tap-active px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20"><i class="fas fa-qrcode"></i> Pay ₹' + s.amount.toLocaleString() + '</button>';
+          } else if (isMeCreditor) {
+            subRight += '<button onclick="openConcessionFor(\'' + s.fromUser + '\')" class="tap-active px-2.5 py-1 rounded-lg bg-[var(--card)] hover:bg-[var(--card-hover)] text-emerald-400 border border-emerald-500/30 text-[11px] flex items-center gap-1"><i class="fas fa-hand-holding-dollar"></i> Record Cash</button>';
+          } else if (!state.currentUser) {
+            subRight += '<button onclick="openLoginForUser(\'' + s.fromUser + '\')" class="tap-active px-2.5 py-1 rounded-lg bg-[var(--card)] hover:bg-[var(--card-hover)] text-[var(--text-muted)] hover:text-white border border-[var(--border)] text-[11px]">Login to Pay</button>';
+          }
+
+          subRight += '</div>';
+
+          subRow.innerHTML = subLeft + subRight;
+          tree.appendChild(subRow);
+        });
+
+        cardWrapper.appendChild(tree);
+        container.appendChild(cardWrapper);
       });
+    }
+
+    function toggleDebtorTree(treeId, arrowId) {
+      var tree = $(treeId);
+      var arrow = $(arrowId);
+      if (!tree) return;
+      var isHidden = tree.classList.contains('hidden');
+      if (isHidden) {
+        tree.classList.remove('hidden');
+        if (arrow) arrow.classList.add('rotate-90');
+      } else {
+        tree.classList.add('hidden');
+        if (arrow) arrow.classList.remove('rotate-90');
+      }
     }
 
     function openLoginForUser(username) {
