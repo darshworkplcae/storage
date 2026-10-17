@@ -1897,6 +1897,8 @@ async function hDebugDB(req, env) {
       teraFiles: teraFiles.map(f => ({id:f.id, name:f.name, size:f.size})),
       allFolders: (db.folders||[]).map(f => ({id:f.id, name:f.name, parentId:f.parentId, googleFolderId:f.googleFolderId}))
     });
+  }
+
   if (action === 'kenjalgad-detail') {
     const kenjFolders = (db.folders||[]).filter(f => (f.name||'').toLowerCase().includes('kenj'));
     const kenjFiles = (db.files||[]).filter(f => kenjFolders.some(k => k.id === f.folderId));
