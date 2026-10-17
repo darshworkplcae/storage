@@ -1845,6 +1845,55 @@ async function hDebugDB(req, env) {
     });
   }
 
+  if (action === 'scan-gdrive') {
+    const drv = (db.drives||[])[0];
+    if (!drv || !drv.encToken) return J({error:'No drive token'}, 400);
+    const at = await gAT(env, drv.encToken);
+    let pageToken = '';
+    const fetchedGoogleFiles = [];
+    let pageCount = 0;
+    do {
+      const u = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType != 'application/vnd.google-apps.folder' and trashed = false")}&fields=nextPageToken,files(id,name,size,mimeType,parents,createdTime)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true${pageToken ? `&pageToken=${pageToken}` : ''}`;
+      const resp = await fetch(u, { headers: { Authorization: `Bearer ${at}` } });
+      const data = await resp.json();
+      if (data.files) fetchedGoogleFiles.push(...data.files);
+      pageToken = data.nextPageToken || '';
+      pageCount++;
+    } while (pageToken && pageCount < 10);
+
+    const existingGIds = new Set((db.files||[]).map(f => f.googleFileId).filter(Boolean));
+    const missingInDB = fetchedGoogleFiles.filter(gf => !existingGIds.has(gf.id));
+
+    if (missingInDB.length > 0) {
+      if (!db.files) db.files = [];
+      const gToLocalFold = new Map();
+      (db.folders||[]).forEach(f => { if (f.googleFolderId) gToLocalFold.set(f.googleFolderId, f.id); });
+      missingInDB.forEach(gf => {
+        const parentGId = (gf.parents && gf.parents[0]) || null;
+        const localFoldId = parentGId ? (gToLocalFold.get(parentGId) || null) : null;
+        db.files.push({
+          id: uid(),
+          googleFileId: gf.id,
+          driveId: drv.id,
+          folderId: localFoldId,
+          name: gf.name,
+          size: parseInt(gf.size) || 0,
+          mimeType: gf.mimeType || 'application/octet-stream',
+          uploadedBy: 'sync-recovery',
+          date: gf.createdTime || new Date().toISOString()
+        });
+      });
+      await uSet(env, 'td:db', db);
+    }
+
+    return J({
+      totalOnGoogleDrive: fetchedGoogleFiles.length,
+      previouslyInDB: (db.files||[]).length - missingInDB.length,
+      missingImportedCount: missingInDB.length,
+      nowInDB: (db.files||[]).length
+    });
+  }
+
   if (action === 'auto-clean-tera') {
     const drv = (db.drives||[])[0];
     let gdb = null;
