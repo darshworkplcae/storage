@@ -1913,7 +1913,8 @@ async function hDebugDB(req, env) {
       filesNotInSubtree,
       filesInRoot,
       folderCounts,
-      aaaaaZip
+      aaaaaZip,
+      allFiles: (db.files||[]).filter(f => f.driveId === drvId && !f.trashed).map(f => ({ name: f.name, size: f.size, folderId: f.folderId }))
     });
   }
 
