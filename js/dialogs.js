@@ -217,6 +217,7 @@ async function uploadFiles(fileList, targetFolderId) {
   window._isUploading = true;
   window._isBatchUploading = true;
   await requestWakeLock();
+  if (window.TeleDriveMobileBg) window.TeleDriveMobileBg.startKeepAlive();
   var uploadedCount = 0;
 
   try {
@@ -227,6 +228,19 @@ async function uploadFiles(fileList, targetFolderId) {
       }
       var res = await uploadOne(fileItems[j].file, destFolder, fileItems[j].tId, null, targetDrive);
       if (res && res.ok) uploadedCount++;
+      if (window.TeleDriveMobileBg) {
+        var pct = Math.round((j + 1) / fileItems.length * 100);
+        window.TeleDriveMobileBg.updateProgress({
+          percent: pct,
+          fileIndex: j + 1,
+          totalFiles: fileItems.length,
+          batchLoaded: j + 1,
+          batchTotal: fileItems.length,
+          speed: (res && res._speed) || 0,
+          etaSec: 0,
+          fileName: fileItems[j].file.name
+        });
+      }
     }
     if (uploadedCount === fileItems.length) {
       try { localStorage.removeItem('td_active_batch'); } catch (e) { }
@@ -237,10 +251,14 @@ async function uploadFiles(fileList, targetFolderId) {
         toggleTMPanel(true);
       }
     }
+    if (window.TeleDriveMobileBg) {
+      window.TeleDriveMobileBg.finishUpload(uploadedCount + ' file(s) uploaded successfully');
+    }
   } finally {
     window._isUploading = false;
     window._isBatchUploading = false;
     releaseWakeLock();
+    if (window.TeleDriveMobileBg) window.TeleDriveMobileBg.stopKeepAlive();
     try {
       S.db = await apiFetchDB();
       if (S.db && S.db.files) tmSyncWithServer(S.db.files);
@@ -305,6 +323,7 @@ async function processFolderFiles(files) {
   var isAuth = (S.ses && S.ses.token);
 
   if (!files.length) return;
+  if (window.TeleDriveMobileBg) window.TeleDriveMobileBg.startKeepAlive();
 
   // Refresh DB to get absolute ground truth from Google Drive
   try {
@@ -485,6 +504,19 @@ async function processFolderFiles(files) {
       }
       var remSizeStr = remBytes > 0 && uploadsLeft > 0 ? ' (' + fmt(remBytes) + ')' : '';
       upOverallLabel.textContent = parts.join(' · ') + (uploadsLeft > 0 ? ' · ' + uploadsLeft + ' left' + remSizeStr : ' · Done!') + etaStr;
+
+      if (window.TeleDriveMobileBg) {
+        window.TeleDriveMobileBg.updateProgress({
+          percent: pct,
+          fileIndex: _batchDone,
+          totalFiles: _batchTotal,
+          batchLoaded: _uploadedBatchBytes,
+          batchTotal: _estUploadBytes || _uploadedBatchBytes,
+          speed: (typeof sustainedByteRate !== 'undefined' ? sustainedByteRate : 0),
+          etaSec: (typeof etaSec !== 'undefined' ? etaSec : 0),
+          fileName: (files && files[_batchDone - 1] ? files[_batchDone - 1].name : rootFolder)
+        });
+      }
     }
   }
 
@@ -755,6 +787,10 @@ async function processFolderFiles(files) {
     window._isUploading = false;
     window._isBatchUploading = false;
     releaseWakeLock();
+    if (window.TeleDriveMobileBg) {
+      window.TeleDriveMobileBg.finishUpload(uploadedCount + ' folder file(s) uploaded');
+      window.TeleDriveMobileBg.stopKeepAlive();
+    }
     // Hide overall progress bar
     if (upOverall) upOverall.classList.add('hidden');
     if (upOverallFill) upOverallFill.style.width = '0%';
@@ -878,6 +914,9 @@ async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId
   }
   if (upName) upName.textContent = file.name;
   if (upStatus) upStatus.textContent = 'Initializing…';
+  if (!window._isBatchUploading && window.TeleDriveMobileBg) {
+    window.TeleDriveMobileBg.startKeepAlive();
+  }
   tmAdd(tId, file.name, file.size);
   poolUploadFiles([{ file: file, tId: tId }], resolvedDriveId, targetFolderId);
 
@@ -918,6 +957,19 @@ async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId
           var eta = (speed > 0 && total > loaded) ? fmtEta(total - loaded, speed) : '';
           if (upStatus && !_cancelSignal.paused) upStatus.textContent = fmt(loaded) + ' / ' + fmt(total) + (speed > 0 ? ' · ' + fmtSpeed(speed) : '') + (eta ? ' · ' + eta : '');
           tmUpdate(tId, pct, speed, loaded);
+          if (!window._isBatchUploading && window.TeleDriveMobileBg) {
+            var singleEta = (speed > 0 && total > loaded) ? Math.round((total - loaded) / speed) : 0;
+            window.TeleDriveMobileBg.updateProgress({
+              percent: pct,
+              fileIndex: 1,
+              totalFiles: 1,
+              batchLoaded: loaded,
+              batchTotal: total,
+              speed: speed,
+              etaSec: singleEta,
+              fileName: file.name
+            });
+          }
         }, _cancelSignal);
 
         if (!result || !result.googleFileId) {
@@ -991,6 +1043,10 @@ async function uploadOne(file, targetFolderId, existingTid, targetGoogleFolderId
     document.body.classList.remove('has-active-upload');
     if (upFill) upFill.style.width = '0%';
     if (upPct) upPct.textContent = '0%';
+    if (!window._isBatchUploading && window.TeleDriveMobileBg) {
+      window.TeleDriveMobileBg.finishUpload();
+      window.TeleDriveMobileBg.stopKeepAlive();
+    }
   }
 
   if (lastErr) {
@@ -1104,6 +1160,7 @@ async function retryAllFailedUploads() {
   window._isUploading = true;
   window._isBatchUploading = true;
   await requestWakeLock();
+  if (window.TeleDriveMobileBg) window.TeleDriveMobileBg.startKeepAlive();
   var prevDrive = _driveId;
   var successCount = 0;
 
@@ -1115,12 +1172,29 @@ async function retryAllFailedUploads() {
       var retryDriveId = pair.pooled.driveId || (destFolder && S.db && Array.isArray(S.db.folders) ? (S.db.folders.find(function(f){ return f.id === destFolder; })||{}).driveId : null) || _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : null);
       var res = await uploadOne(pair.pooled.file, destFolder, pair.item.id, null, retryDriveId);
       if (res && res.ok) successCount++;
+      if (window.TeleDriveMobileBg) {
+        var pct = Math.round((i + 1) / canRetry.length * 100);
+        window.TeleDriveMobileBg.updateProgress({
+          percent: pct,
+          fileIndex: i + 1,
+          totalFiles: canRetry.length,
+          batchLoaded: i + 1,
+          batchTotal: canRetry.length,
+          speed: (res && res._speed) || 0,
+          etaSec: 0,
+          fileName: pair.item.name
+        });
+      }
     }
   } finally {
     _driveId = prevDrive;
     window._isUploading = false;
     window._isBatchUploading = false;
     releaseWakeLock();
+    if (window.TeleDriveMobileBg) {
+      window.TeleDriveMobileBg.finishUpload();
+      window.TeleDriveMobileBg.stopKeepAlive();
+    }
     try {
       S.db = await apiFetchDB();
       if (S.db && S.db.files) tmSyncWithServer(S.db.files);

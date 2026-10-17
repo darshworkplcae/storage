@@ -7,8 +7,14 @@
   <title>TeleDrive</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=obito">
   <link rel="alternate icon" href="/favicon.svg?v=obito">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TeleDrive">
+  <meta name="theme-color" content="#0a0b12">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/main.css?v=20261017_e">
   <script>
     (function(){
       var t = localStorage.getItem('td_theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
@@ -238,6 +244,20 @@
             <span>New folder to organize files</span>
           </div>
         </button>
+        <button class="fab-menu-item" onclick="if(typeof syncCurrentDrive==='function') syncCurrentDrive(); toggleMobileFab(false)">
+          <div class="fab-item-icon sync-icon" style="background:rgba(0,229,255,0.15);color:#00e5ff"><i class="fas fa-rotate"></i></div>
+          <div class="fab-item-text">
+            <strong>Sync All Folders</strong>
+            <span>Scan & refresh Google Drive</span>
+          </div>
+        </button>
+        <button class="fab-menu-item" onclick="if(window.TeleDriveMobileBg) window.TeleDriveMobileBg.showDialog(); toggleMobileFab(false)">
+          <div class="fab-item-icon bg-icon" style="background:rgba(48,209,88,0.15);color:#30d158"><i class="fas fa-mobile-screen"></i></div>
+          <div class="fab-item-text">
+            <strong>Background Uploads</strong>
+            <span>Lock-screen progress & notification</span>
+          </div>
+        </button>
         <button class="fab-menu-item" onclick="showIPhoneFastUploadTip()">
           <div class="fab-item-icon tip-icon"><i class="fas fa-bolt"></i></div>
           <div class="fab-item-text">
@@ -301,15 +321,16 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.3/dist/docx-preview.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="/js/config.js?v=20261017_d"></script>
-<script src="/js/state.js?v=20261017_d"></script>
-<script src="/js/utils.js?v=20261017_d"></script>
-<script src="/js/api.js?v=20261017_d"></script>
-<script src="/js/db.js?v=20261017_d"></script>
-<script src="/js/router.js?v=20261017_d"></script>
-<script src="/js/render.js?v=20261017_d"></script>
-<script src="/js/dialogs.js?v=20261017_d"></script>
-<script src="/js/admin.js?v=20261017_d"></script>
-<script src="/js/main.js?v=20261017_d"></script>
+<script src="/js/config.js?v=20261017_e"></script>
+<script src="/js/state.js?v=20261017_e"></script>
+<script src="/js/utils.js?v=20261017_e"></script>
+<script src="/js/api.js?v=20261017_e"></script>
+<script src="/js/db.js?v=20261017_e"></script>
+<script src="/js/router.js?v=20261017_e"></script>
+<script src="/js/render.js?v=20261017_e"></script>
+<script src="/js/mobile-bg.js?v=20261017_e"></script>
+<script src="/js/dialogs.js?v=20261017_e"></script>
+<script src="/js/admin.js?v=20261017_e"></script>
+<script src="/js/main.js?v=20261017_e"></script>
 </body>
 </html>

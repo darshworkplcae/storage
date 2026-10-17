@@ -1,0 +1,19 @@
+{
+  "name": "TeleDrive Cloud Storage",
+  "short_name": "TeleDrive",
+  "description": "Lightning-fast encrypted cloud storage powered by Google Drive",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0b12",
+  "theme_color": "#0a0b12",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

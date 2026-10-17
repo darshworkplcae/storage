@@ -217,6 +217,27 @@ function triggerMobileUploadFolder() {
   uploadFolder();
 }
 
+async function syncCurrentDrive() {
+  var icons = document.querySelectorAll('#syncBtn i, .fab-menu-item .fa-rotate');
+  icons.forEach(function(ic) { ic.classList.add('fa-spin'); });
+  try {
+    toast('Syncing with Google Drive…', 'info', 2000);
+    S.db = await apiFetchDB();
+    if (typeof cacheDBLocally === 'function' && S.db) cacheDBLocally(S.db);
+    if (S.db && S.db.files && typeof tmSyncWithServer === 'function') tmSyncWithServer(S.db.files);
+    syncLiveQuota();
+    renderFilesPage(_driveId, _folderId);
+    renderSidebarStorage();
+    toast('Synced with Google Drive!', 'success');
+  } catch (e) {
+    console.error('Sync failed:', e);
+    toast('Sync failed: ' + (e.message || e), 'error');
+  } finally {
+    icons.forEach(function(ic) { ic.classList.remove('fa-spin'); });
+  }
+}
+window.syncCurrentDrive = syncCurrentDrive;
+
 // ─── Wire events ─────────────────────────────────────────────────────────────
 function wireEvents() {
   // File upload
@@ -241,13 +262,7 @@ function wireEvents() {
   };
   // Sync
   var syncBtn=$('syncBtn');
-  if(syncBtn) syncBtn.onclick=async function(){
-    S.db=await apiFetchDB();
-    syncLiveQuota();
-    renderFilesPage(_driveId,_folderId);
-    renderSidebarStorage();
-    toast('Synced','success');
-  };
+  if(syncBtn) syncBtn.onclick = syncCurrentDrive;
   // Transfer panel
   var tmBtn=$('tmBtn');
   if(tmBtn){
