@@ -848,7 +848,41 @@ async function hUI(req,env){
     ir = await reqInit(at, pid);
   }
   if (ir.status === 404 && pid !== drv.rootFolderId) {
-    ir = await reqInit(at, drv.rootFolderId);
+    // NEVER fall back to rootFolderId! Find folder and recreate it under its proper parent
+    const allFolders = (db.folders||[]).concat((_memDBCache&&_memDBCache.folders)||[]);
+    const targetF = allFolders.find(x => x.id === folderId || x.googleFolderId === pid);
+    if (targetF && targetF.name) {
+      let targetParentGId = drv.rootFolderId;
+      if (targetF.parentId) {
+        const pf = allFolders.find(x => x.id === targetF.parentId);
+        if (pf && pf.googleFolderId) targetParentGId = pf.googleFolderId;
+      }
+      try {
+        const newGId = await mkDir(at, targetF.name, targetParentGId);
+        if (newGId) {
+          targetF.googleFolderId = newGId;
+          pid = newGId;
+          (db.folders||[]).forEach(x => {
+            if (x.id === targetF.id) x.googleFolderId = newGId;
+          });
+          if (_memDBCache && _memDBCache.folders) {
+            _memDBCache.folders.forEach(x => {
+              if (x.id === targetF.id) x.googleFolderId = newGId;
+            });
+          }
+          await uSet(env, 'td:db', db);
+          ir = await reqInit(at, pid);
+        }
+      } catch(recreateErr) {
+        console.error('Failed to auto-recreate missing folder:', recreateErr);
+      }
+    }
+    if (ir.status === 404) {
+      return J({
+        error: `Target folder "${targetF ? targetF.name : (folderId || pid)}" not found on Google Drive. Upload halted to protect file destination.`,
+        targetFolder: targetF ? targetF.name : folderId
+      }, 404);
+    }
   }
   const uUrl=ir.headers.get('Location');
   if(!uUrl) {
@@ -2089,6 +2123,263 @@ async function hDebugDB(req, env) {
       duplicateGroupsCount,
       tripFilesCount: tripFiles.length,
       gDriveBackupId,
+      _dbVer: targetDb._dbVer
+    });
+  if (action === 'heal-all-folders') {
+    const drv = (db.drives||[])[0];
+    if (!drv) return J({error:'No drive found'}, 404);
+    let at = await gAT(env, drv.encToken);
+
+    let gdb = null;
+    try { gdb = await loadDBFromGDrive(env, drv); } catch(e){}
+    const targetDb = gdb || db;
+    if (!targetDb.folders) targetDb.folders = [];
+    if (!targetDb.files) targetDb.files = [];
+
+    async function checkGF(gId) {
+      if (!gId || gId.length < 10) return false;
+      try {
+        let r = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?fields=id,trashed&supportsAllDrives=true`, {
+          headers: { Authorization: `Bearer ${at}` }
+        });
+        if (r.status === 401) {
+          at = await gAT(env, drv.encToken, true);
+          r = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?fields=id,trashed&supportsAllDrives=true`, {
+            headers: { Authorization: `Bearer ${at}` }
+          });
+        }
+        if (r.ok) {
+          const d = await r.json();
+          return !d.trashed;
+        }
+        return false;
+      } catch(e) { return false; }
+    }
+
+    async function ensureGF(name, parentGId) {
+      const q = `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false and '${parentGId}' in parents`;
+      let s = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&supportsAllDrives=true`, {
+        headers: { Authorization: `Bearer ${at}` }
+      });
+      if (s.status === 401) {
+        at = await gAT(env, drv.encToken, true);
+        s = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&supportsAllDrives=true`, {
+          headers: { Authorization: `Bearer ${at}` }
+        });
+      }
+      const sData = await s.json().catch(()=>({}));
+      if (sData.files && sData.files.length > 0) {
+        return sData.files[0].id;
+      }
+      let c = await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${at}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentGId] })
+      });
+      if (c.status === 401) {
+        at = await gAT(env, drv.encToken, true);
+        c = await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${at}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentGId] })
+        });
+      }
+      const cData = await c.json().catch(()=>({}));
+      return cData.id || null;
+    }
+
+    let tera = targetDb.folders.find(f => f.id === 'mv73d3n3g2wy8');
+    if (!tera) tera = targetDb.folders.find(f => (f.name||'').toLowerCase() === 'tera' && !f.parentId);
+    if (!tera) return J({error:'Tera folder not found in DB'}, 404);
+
+    let teraGIdValid = await checkGF(tera.googleFolderId);
+    if (!teraGIdValid) {
+      tera.googleFolderId = await ensureGF('tera', drv.rootFolderId);
+    }
+
+    const canonicalNames = new Set([
+      'act class', 'b.y vlogs', 'build', 'clg crazy videos!',
+      'close friends photos', 'days', 'dcim', 'group photos',
+      'imagine', 'old backup', 'one plus', 'photos 111',
+      'screen recorder', 'singing', 'steaxs filters pack - charlie',
+      't', 'trip', 'well its'
+    ]);
+
+    const toRemoveFolderIds = new Set();
+    const teraChildren = targetDb.folders.filter(f => f.parentId === tera.id);
+    for (const c of teraChildren) {
+      const cNameLow = (c.name||'').toLowerCase().trim();
+      if (!canonicalNames.has(cNameLow)) {
+        toRemoveFolderIds.add(c.id);
+      }
+    }
+    toRemoveFolderIds.add('mvb97x9sslyph');
+
+    targetDb.folders = targetDb.folders.filter(f => !toRemoveFolderIds.has(f.id));
+
+    const healed = [];
+    async function healSubtree(parentId, parentGId) {
+      const children = targetDb.folders.filter(f => f.parentId === parentId && !f.trashed);
+      for (const child of children) {
+        let valid = await checkGF(child.googleFolderId);
+        if (!valid) {
+          const newGId = await ensureGF(child.name, parentGId);
+          if (newGId) {
+            healed.push({ id: child.id, name: child.name, oldGId: child.googleFolderId, newGId });
+            child.googleFolderId = newGId;
+          }
+        }
+        if (child.googleFolderId) {
+          await healSubtree(child.id, child.googleFolderId);
+        }
+      }
+    }
+
+    await healSubtree(tera.id, tera.googleFolderId);
+
+    targetDb._dbVer = 500;
+    _memDBCacheVer = 500;
+    _memDBCache = targetDb;
+    await uSet(env, 'td:db', targetDb);
+    const gDriveBackupId = await saveDBToGDrive(env, targetDb);
+
+    const gTeraRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${tera.googleFolderId}' in parents and trashed = false`)}&fields=files(id,name,mimeType)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
+      headers: { Authorization: `Bearer ${at}` }
+    });
+    const gTeraData = await gTeraRes.json().catch(()=>({files:[]}));
+
+    return J({
+      ok: true,
+      teraGoogleFolderId: tera.googleFolderId,
+      healedFoldersCount: healed.length,
+      healed,
+      removedStraysCount: toRemoveFolderIds.size,
+      dbFoldersDirectlyInTera: targetDb.folders.filter(f => f.parentId === tera.id).length,
+      gDriveFoldersInTeraCount: (gTeraData.files||[]).length,
+      gDriveFoldersInTera: (gTeraData.files||[]).map(f => f.name),
+      _dbVer: targetDb._dbVer,
+      gDriveBackupId
+    });
+  }
+
+  if (action === 'move-stray-root-files') {
+    const drv = (db.drives||[])[0];
+    if (!drv) return J({error:'No drive found'}, 404);
+    let at = await gAT(env, drv.encToken);
+
+    let gdb = null;
+    try { gdb = await loadDBFromGDrive(env, drv); } catch(e){}
+    const targetDb = gdb || db;
+    if (!targetDb.files) targetDb.files = [];
+    if (!targetDb.folders) targetDb.folders = [];
+
+    let allRootFiles = [];
+    let pageToken = '';
+    do {
+      const q = `'${drv.rootFolderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder' and name != '__teledrive_db__.json'`;
+      const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=nextPageToken,files(id,name,size,mimeType)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true${pageToken ? '&pageToken=' + pageToken : ''}`;
+      let r = await fetch(url, { headers: { Authorization: `Bearer ${at}` } });
+      if (r.status === 401) {
+        at = await gAT(env, drv.encToken, true);
+        r = await fetch(url, { headers: { Authorization: `Bearer ${at}` } });
+      }
+      const d = await r.json().catch(()=>({}));
+      if (d.files) allRootFiles.push(...d.files);
+      pageToken = d.nextPageToken || '';
+    } while (pageToken && allRootFiles.length < 500);
+
+    const moved = [];
+    const failed = [];
+
+    const folderGMap = new Map();
+    for (const f of targetDb.folders) {
+      if (f.googleFolderId) folderGMap.set(f.id, f.googleFolderId);
+    }
+
+    const cameraFolder = targetDb.folders.find(f => (f.name||'').toLowerCase() === 'camera' && targetDb.folders.some(p => p.id === f.parentId && (p.name||'').toLowerCase() === 'dcim'))
+      || targetDb.folders.find(f => (f.name||'').toLowerCase() === 'dcim')
+      || targetDb.folders.find(f => (f.name||'').toLowerCase() === 'photos 111');
+
+    for (const file of allRootFiles) {
+      let dbEntry = targetDb.files.find(f => f.googleFileId === file.id);
+      if (!dbEntry) {
+        dbEntry = targetDb.files.find(f => f.name === file.name && String(f.size) === String(file.size) && !f.trashed);
+      }
+
+      let destGId = null;
+      let destFolderId = null;
+
+      if (dbEntry && dbEntry.folderId) {
+        destFolderId = dbEntry.folderId;
+        destGId = folderGMap.get(destFolderId);
+      }
+
+      if (!destGId && cameraFolder && cameraFolder.googleFolderId) {
+        const isIPhoneMedia = /^(iphone|IMG_|DOC-|Attendance)/i.test(file.name);
+        if (isIPhoneMedia) {
+          destFolderId = cameraFolder.id;
+          destGId = cameraFolder.googleFolderId;
+        }
+      }
+
+      if (!destGId || destGId === drv.rootFolderId) {
+        failed.push({ fileId: file.id, name: file.name, reason: 'Destination folder unknown' });
+        continue;
+      }
+
+      try {
+        let patchR = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}?addParents=${encodeURIComponent(destGId)}&removeParents=${encodeURIComponent(drv.rootFolderId)}&supportsAllDrives=true`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${at}` }
+        });
+        if (patchR.status === 401) {
+          at = await gAT(env, drv.encToken, true);
+          patchR = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}?addParents=${encodeURIComponent(destGId)}&removeParents=${encodeURIComponent(drv.rootFolderId)}&supportsAllDrives=true`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${at}` }
+          });
+        }
+        if (patchR.ok) {
+          moved.push({ fileId: file.id, name: file.name, destFolderId, destGId });
+          if (dbEntry) {
+            dbEntry.folderId = destFolderId;
+            dbEntry.googleFileId = file.id;
+          } else {
+            targetDb.files.push({
+              id: uid(),
+              googleFileId: file.id,
+              driveId: drv.id,
+              folderId: destFolderId,
+              name: file.name,
+              size: parseInt(file.size) || 0,
+              mimeType: file.mimeType || 'application/octet-stream',
+              uploadedBy: 'admin',
+              date: new Date().toISOString()
+            });
+          }
+        } else {
+          failed.push({ fileId: file.id, name: file.name, status: patchR.status });
+        }
+      } catch(e) {
+        failed.push({ fileId: file.id, name: file.name, error: e.message });
+      }
+    }
+
+    if (moved.length > 0) {
+      targetDb._dbVer = 520;
+      _memDBCacheVer = 520;
+      _memDBCache = targetDb;
+      await uSet(env, 'td:db', targetDb);
+      await saveDBToGDrive(env, targetDb);
+    }
+
+    return J({
+      ok: true,
+      totalRootFilesFound: allRootFiles.length,
+      movedCount: moved.length,
+      failedCount: failed.length,
+      moved: moved.slice(0, 30),
+      failed: failed.slice(0, 10),
       _dbVer: targetDb._dbVer
     });
   }
