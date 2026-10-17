@@ -731,6 +731,9 @@ function folderCard(f){
     <div class="card-select-btn ${isSelected ? 'selected' : ''}" onclick="event.stopPropagation(); toggleFileSelect('${esc(f.id)}')" title="Select folder">
       <i class="fas fa-check"></i>
     </div>
+    <div class="card-bill-btn" onclick="event.stopPropagation();window.open('/trip.html?folder=' + encodeURIComponent('${esc(f.id)}'),'_blank')" title="Trip Bills & Expense Splitter">
+      <i class="fas fa-receipt"></i> <span class="bill-label">Bills</span>
+    </div>
     ${isLocked ? `
       <div class="card-security-btn locked" onclick="event.stopPropagation();showRemoveFolderLockDialog('${esc(f.id)}','${esc(f.name).replace(/'/g,"\\'")}')" title="Protected Folder (Click to manage password)">
         <i class="fas fa-shield-halved"></i> <span class="sec-label">Protected</span>

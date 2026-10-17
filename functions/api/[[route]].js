@@ -3836,12 +3836,459 @@ async function hUBC(req, env) {
 async function hCP(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const{newPassword}=await req.json().catch(()=>({}));if(!newPassword||newPassword.length<4)return J({error:'Min 4 chars'},400);let db=await uGet(env,'td:db');if(!db)db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};db.adminHash=await sha256(newPassword);await uSet(env,'td:db',db);return J({ok:true});}
 async function hInit(req,env){const url=new URL(req.url),ex=await uGet(env,'td:db');if(ex&&ex.adminHash&&url.searchParams.get('reset')!=='yes')return J({error:'Already initialized. Add ?reset=yes to force.'},409);const{adminPassword='admin123'}=await req.json().catch(()=>({}));await uSet(env,'td:db',{v:3,adminHash:await sha256(adminPassword),drives:[],files:[],folders:[],activityLog:[],users:[]});return J({ok:true,message:`Password set: ${adminPassword}`});}
 
+// TripSplit & Bill Manager Backend Module
+const DEFAULT_TRIP_NAMES = ['Amar', 'Darshan', 'Soham', 'Omakr', 'Rohit', 'Nikhil', 'Bhushan'];
+
+async function makeTripToken(username, secret) {
+  const ts = Date.now().toString(36);
+  const data = `trip_${username.toLowerCase()}.${ts}`;
+  const sig = await sha256(`tdtrip:${data}:${secret}`);
+  return `ttk_${data}.${sig.slice(0, 32)}`;
+}
+
+async function verifyTripToken(token, secret) {
+  if (!token || typeof token !== 'string' || !token.startsWith('ttk_trip_')) return null;
+  const parts = token.slice(9).split('.');
+  if (parts.length !== 3) return null;
+  const [username, tsStr, sig] = parts;
+  const ts = parseInt(tsStr, 36);
+  if (isNaN(ts) || Date.now() - ts > 30 * 86400 * 1000) return null; // 30-day login
+  const expectedSig = (await sha256(`tdtrip:trip_${username}.${tsStr}:${secret}`)).slice(0, 32);
+  if (sig === expectedSig) return username;
+  return null;
+}
+
+async function ensureTripUsers(db) {
+  if (!db.tripUsers) db.tripUsers = [];
+  let changed = false;
+  for (const name of DEFAULT_TRIP_NAMES) {
+    const un = name.toLowerCase();
+    let existing = db.tripUsers.find(u => u.username && u.username.toLowerCase() === un);
+    if (!existing) {
+      db.tripUsers.push({
+        id: uid(),
+        name: name,
+        username: un,
+        passwordHash: await sha256(name.toUpperCase()),
+        rawPasswordHint: name.toUpperCase(),
+        upiId: '',
+        qrDataUrl: '',
+        dateCreated: new Date().toISOString()
+      });
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+async function hTripAPI(req, env, subpath, method) {
+  let db = await uGet(env, 'td:db');
+  if (!db) db = { v: 3, drives: [], files: [], folders: [] };
+  const changed = await ensureTripUsers(db);
+  if (changed) {
+    await uSet(env, 'td:db', db);
+  }
+  if (!db.tripData) db.tripData = {};
+
+  const url = new URL(req.url);
+  const authHeader = req.headers.get('Authorization') || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '') || url.searchParams.get('token') || '';
+  const loggedInUser = await verifyTripToken(token, gEK(env));
+  const adminSes = await vSes(req, env, 'admin');
+
+  // 1. GET /api/trip/users — Public list of user profiles (for dropdown and dashboard)
+  if (subpath === 'users' && method === 'GET') {
+    return J({
+      users: (db.tripUsers || []).map(u => ({
+        id: u.id,
+        name: u.name,
+        username: u.username,
+        upiId: u.upiId || '',
+        hasQr: !!u.qrDataUrl,
+        qrDataUrl: u.qrDataUrl || ''
+      }))
+    });
+  }
+
+  // 2. POST /api/trip/login — User selects name from list and enters password
+  if (subpath === 'login' && method === 'POST') {
+    const body = await req.json().catch(() => ({}));
+    const { username, password } = body;
+    if (!username || !password) return J({ error: 'Username and password required' }, 400);
+
+    const user = (db.tripUsers || []).find(u => u.username.toLowerCase() === username.toLowerCase().trim());
+    if (!user) return J({ error: 'User not found' }, 404);
+
+    const passHash = await sha256(password);
+    if (user.passwordHash !== passHash && user.passwordHash !== await sha256(password.toUpperCase())) {
+      return J({ error: 'Incorrect password' }, 401);
+    }
+
+    const tToken = await makeTripToken(user.username, gEK(env));
+    return J({
+      ok: true,
+      token: tToken,
+      user: {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        upiId: user.upiId || '',
+        qrDataUrl: user.qrDataUrl || ''
+      }
+    });
+  }
+
+  // 3. GET /api/trip/me — Check session
+  if (subpath === 'me' && method === 'GET') {
+    if (!loggedInUser) return J({ error: 'Not logged in' }, 401);
+    const user = (db.tripUsers || []).find(u => u.username === loggedInUser);
+    if (!user) return J({ error: 'User not found' }, 404);
+    return J({
+      ok: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        upiId: user.upiId || '',
+        qrDataUrl: user.qrDataUrl || ''
+      }
+    });
+  }
+
+  // 4. POST /api/trip/profile — Update user's UPI ID and QR code
+  if (subpath === 'profile' && method === 'POST') {
+    if (!loggedInUser) return J({ error: 'Unauthorized — Please login' }, 401);
+    const body = await req.json().catch(() => ({}));
+    const user = (db.tripUsers || []).find(u => u.username === loggedInUser);
+    if (!user) return J({ error: 'User not found' }, 404);
+
+    if (body.upiId !== undefined) user.upiId = String(body.upiId).trim();
+    if (body.qrDataUrl !== undefined) user.qrDataUrl = body.qrDataUrl;
+    if (body.newPassword && body.newPassword.length >= 3) {
+      user.passwordHash = await sha256(body.newPassword);
+      user.rawPasswordHint = body.newPassword;
+    }
+
+    await uSet(env, 'td:db', db);
+    return J({
+      ok: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        upiId: user.upiId || '',
+        qrDataUrl: user.qrDataUrl || ''
+      }
+    });
+  }
+
+  // 5. GET /api/trip/folders — List folders for trip selection
+  if (subpath === 'folders' && method === 'GET') {
+    const folders = (db.folders || []).filter(f => !f.trashed && !f.destroyed).map(f => ({
+      id: f.id,
+      name: f.name,
+      parentId: f.parentId,
+      driveId: f.driveId
+    }));
+    return J({ folders });
+  }
+
+  // 6. GET /api/trip/data?folderId=... — Trip details, bills, settlements
+  if (subpath === 'data' && method === 'GET') {
+    const folderId = url.searchParams.get('folderId') || 'general';
+    const trip = db.tripData[folderId] || {
+      folderId,
+      bills: [],
+      settlements: [],
+      concessions: []
+    };
+
+    // Calculate balances
+    const balances = {}; // username -> net balance (positive = owed to them, negative = they owe)
+    (db.tripUsers || []).forEach(u => balances[u.username] = 0);
+
+    // Sum bills
+    let totalExpenses = 0;
+    (trip.bills || []).forEach(b => {
+      const amt = parseFloat(b.amount) || 0;
+      totalExpenses += amt;
+      const payer = (b.paidBy || '').toLowerCase();
+      const splits = b.splitMembers || (db.tripUsers || []).map(u => u.username);
+      const share = splits.length > 0 ? (amt / splits.length) : 0;
+
+      // Payer gets full amount credited
+      balances[payer] = (balances[payer] || 0) + amt;
+      // Each participant owes their share
+      splits.forEach(m => {
+        const mu = m.toLowerCase();
+        balances[mu] = (balances[mu] || 0) - share;
+      });
+    });
+
+    // Account for verified settlements
+    let totalSettled = 0;
+    (trip.settlements || []).forEach(s => {
+      if (s.status === 'verified') {
+        const amt = parseFloat(s.amount) || 0;
+        totalSettled += amt;
+        const fromU = (s.fromUser || '').toLowerCase();
+        const toU = (s.toUser || '').toLowerCase();
+        balances[fromU] = (balances[fromU] || 0) + amt;
+        balances[toU] = (balances[toU] || 0) - amt;
+      }
+    });
+
+    // Account for concessions (instant clear)
+    (trip.concessions || []).forEach(c => {
+      const amt = parseFloat(c.amount) || 0;
+      const forU = (c.forUser || '').toLowerCase();
+      const byU = (c.byUser || '').toLowerCase();
+      balances[forU] = (balances[forU] || 0) + amt;
+      balances[byU] = (balances[byU] || 0) - amt;
+    });
+
+    // Compute pairwise settlement suggestions
+    const creditors = []; // positive
+    const debtors = [];   // negative
+    for (const [un, bal] of Object.entries(balances)) {
+      if (bal > 1) creditors.push({ username: un, amount: bal });
+      else if (bal < -1) debtors.push({ username: un, amount: -bal });
+    }
+    creditors.sort((a,b) => b.amount - a.amount);
+    debtors.sort((a,b) => b.amount - a.amount);
+
+    const suggestions = [];
+    let ci = 0, di = 0;
+    const credCopy = creditors.map(c => ({ ...c }));
+    const debtCopy = debtors.map(d => ({ ...d }));
+
+    while (ci < credCopy.length && di < debtCopy.length) {
+      const c = credCopy[ci];
+      const d = debtCopy[di];
+      const settleAmt = Math.min(c.amount, d.amount);
+      if (settleAmt >= 1) {
+        const payeeUser = (db.tripUsers || []).find(u => u.username === c.username);
+        suggestions.push({
+          fromUser: d.username,
+          toUser: c.username,
+          amount: Math.round(settleAmt),
+          payeeName: payeeUser ? payeeUser.name : c.username,
+          payeeUpi: payeeUser ? payeeUser.upiId : '',
+          payeeQr: payeeUser ? payeeUser.qrDataUrl : ''
+        });
+      }
+      c.amount -= settleAmt;
+      d.amount -= settleAmt;
+      if (c.amount < 1) ci++;
+      if (d.amount < 1) di++;
+    }
+
+    const folderObj = (db.folders || []).find(f => f.id === folderId);
+    return J({
+      folderId,
+      folderName: folderObj ? folderObj.name : 'Trip Expenses',
+      totalExpenses: Math.round(totalExpenses),
+      totalSettled: Math.round(totalSettled),
+      remainingDue: Math.max(0, Math.round(totalExpenses - totalSettled)),
+      bills: trip.bills || [],
+      settlements: trip.settlements || [],
+      concessions: trip.concessions || [],
+      balances,
+      suggestions,
+      users: (db.tripUsers || []).map(u => ({
+        id: u.id,
+        name: u.name,
+        username: u.username,
+        upiId: u.upiId || '',
+        qrDataUrl: u.qrDataUrl || ''
+      }))
+    });
+  }
+
+  // 7. POST /api/trip/bill — Add a new bill
+  if (subpath === 'bill' && method === 'POST') {
+    if (!loggedInUser) return J({ error: 'Unauthorized — Please login to add bill' }, 401);
+    const body = await req.json().catch(() => ({}));
+    const { folderId, title, amount, splitMembers, receiptImage } = body;
+    if (!folderId || !title || !amount) return J({ error: 'Missing required bill fields' }, 400);
+
+    if (!db.tripData[folderId]) {
+      db.tripData[folderId] = { folderId, bills: [], settlements: [], concessions: [] };
+    }
+
+    const userObj = (db.tripUsers || []).find(u => u.username === loggedInUser);
+    const newBill = {
+      id: uid(),
+      title: String(title).trim(),
+      amount: parseFloat(amount),
+      paidBy: loggedInUser,
+      paidByName: userObj ? userObj.name : loggedInUser,
+      splitMembers: Array.isArray(splitMembers) && splitMembers.length ? splitMembers : (db.tripUsers || []).map(u => u.username),
+      receiptImage: receiptImage || null,
+      date: new Date().toISOString()
+    };
+
+    db.tripData[folderId].bills.unshift(newBill);
+    await uSet(env, 'td:db', db);
+    return J({ ok: true, bill: newBill });
+  }
+
+  // 8. POST /api/trip/pay — Submit payment to payee (status: pending)
+  if (subpath === 'pay' && method === 'POST') {
+    if (!loggedInUser) return J({ error: 'Unauthorized — Please login' }, 401);
+    const body = await req.json().catch(() => ({}));
+    const { folderId, toUser, amount, note, proofImage } = body;
+    if (!folderId || !toUser || !amount) return J({ error: 'Missing payment fields' }, 400);
+
+    if (!db.tripData[folderId]) {
+      db.tripData[folderId] = { folderId, bills: [], settlements: [], concessions: [] };
+    }
+
+    const fromUserObj = (db.tripUsers || []).find(u => u.username === loggedInUser);
+    const toUserObj = (db.tripUsers || []).find(u => u.username.toLowerCase() === toUser.toLowerCase());
+
+    const newPayment = {
+      id: uid(),
+      folderId,
+      fromUser: loggedInUser,
+      fromUserName: fromUserObj ? fromUserObj.name : loggedInUser,
+      toUser: toUser.toLowerCase(),
+      toUserName: toUserObj ? toUserObj.name : toUser,
+      amount: parseFloat(amount),
+      note: note || 'UPI Payment',
+      proofImage: proofImage || null,
+      status: 'pending', // Pending Verification
+      date: new Date().toISOString()
+    };
+
+    db.tripData[folderId].settlements.unshift(newPayment);
+    await uSet(env, 'td:db', db);
+    return J({ ok: true, payment: newPayment });
+  }
+
+  // 9. POST /api/trip/verify-payment — Payee verifies or rejects payment
+  if (subpath === 'verify-payment' && method === 'POST') {
+    if (!loggedInUser && !adminSes) return J({ error: 'Unauthorized' }, 401);
+    const body = await req.json().catch(() => ({}));
+    const { folderId, settlementId, action } = body;
+    if (!folderId || !settlementId || !action) return J({ error: 'Missing verification fields' }, 400);
+
+    const trip = db.tripData[folderId];
+    if (!trip || !trip.settlements) return J({ error: 'Trip not found' }, 404);
+
+    const s = trip.settlements.find(x => x.id === settlementId);
+    if (!s) return J({ error: 'Payment record not found' }, 404);
+
+    // Only payee or admin can verify
+    if (!adminSes && s.toUser.toLowerCase() !== loggedInUser.toLowerCase()) {
+      return J({ error: 'Only the payee can verify this payment' }, 403);
+    }
+
+    if (action === 'approve') {
+      s.status = 'verified';
+      s.verifiedAt = new Date().toISOString();
+      s.verifiedBy = loggedInUser || 'admin';
+    } else if (action === 'reject') {
+      s.status = 'failed';
+      s.rejectedAt = new Date().toISOString();
+      s.rejectedBy = loggedInUser || 'admin';
+    } else {
+      return J({ error: 'Invalid action' }, 400);
+    }
+
+    await uSet(env, 'td:db', db);
+    return J({ ok: true, status: s.status });
+  }
+
+  // 10. POST /api/trip/concession — Grant cash or discount concession
+  if (subpath === 'concession' && method === 'POST') {
+    if (!loggedInUser && !adminSes) return J({ error: 'Unauthorized' }, 401);
+    const body = await req.json().catch(() => ({}));
+    const { folderId, forUser, amount, note } = body;
+    if (!folderId || !forUser || !amount) return J({ error: 'Missing concession fields' }, 400);
+
+    if (!db.tripData[folderId]) {
+      db.tripData[folderId] = { folderId, bills: [], settlements: [], concessions: [] };
+    }
+
+    const byUserObj = (db.tripUsers || []).find(u => u.username === (loggedInUser || 'admin'));
+    const forUserObj = (db.tripUsers || []).find(u => u.username.toLowerCase() === forUser.toLowerCase());
+
+    const newConcession = {
+      id: uid(),
+      folderId,
+      byUser: loggedInUser || 'admin',
+      byUserName: byUserObj ? byUserObj.name : 'Admin',
+      forUser: forUser.toLowerCase(),
+      forUserName: forUserObj ? forUserObj.name : forUser,
+      amount: parseFloat(amount),
+      note: note || 'Cash / Concession',
+      date: new Date().toISOString()
+    };
+
+    if (!db.tripData[folderId].concessions) db.tripData[folderId].concessions = [];
+    db.tripData[folderId].concessions.unshift(newConcession);
+    await uSet(env, 'td:db', db);
+    return J({ ok: true, concession: newConcession });
+  }
+
+  // 11. Admin trip users panel: GET /api/trip/admin-users
+  if (subpath === 'admin-users' && method === 'GET') {
+    if (!adminSes) return J({ error: 'Admin only' }, 401);
+    return J({
+      users: (db.tripUsers || []).map(u => ({
+        id: u.id,
+        name: u.name,
+        username: u.username,
+        passwordHint: u.rawPasswordHint || '(custom)',
+        upiId: u.upiId || '',
+        hasQr: !!u.qrDataUrl,
+        dateCreated: u.dateCreated
+      }))
+    });
+  }
+
+  // 12. Admin trip users panel: POST /api/trip/admin-users (Create new user or reset pass)
+  if (subpath === 'admin-users' && method === 'POST') {
+    if (!adminSes) return J({ error: 'Admin only' }, 401);
+    const body = await req.json().catch(() => ({}));
+    const { name, username, password } = body;
+    if (!name || !username || !password) return J({ error: 'Missing fields' }, 400);
+
+    const un = username.toLowerCase().trim();
+    let user = (db.tripUsers || []).find(u => u.username === un);
+    if (user) {
+      user.name = name.trim();
+      user.passwordHash = await sha256(password);
+      user.rawPasswordHint = password;
+    } else {
+      user = {
+        id: uid(),
+        name: name.trim(),
+        username: un,
+        passwordHash: await sha256(password),
+        rawPasswordHint: password,
+        upiId: '',
+        qrDataUrl: '',
+        dateCreated: new Date().toISOString()
+      };
+      db.tripUsers.push(user);
+    }
+    await uSet(env, 'td:db', db);
+    return J({ ok: true, user });
+  }
+
+  return J({ error: 'Unknown trip API route' }, 404);
+}
+
+
 export async function onRequest(ctx){
   _globalCtx = ctx;
   const { request, env } = ctx;
   if(request.method==='OPTIONS')return new Response(null,{status:204,headers:COR});
   const url=new URL(request.url),p=url.pathname.replace(/^\/api\/?/,''),m=request.method;
   try{
+    if(p.startsWith('trip/'))return hTripAPI(request,env,p.replace(/^trip\//,''),m);
     if(p==='auth/login'&&m==='POST')return hAL(request,env);
     if(p==='auth/user-login'&&m==='POST')return hUL(request,env);
     if(p==='auth/verify'&&m==='GET')return hVerifySes(request,env);
