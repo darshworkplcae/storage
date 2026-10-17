@@ -2125,6 +2125,8 @@ async function hDebugDB(req, env) {
       gDriveBackupId,
       _dbVer: targetDb._dbVer
     });
+  }
+
   if (action === 'heal-all-folders') {
     const drv = (db.drives||[])[0];
     if (!drv) return J({error:'No drive found'}, 404);
