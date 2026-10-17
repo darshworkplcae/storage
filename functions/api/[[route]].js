@@ -1975,6 +1975,38 @@ async function hDebugDB(req, env) {
     });
   }
 
+  if (action === 'check-gdrive-file') {
+    const fileId = url.searchParams.get('id');
+    const drv = (db.drives||[])[0];
+    const at = await gAT(env, drv.encToken);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,parents,trashed,mimeType&supportsAllDrives=true`, {
+      headers: { Authorization: `Bearer ${at}` }
+    });
+    const data = await res.json().catch(()=>({}));
+    return J({ status: res.status, data });
+  }
+
+  if (action === 'list-root-files') {
+    const drv = (db.drives||[])[0];
+    const at = await gAT(env, drv.encToken);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${drv.rootFolderId}' in parents and trashed = false`)}&fields=files(id,name,mimeType,parents,size)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
+      headers: { Authorization: `Bearer ${at}` }
+    });
+    const data = await res.json().catch(()=>({}));
+    return J(data);
+  }
+
+  if (action === 'list-tera-gdrive') {
+    const drv = (db.drives||[])[0];
+    const at = await gAT(env, drv.encToken);
+    const tera = (db.folders||[]).find(f => f.id === 'mv73d3n3g2wy8');
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${tera.googleFolderId}' in parents and trashed = false`)}&fields=files(id,name,mimeType,parents,size)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
+      headers: { Authorization: `Bearer ${at}` }
+    });
+    const data = await res.json().catch(()=>({}));
+    return J(data);
+  }
+
   if (action === 'inspect-folder') {
     const targetFolderId = url.searchParams.get('folderId');
     const folderFiles = (db.files||[]).filter(f => f.folderId === targetFolderId && !f.trashed);
