@@ -2890,6 +2890,76 @@ async function hDebugDB(req, env) {
     return J({ ok: true, registered: name, fileId, folderId, totalTeraFiles: (db.files||[]).filter(f=>f.folderId===folderId).length });
   }
 
+  if (action === 'batch-register-files') {
+    const body = await req.json().catch(() => ({ files: [] }));
+    const filesToRegister = body.files || [];
+    const drv = (db.drives||[])[0];
+    if (!db.files) db.files = [];
+
+    const existingMap = new Map();
+    db.files.forEach(f => {
+      if (f.googleFileId) existingMap.set(f.googleFileId, f);
+      existingMap.set((f.folderId||'') + '::' + (f.name||'').toLowerCase().trim(), f);
+    });
+
+    let addedCount = 0;
+    let updatedCount = 0;
+    for (const item of filesToRegister) {
+      const k = (item.folderId||'') + '::' + (item.name||'').toLowerCase().trim();
+      const existing = (item.googleFileId && existingMap.get(item.googleFileId)) || existingMap.get(k);
+      if (existing) {
+        if (item.googleFileId) existing.googleFileId = item.googleFileId;
+        if (item.size) existing.size = item.size;
+        if (item.folderId) existing.folderId = item.folderId;
+        existing.trashed = false;
+        updatedCount++;
+      } else {
+        const newFile = {
+          id: uid(),
+          googleFileId: item.googleFileId,
+          driveId: drv ? drv.id : 'mv3st1820rife',
+          folderId: item.folderId || 'mv73d3n3g2wy8',
+          name: item.name,
+          size: item.size || 0,
+          mimeType: item.mimeType || 'application/octet-stream',
+          uploadedBy: 'admin',
+          date: new Date().toISOString()
+        };
+        db.files.push(newFile);
+        existingMap.set(item.googleFileId, newFile);
+        existingMap.set(k, newFile);
+        addedCount++;
+      }
+    }
+    await uSet(env, 'td:db', db);
+    return J({ ok: true, addedCount, updatedCount, totalFiles: db.files.length });
+  }
+
+  if (action === 'register-folder') {
+    const name = url.searchParams.get('name');
+    const googleFolderId = url.searchParams.get('googleFolderId');
+    const parentGoogleId = url.searchParams.get('parentGoogleId');
+    const drv = (db.drives||[])[0];
+    if (!googleFolderId || !name) return J({error:'Missing params'}, 400);
+
+    let parentDbFolder = (db.folders||[]).find(f => f.googleFolderId === parentGoogleId);
+    let existing = (db.folders||[]).find(f => f.googleFolderId === googleFolderId);
+    if (!existing) {
+      existing = {
+        id: uid(),
+        driveId: drv ? drv.id : 'mv3st1820rife',
+        parentId: parentDbFolder ? parentDbFolder.id : null,
+        name: name,
+        googleFolderId: googleFolderId,
+        date: new Date().toISOString()
+      };
+      if (!db.folders) db.folders = [];
+      db.folders.push(existing);
+      await uSet(env, 'td:db', db);
+    }
+    return J({ ok: true, folderId: existing.id, googleFolderId });
+  }
+
   return J({error: 'Invalid action'}, 400);
 }
 
