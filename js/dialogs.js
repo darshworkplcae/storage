@@ -360,10 +360,12 @@ async function processFolderFiles(files) {
   });
 
   var _dupAction = null; // 'skip' | 'replace' | 'new' | null (folder didn't exist)
+  var _subtreeSet = null;
+  var _alreadyCount = 0;
 
   if (_existingRootFolder) {
     // Count how many of these files are likely already uploaded (by name+size in that subtree)
-    var _subtreeSet = new Set();
+    _subtreeSet = new Set();
     if (S.db && Array.isArray(S.db.files)) {
       // Collect all folderId's in the existing folder subtree
       var _subtreeFolderIds = new Set([_existingRootFolder.id]);
@@ -378,10 +380,13 @@ async function processFolderFiles(files) {
       S.db.files.forEach(function(ff) {
         if (!ff.trashed && ff.driveId === batchDriveId && _subtreeFolderIds.has(ff.folderId)) {
           _subtreeSet.add(ff.name + '::' + ff.size);
+          _subtreeSet.add((ff.name || '').toLowerCase().trim() + '::' + ff.size);
         }
       });
     }
-    var _alreadyCount = files.filter(function(f) { return _subtreeSet.has(f.name + '::' + f.size); }).length;
+    _alreadyCount = files.filter(function(f) {
+      return _subtreeSet.has(f.name + '::' + f.size) || _subtreeSet.has((f.name || '').toLowerCase().trim() + '::' + f.size);
+    }).length;
 
     // Find next available [2], [3], etc. name
     var _newSuffix = 2;
@@ -399,27 +404,37 @@ async function processFolderFiles(files) {
       ov.className = 'modal-overlay';
       ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(8px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem;';
       var pct = files.length > 0 ? Math.round(_alreadyCount / files.length * 100) : 0;
+      var remCount = Math.max(0, files.length - _alreadyCount);
       ov.innerHTML =
-        '<div style="background:var(--surface,#13152a);border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:1.6rem;max-width:420px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,.75);">' +
-          '<div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1.2rem;">' +
-            '<div style="width:42px;height:42px;border-radius:12px;background:rgba(255,159,10,.15);color:#ff9f0a;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0;"><i class="fas fa-folder-open"></i></div>' +
+        '<div style="background:var(--surface,#13152a);border:1px solid rgba(255,255,255,.14);border-radius:18px;padding:1.6rem;max-width:440px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,.75);">' +
+          '<div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1.1rem;">' +
+            '<div style="width:42px;height:42px;border-radius:12px;background:rgba(48,209,88,.15);color:#30d158;display:flex;align-items:center;justify-content:center;font-size:1.25rem;flex-shrink:0;"><i class="fas fa-cloud-check"></i></div>' +
             '<div>' +
-              '<div style="font-size:1rem;font-weight:700;color:var(--text1,#e8eaf6);">Folder already exists</div>' +
-              '<div style="font-size:.8rem;color:var(--text2,#8c90b0);margin-top:.15rem;">"<strong>' + esc(rootFolder) + '</strong>" · ' + files.length + ' files · ' + _alreadyCount + ' already uploaded (' + pct + '%)</div>' +
+              '<div style="font-size:1.05rem;font-weight:700;color:var(--text1,#e8eaf6);">Resume Folder Upload</div>' +
+              '<div style="font-size:.82rem;color:var(--text2,#8c90b0);margin-top:.15rem;">"<strong>' + esc(rootFolder) + '</strong>" · ' + files.length.toLocaleString() + ' files total</div>' +
             '</div>' +
           '</div>' +
-          '<div style="display:flex;flex-direction:column;gap:.5rem;">' +
-            '<button id="dupSkipBtn" style="background:rgba(78,134,245,.15);border:1px solid rgba(78,134,245,.35);color:#4e86f5;border-radius:10px;padding:.7rem 1rem;cursor:pointer;text-align:left;font-size:.87rem;transition:background .18s;">' +
-              '<i class="fas fa-forward-step" style="width:18px"></i> <strong>Skip existing</strong> — upload only new files' +
+          '<div style="margin-bottom:1.1rem;padding:.75rem .9rem;background:rgba(48,209,88,.08);border:1px solid rgba(48,209,88,.25);border-radius:10px;font-size:.84rem;color:#30d158;line-height:1.45;">' +
+            '<div style="display:flex;align-items:center;gap:.5rem;font-weight:700;">' +
+              '<i class="fas fa-check-circle"></i> ' + _alreadyCount.toLocaleString() + ' files (' + pct + '%) already safe on Drive!' +
+            '</div>' +
+            '<div style="font-size:.8rem;color:var(--text2,#8c90b0);margin-top:.3rem;">' +
+              'Only <strong>' + remCount.toLocaleString() + ' new files</strong> left to upload.' +
+            '</div>' +
+          '</div>' +
+          '<div style="display:flex;flex-direction:column;gap:.55rem;">' +
+            '<button id="dupSkipBtn" style="background:rgba(78,134,245,.15);border:1px solid rgba(78,134,245,.4);color:#4e86f5;border-radius:10px;padding:.75rem 1rem;cursor:pointer;text-align:left;font-size:.88rem;transition:all .18s;line-height:1.35;">' +
+              '<i class="fas fa-forward-step" style="width:20px"></i> <strong>Upload remaining ' + remCount.toLocaleString() + ' new files</strong>' +
+              '<div style="font-size:.76rem;color:var(--text2,#8c90b0);margin-left:24px;">Skip ' + _alreadyCount.toLocaleString() + ' files already verified on Google Drive</div>' +
             '</button>' +
             '<button id="dupReplaceBtn" style="background:rgba(255,69,58,.1);border:1px solid rgba(255,69,58,.3);color:#ff453a;border-radius:10px;padding:.7rem 1rem;cursor:pointer;text-align:left;font-size:.87rem;transition:background .18s;">' +
-              '<i class="fas fa-arrows-rotate" style="width:18px"></i> <strong>Re-upload all</strong> — overwrite everything' +
+              '<i class="fas fa-arrows-rotate" style="width:20px"></i> <strong>Re-upload all ' + files.length.toLocaleString() + ' files</strong> — overwrite everything' +
             '</button>' +
             '<button id="dupNewBtn" style="background:rgba(48,209,88,.1);border:1px solid rgba(48,209,88,.3);color:#30d158;border-radius:10px;padding:.7rem 1rem;cursor:pointer;text-align:left;font-size:.87rem;transition:background .18s;">' +
-              '<i class="fas fa-folder-plus" style="width:18px"></i> <strong>Upload as "' + esc(_newRootName) + '"</strong> — keep both' +
+              '<i class="fas fa-folder-plus" style="width:20px"></i> <strong>Upload as "' + esc(_newRootName) + '"</strong> — keep both' +
             '</button>' +
             '<button id="dupCancelBtn" style="background:transparent;border:1px solid rgba(255,255,255,.1);color:var(--text2,#8c90b0);border-radius:10px;padding:.55rem 1rem;cursor:pointer;text-align:left;font-size:.84rem;">' +
-              '<i class="fas fa-xmark" style="width:18px"></i> Cancel upload' +
+              '<i class="fas fa-xmark" style="width:20px"></i> Cancel upload' +
             '</button>' +
           '</div>' +
         '</div>';
@@ -486,8 +501,8 @@ async function processFolderFiles(files) {
     if (upOverallLabel) {
       var uploadsLeft = Math.max(0, _estUploads - _batchUploaded);
       var parts = [];
-      parts.push('\u2191 ' + _batchUploaded + ' / ' + _estUploads + ' uploaded');
-      if (_batchSkipped > 0) parts.push('\u26a1 ' + _batchSkipped + ' skipped');
+      parts.push('\u2191 ' + _batchUploaded + ' / ' + _estUploads + ' new');
+      if (_batchSkipped > 0) parts.push('\u2713 ' + _batchSkipped + ' safe on Drive');
 
       // Realistic ETA based on sustained file rate and batch byte throughput
       var remBytes = Math.max(0, _estUploadBytes - _uploadedBatchBytes);
@@ -558,7 +573,8 @@ async function processFolderFiles(files) {
   var _estSkips = 0;
   _estUploadBytes = 0;
   fileItems.forEach(function(item) {
-    var isSkip = existingNameSizeSet.has(item.file.name + '::' + item.file.size) ||
+    var isSkip = (_subtreeSet && (_subtreeSet.has(item.file.name + '::' + item.file.size) || _subtreeSet.has((item.file.name || '').toLowerCase().trim() + '::' + item.file.size))) ||
+                 existingNameSizeSet.has(item.file.name + '::' + item.file.size) ||
                  existingNameSizeSet.has((item.file.name || '').toLowerCase().trim() + '::' + item.file.size);
     if (isSkip) {
       _estSkips++;
@@ -746,6 +762,13 @@ async function processFolderFiles(files) {
       // Smart Resume & Deduplication in O(1) time
       var isAlreadyUploaded = existingFileSet.has((parentId || '') + '::' + file.name + '::' + file.size) ||
                               existingFileSet.has((parentId || '') + '::' + (file.name || '').toLowerCase().trim() + '::' + file.size);
+      if (!isAlreadyUploaded && _dupAction === 'skip') {
+        if (_subtreeSet && (_subtreeSet.has(file.name + '::' + file.size) || _subtreeSet.has((file.name || '').toLowerCase().trim() + '::' + file.size))) {
+          isAlreadyUploaded = true;
+        } else if (existingNameSizeSet.has(file.name + '::' + file.size) || existingNameSizeSet.has((file.name || '').toLowerCase().trim() + '::' + file.size)) {
+          isAlreadyUploaded = true;
+        }
+      }
 
       if (isAlreadyUploaded) {
         skippedCount++;
