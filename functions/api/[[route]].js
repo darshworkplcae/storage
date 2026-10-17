@@ -2138,40 +2138,30 @@ async function hDebugDB(req, env) {
     if (!targetDb.folders) targetDb.folders = [];
     if (!targetDb.files) targetDb.files = [];
 
-    async function checkGF(gId) {
-      if (!gId || gId.length < 10) return false;
-      try {
-        let r = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?fields=id,trashed&supportsAllDrives=true`, {
-          headers: { Authorization: `Bearer ${at}` }
-        });
-        if (r.status === 401) {
-          at = await gAT(env, drv.encToken, true);
-          r = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?fields=id,trashed&supportsAllDrives=true`, {
-            headers: { Authorization: `Bearer ${at}` }
-          });
-        }
-        if (r.ok) {
-          const d = await r.json();
-          return !d.trashed;
-        }
-        return false;
-      } catch(e) { return false; }
-    }
-
-    async function ensureGF(name, parentGId) {
-      const q = `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false and '${parentGId}' in parents`;
-      let s = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&supportsAllDrives=true`, {
+    // Subrequest 1: Fetch ALL existing folders from Google Drive in ONE single call
+    let allGFoldersResp = await fetch('https://www.googleapis.com/drive/v3/files?q=mimeType%3D%27application%2Fvnd.google-apps.folder%27+and+trashed%3Dfalse&fields=files(id,name,parents)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true', {
+      headers: { Authorization: `Bearer ${at}` }
+    });
+    if (allGFoldersResp.status === 401) {
+      at = await gAT(env, drv.encToken, true);
+      allGFoldersResp = await fetch('https://www.googleapis.com/drive/v3/files?q=mimeType%3D%27application%2Fvnd.google-apps.folder%27+and+trashed%3Dfalse&fields=files(id,name,parents)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true', {
         headers: { Authorization: `Bearer ${at}` }
       });
-      if (s.status === 401) {
-        at = await gAT(env, drv.encToken, true);
-        s = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&supportsAllDrives=true`, {
-          headers: { Authorization: `Bearer ${at}` }
-        });
+    }
+    const allGFoldersData = await allGFoldersResp.json().catch(()=>({files:[]}));
+    const gDriveFolderMap = new Map(); // key: `${parentGId}::${name.toLowerCase()}` -> id
+    for (const gf of (allGFoldersData.files || [])) {
+      if (gf.parents && gf.parents.length) {
+        for (const p of gf.parents) {
+          gDriveFolderMap.set(p + '::' + (gf.name||'').toLowerCase().trim(), gf.id);
+        }
       }
-      const sData = await s.json().catch(()=>({}));
-      if (sData.files && sData.files.length > 0) {
-        return sData.files[0].id;
+    }
+
+    async function getOrCreateGF(name, parentGId) {
+      const k = parentGId + '::' + name.toLowerCase().trim();
+      if (gDriveFolderMap.has(k)) {
+        return { id: gDriveFolderMap.get(k), created: false };
       }
       let c = await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true', {
         method: 'POST',
@@ -2187,64 +2177,90 @@ async function hDebugDB(req, env) {
         });
       }
       const cData = await c.json().catch(()=>({}));
-      return cData.id || null;
+      if (cData && cData.id) {
+        gDriveFolderMap.set(k, cData.id);
+        return { id: cData.id, created: true };
+      }
+      return { id: null, created: false };
     }
 
     let tera = targetDb.folders.find(f => f.id === 'mv73d3n3g2wy8');
     if (!tera) tera = targetDb.folders.find(f => (f.name||'').toLowerCase() === 'tera' && !f.parentId);
     if (!tera) return J({error:'Tera folder not found in DB'}, 404);
 
-    let teraGIdValid = await checkGF(tera.googleFolderId);
-    if (!teraGIdValid) {
-      tera.googleFolderId = await ensureGF('tera', drv.rootFolderId);
-    }
+    const teraRes = await getOrCreateGF('tera', drv.rootFolderId);
+    if (teraRes.id) tera.googleFolderId = teraRes.id;
 
-    const canonicalNames = new Set([
-      'act class', 'b.y vlogs', 'build', 'clg crazy videos!',
-      'close friends photos', 'days', 'dcim', 'group photos',
-      'imagine', 'old backup', 'one plus', 'photos 111',
-      'screen recorder', 'singing', 'steaxs filters pack - charlie',
-      't', 'trip', 'well its'
-    ]);
+    const canonical18Names = [
+      'Act Class', 'B.Y Vlogs', 'build', 'Clg Crazy Videos!',
+      'Close friends photos', 'Days', 'DCIM', 'Group Photos',
+      'Imagine', 'old backup', 'one plus', 'photos 111',
+      'Screen recorder', 'Singing', 'STEAXS FILTERS PACK - CHARLIE',
+      'T', 'Trip', 'well its'
+    ];
+    const canonicalSet = new Set(canonical18Names.map(x => x.toLowerCase()));
 
+    // 1. Remove stray folders directly under tera that do not belong
     const toRemoveFolderIds = new Set();
     const teraChildren = targetDb.folders.filter(f => f.parentId === tera.id);
     for (const c of teraChildren) {
       const cNameLow = (c.name||'').toLowerCase().trim();
-      if (!canonicalNames.has(cNameLow)) {
+      if (!canonicalSet.has(cNameLow)) {
         toRemoveFolderIds.add(c.id);
       }
     }
-    toRemoveFolderIds.add('mvb97x9sslyph');
-
+    toRemoveFolderIds.add('mvb97x9sslyph'); // ghost b
     targetDb.folders = targetDb.folders.filter(f => !toRemoveFolderIds.has(f.id));
 
-    const healed = [];
-    async function healSubtree(parentId, parentGId) {
-      const children = targetDb.folders.filter(f => f.parentId === parentId && !f.trashed);
-      for (const child of children) {
-        let valid = await checkGF(child.googleFolderId);
-        if (!valid) {
-          const newGId = await ensureGF(child.name, parentGId);
-          if (newGId) {
-            healed.push({ id: child.id, name: child.name, oldGId: child.googleFolderId, newGId });
-            child.googleFolderId = newGId;
-          }
+    // 2. Ensure each of the 18 canonical folders exists in DB & Google Drive
+    const healedCanonical = [];
+    for (const cName of canonical18Names) {
+      let dbFolder = targetDb.folders.find(f => f.parentId === tera.id && (f.name||'').toLowerCase().trim() === cName.toLowerCase());
+      if (!dbFolder) {
+        dbFolder = {
+          id: uid(),
+          driveId: drv.id,
+          parentId: tera.id,
+          name: cName,
+          date: new Date().toISOString()
+        };
+        targetDb.folders.push(dbFolder);
+      }
+      const res = await getOrCreateGF(cName, tera.googleFolderId);
+      if (res.id) {
+        if (dbFolder.googleFolderId !== res.id || res.created) {
+          healedCanonical.push({ name: cName, googleFolderId: res.id, created: res.created });
         }
-        if (child.googleFolderId) {
-          await healSubtree(child.id, child.googleFolderId);
+        dbFolder.googleFolderId = res.id;
+      }
+    }
+
+    // 3. Ensure subfolders of the canonical folders exist on Google Drive
+    const healedSubfolders = [];
+    const directTeraFolderIds = new Set(targetDb.folders.filter(f => f.parentId === tera.id).map(f => f.id));
+    for (const sub of targetDb.folders) {
+      if (sub.parentId && sub.parentId !== tera.id && directTeraFolderIds.has(sub.parentId)) {
+        const parentFolder = targetDb.folders.find(f => f.id === sub.parentId);
+        if (parentFolder && parentFolder.googleFolderId) {
+          const res = await getOrCreateGF(sub.name, parentFolder.googleFolderId);
+          if (res.id) {
+            if (sub.googleFolderId !== res.id || res.created) {
+              healedSubfolders.push({ name: sub.name, parent: parentFolder.name, googleFolderId: res.id, created: res.created });
+            }
+            sub.googleFolderId = res.id;
+          }
         }
       }
     }
 
-    await healSubtree(tera.id, tera.googleFolderId);
-
+    // 4. Save DB with version 500
     targetDb._dbVer = 500;
     _memDBCacheVer = 500;
     _memDBCache = targetDb;
     await uSet(env, 'td:db', targetDb);
     const gDriveBackupId = await saveDBToGDrive(env, targetDb);
 
+    // 5. Final check of items in tera on Google Drive
     const gTeraRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${tera.googleFolderId}' in parents and trashed = false`)}&fields=files(id,name,mimeType)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
       headers: { Authorization: `Bearer ${at}` }
     });
@@ -2253,8 +2269,10 @@ async function hDebugDB(req, env) {
     return J({
       ok: true,
       teraGoogleFolderId: tera.googleFolderId,
-      healedFoldersCount: healed.length,
-      healed,
+      healedCanonicalCount: healedCanonical.length,
+      healedCanonical,
+      healedSubfoldersCount: healedSubfolders.length,
+      healedSubfolders,
       removedStraysCount: toRemoveFolderIds.size,
       dbFoldersDirectlyInTera: targetDb.folders.filter(f => f.parentId === tera.id).length,
       gDriveFoldersInTeraCount: (gTeraData.files||[]).length,
@@ -2275,21 +2293,19 @@ async function hDebugDB(req, env) {
     if (!targetDb.files) targetDb.files = [];
     if (!targetDb.folders) targetDb.folders = [];
 
-    let allRootFiles = [];
-    let pageToken = '';
-    do {
-      const q = `'${drv.rootFolderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder' and name != '__teledrive_db__.json'`;
-      const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=nextPageToken,files(id,name,size,mimeType)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true${pageToken ? '&pageToken=' + pageToken : ''}`;
-      let r = await fetch(url, { headers: { Authorization: `Bearer ${at}` } });
-      if (r.status === 401) {
-        at = await gAT(env, drv.encToken, true);
-        r = await fetch(url, { headers: { Authorization: `Bearer ${at}` } });
-      }
-      const d = await r.json().catch(()=>({}));
-      if (d.files) allRootFiles.push(...d.files);
-      pageToken = d.nextPageToken || '';
-    } while (pageToken && allRootFiles.length < 500);
+    // Query files directly in root
+    const q = `'${drv.rootFolderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder' and name != '__teledrive_db__.json'`;
+    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,size,mimeType)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+    let r = await fetch(url, { headers: { Authorization: `Bearer ${at}` } });
+    if (r.status === 401) {
+      at = await gAT(env, drv.encToken, true);
+      r = await fetch(url, { headers: { Authorization: `Bearer ${at}` } });
+    }
+    const d = await r.json().catch(()=>({files:[]}));
+    const allRootFiles = d.files || [];
 
+    // Move in safe batches of 30 to respect Cloudflare Worker subrequest budget
+    const batchToMove = allRootFiles.slice(0, 30);
     const moved = [];
     const failed = [];
 
@@ -2302,7 +2318,7 @@ async function hDebugDB(req, env) {
       || targetDb.folders.find(f => (f.name||'').toLowerCase() === 'dcim')
       || targetDb.folders.find(f => (f.name||'').toLowerCase() === 'photos 111');
 
-    for (const file of allRootFiles) {
+    for (const file of batchToMove) {
       let dbEntry = targetDb.files.find(f => f.googleFileId === file.id);
       if (!dbEntry) {
         dbEntry = targetDb.files.find(f => f.name === file.name && String(f.size) === String(file.size) && !f.trashed);
@@ -2378,10 +2394,11 @@ async function hDebugDB(req, env) {
     return J({
       ok: true,
       totalRootFilesFound: allRootFiles.length,
-      movedCount: moved.length,
+      movedInThisBatch: moved.length,
+      remainingInRoot: allRootFiles.length - moved.length,
       failedCount: failed.length,
-      moved: moved.slice(0, 30),
-      failed: failed.slice(0, 10),
+      moved: moved.slice(0, 15),
+      failed: failed.slice(0, 5),
       _dbVer: targetDb._dbVer
     });
   }
