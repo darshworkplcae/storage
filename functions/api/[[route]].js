@@ -4084,9 +4084,51 @@ async function hTripAPI(req, env, subpath, method) {
     }
 
     const folderObj = (db.folders || []).find(f => f.id === folderId);
+    const tripCustomName = (trip && trip.tripName) ? trip.tripName : null;
+
+    const membersSummary = (db.tripUsers || []).map(u => {
+      const un = u.username.toLowerCase();
+      let paid = 0;
+      let share = 0;
+      (trip.bills || []).forEach(b => {
+        const amt = parseFloat(b.amount) || 0;
+        if ((b.paidBy || '').toLowerCase() === un) paid += amt;
+        const splits = b.splitMembers || (db.tripUsers || []).map(x => x.username);
+        if (splits.map(x => x.toLowerCase()).includes(un)) {
+          share += (amt / splits.length);
+        }
+      });
+      let settledDelta = 0;
+      (trip.settlements || []).forEach(s => {
+        if (s.status === 'verified') {
+          const amt = parseFloat(s.amount) || 0;
+          if ((s.fromUser || '').toLowerCase() === un) settledDelta += amt;
+          if ((s.toUser || '').toLowerCase() === un) settledDelta -= amt;
+        }
+      });
+      (trip.concessions || []).forEach(c => {
+        const amt = parseFloat(c.amount) || 0;
+        if ((c.forUser || '').toLowerCase() === un) settledDelta += amt;
+        if ((c.byUser || '').toLowerCase() === un) settledDelta -= amt;
+      });
+      const net = (paid - share) + settledDelta;
+      return {
+        id: u.id,
+        name: u.name,
+        username: u.username,
+        upiId: u.upiId || '',
+        qrDataUrl: u.qrDataUrl || '',
+        totalPaid: Math.round(paid),
+        totalShare: Math.round(share),
+        netBalance: Math.round(net),
+        status: net > 1 ? 'gets' : (net < -1 ? 'owes' : 'settled'),
+        amount: Math.round(Math.abs(net))
+      };
+    });
+
     return J({
       folderId,
-      folderName: folderObj ? folderObj.name : 'Trip Expenses',
+      folderName: tripCustomName || (folderObj ? folderObj.name : 'Trip Expenses'),
       totalExpenses: Math.round(totalExpenses),
       totalSettled: Math.round(totalSettled),
       remainingDue: Math.max(0, Math.round(totalExpenses - totalSettled)),
@@ -4095,6 +4137,7 @@ async function hTripAPI(req, env, subpath, method) {
       concessions: trip.concessions || [],
       balances,
       suggestions,
+      membersSummary,
       users: (db.tripUsers || []).map(u => ({
         id: u.id,
         name: u.name,
@@ -4232,7 +4275,58 @@ async function hTripAPI(req, env, subpath, method) {
     return J({ ok: true, concession: newConcession });
   }
 
-  // 11. Admin trip users panel: GET /api/trip/admin-users
+  // Rename trip title
+  if (subpath === 'rename' && method === 'POST') {
+    if (!loggedInUser && !adminSes) return J({ error: 'Unauthorized' }, 401);
+    const body = await req.json().catch(() => ({}));
+    const { folderId, newName } = body;
+    if (!folderId || !newName) return J({ error: 'Missing fields' }, 400);
+    if (!db.tripData[folderId]) db.tripData[folderId] = { folderId, bills: [], settlements: [], concessions: [] };
+    db.tripData[folderId].tripName = String(newName).trim();
+    await uSet(env, 'td:db', db);
+    return J({ ok: true, tripName: db.tripData[folderId].tripName });
+  }
+
+  // Delete bill (creator or admin only)
+  if (subpath === 'bill/delete' && method === 'POST') {
+    if (!loggedInUser && !adminSes) return J({ error: 'Unauthorized' }, 401);
+    const body = await req.json().catch(() => ({}));
+    const { folderId, billId } = body;
+    if (!folderId || !billId) return J({ error: 'Missing fields' }, 400);
+    const trip = db.tripData[folderId];
+    if (!trip || !trip.bills) return J({ error: 'Trip not found' }, 404);
+    const bIdx = trip.bills.findIndex(b => b.id === billId);
+    if (bIdx === -1) return J({ error: 'Bill not found' }, 404);
+    const bill = trip.bills[bIdx];
+    if (!adminSes && bill.paidBy.toLowerCase() !== loggedInUser.toLowerCase()) {
+      return J({ error: 'You can only delete your own bills' }, 403);
+    }
+    trip.bills.splice(bIdx, 1);
+    await uSet(env, 'td:db', db);
+    return J({ ok: true });
+  }
+
+  // Reset password
+  if (subpath === 'reset-password' && method === 'POST') {
+    if (!loggedInUser) return J({ error: 'Unauthorized — Please login' }, 401);
+    const body = await req.json().catch(() => ({}));
+    const { oldPassword, newPassword } = body;
+    if (!newPassword || newPassword.length < 3) return J({ error: 'Password must be at least 3 characters' }, 400);
+    const user = (db.tripUsers || []).find(u => u.username === loggedInUser);
+    if (!user) return J({ error: 'User not found' }, 404);
+    if (oldPassword) {
+      const oldHash = await sha256(oldPassword);
+      if (user.passwordHash !== oldHash && user.passwordHash !== await sha256(oldPassword.toUpperCase())) {
+        return J({ error: 'Current password incorrect' }, 401);
+      }
+    }
+    user.passwordHash = await sha256(newPassword);
+    user.rawPasswordHint = newPassword;
+    await uSet(env, 'td:db', db);
+    return J({ ok: true, message: 'Password updated successfully' });
+  }
+
+    // 11. Admin trip users panel: GET /api/trip/admin-users
   if (subpath === 'admin-users' && method === 'GET') {
     if (!adminSes) return J({ error: 'Admin only' }, 401);
     return J({

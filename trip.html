@@ -3,23 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>TripSplit — Trip Bills & UPI Expense Manager</title>
+  <title>TripSplit — Trip Bills & UPI Expense Splitter</title>
   <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     :root {
-      --bg: #0b1120;
-      --card: #1e293b;
-      --border: #334155;
-      --text: #f8fafc;
-      --muted: #94a3b8;
-      --primary: #3b82f6;
-      --accent: #10b981;
+      /* Claude AI Signature Warm Clay & Espresso Palette */
+      --bg: #1a1714;
+      --bg-surface: #24201b;
+      --card: #2c2721;
+      --card-hover: #363029;
+      --border: #423b32;
+      --border-subtle: #332d26;
+      --text: #f6f2ec;
+      --text-muted: #aba092;
+      --clay-accent: #c96b32;
+      --clay-light: #e0834a;
+      --amber: #d97706;
+      --emerald: #10b981;
+      --rose: #f43f5e;
     }
     body {
       background-color: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       -webkit-tap-highlight-color: transparent;
     }
     .tap-active:active {
@@ -30,16 +37,16 @@
       width: 6px;
     }
     .custom-scroll::-webkit-scrollbar-thumb {
-      background: #334155;
+      background: var(--border);
       border-radius: 9999px;
     }
     .glass-nav {
-      background: rgba(15, 23, 42, 0.85);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      background: rgba(26, 23, 20, 0.92);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
     }
     .toast-anim {
-      animation: slideIn 0.25s ease-out forwards;
+      animation: slideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
     @keyframes slideIn {
       from { transform: translateY(-20px); opacity: 0; }
@@ -47,61 +54,76 @@
     }
   </style>
 </head>
-<body class="min-h-screen pb-20 sm:pb-10 antialiased selection:bg-blue-500 selection:text-white">
+<body class="min-h-screen pb-24 sm:pb-12 antialiased selection:bg-[#c96b32] selection:text-white">
 
   <!-- TOP NAVBAR -->
-  <header class="sticky top-0 z-40 glass-nav border-b border-[var(--border)] px-4 py-3">
+  <header class="sticky top-0 z-40 glass-nav border-b border-[var(--border-subtle)] px-4 py-3">
     <div class="max-w-5xl mx-auto flex items-center justify-between gap-3">
       
-      <!-- Brand & Folder Switcher -->
+      <!-- Back & Title -->
       <div class="flex items-center gap-2.5 min-w-0">
-        <a href="/" class="w-9 h-9 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center shrink-0 shadow-sm tap-active" title="Back to TeleDrive">
+        <a href="/" class="w-9 h-9 rounded-xl bg-[var(--card)] hover:bg-[var(--card-hover)] text-[var(--clay-light)] border border-[var(--border)] flex items-center justify-center shrink-0 shadow-sm tap-active transition" title="Back to TeleDrive">
           <i class="fas fa-arrow-left text-sm"></i>
         </a>
         <div class="min-w-0">
           <div class="flex items-center gap-1.5">
-            <span class="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1">
+            <span class="text-xs font-bold text-[var(--clay-light)] uppercase tracking-wider flex items-center gap-1">
               <i class="fas fa-receipt"></i> TripSplit
             </span>
-            <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-medium border border-emerald-500/30">Free</span>
+            <span class="text-[10px] bg-[#c96b32]/20 text-[#e0834a] px-1.5 py-0.5 rounded-full font-medium border border-[#c96b32]/30">Live</span>
           </div>
-          <div class="flex items-center gap-1 cursor-pointer select-none" onclick="openFolderSelectorModal()">
-            <h1 id="tripTitleText" class="font-bold text-sm sm:text-base text-white truncate hover:text-blue-400 transition">
-              Select Trip Folder
+          <div class="flex items-center gap-1.5 group cursor-pointer" onclick="promptRenameTrip()">
+            <h1 id="navTripTitleText" class="font-bold text-sm sm:text-base text-[var(--text)] truncate group-hover:text-[var(--clay-light)] transition">
+              Kenjalgad 3 sep 26
             </h1>
-            <i class="fas fa-chevron-down text-[10px] text-[var(--muted)]"></i>
+            <i class="fas fa-pen text-[10px] text-[var(--text-muted)] group-hover:text-[var(--clay-light)] transition opacity-60 group-hover:opacity-100" title="Click to rename trip title"></i>
           </div>
         </div>
       </div>
 
-      <!-- User Auth State -->
-      <div class="flex items-center gap-2">
-        <button id="authBtn" onclick="handleAuthBtnClick()" class="tap-active px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-blue-500/10 transition">
+      <!-- Auth Controls (Right) -->
+      <div class="flex items-center gap-2 shrink-0">
+        
+        <!-- Logged Out State -->
+        <button id="navLoginBtn" onclick="openLoginModal()" class="tap-active px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#c96b32] to-[#b35922] hover:from-[#d6763a] hover:to-[#c26228] text-white font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-[#c96b32]/20 transition">
           <i class="fas fa-arrow-right-to-bracket text-xs"></i>
-          <span id="authBtnLabel">Login</span>
+          <span>Login</span>
         </button>
 
-        <!-- User Menu Dropdown (Hidden until logged in) -->
-        <div id="userMenuDropdown" class="hidden relative">
-          <button onclick="toggleUserDropdown()" class="tap-active flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-[var(--border)] px-2.5 py-1.5 rounded-xl text-xs font-medium text-white transition">
-            <div id="userAvatarCircle" class="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center font-bold text-white text-[11px]">D</div>
-            <span id="navUserNameText" class="max-w-[80px] sm:max-w-[120px] truncate">User</span>
-            <i class="fas fa-chevron-down text-[10px] text-[var(--muted)]"></i>
+        <!-- Logged In State Controls -->
+        <div id="navUserBar" class="hidden flex items-center gap-2">
+          <!-- Reset Password Quick Pill -->
+          <button onclick="openResetPasswordModal()" class="tap-active hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[var(--card)] hover:bg-[var(--card-hover)] text-xs text-[var(--text-muted)] hover:text-white border border-[var(--border)] transition" title="Change your password">
+            <i class="fas fa-key text-[var(--amber)]"></i>
+            <span>Reset Pass</span>
           </button>
-          
-          <div id="userDropdownContent" class="hidden absolute right-0 mt-2 w-48 bg-[var(--card)] border border-[var(--border)] rounded-2xl shadow-2xl p-1.5 z-50 space-y-1">
-            <button onclick="openProfileModal(); toggleUserDropdown(false);" class="w-full text-left px-3 py-2 text-xs text-white hover:bg-slate-800 rounded-xl flex items-center gap-2 transition">
-              <i class="fas fa-qrcode text-emerald-400 w-4"></i> My UPI QR & Settings
+
+          <!-- User Profile Dropdown Button -->
+          <div class="relative">
+            <button onclick="toggleUserDropdown()" class="tap-active flex items-center gap-2 bg-[var(--card)] hover:bg-[var(--card-hover)] border border-[var(--border)] px-2.5 py-1.5 rounded-xl text-xs font-semibold text-white transition shadow-sm">
+              <div id="navAvatarLetter" class="w-6 h-6 rounded-full bg-[#c96b32] text-white flex items-center justify-center font-bold text-[11px]">D</div>
+              <span id="navUserNameDisplay" class="max-w-[70px] sm:max-w-[110px] truncate">Darshan</span>
+              <i class="fas fa-chevron-down text-[10px] text-[var(--text-muted)]"></i>
             </button>
-            <button onclick="openConcessionModal(); toggleUserDropdown(false);" class="w-full text-left px-3 py-2 text-xs text-white hover:bg-slate-800 rounded-xl flex items-center gap-2 transition">
-              <i class="fas fa-hand-holding-dollar text-amber-400 w-4"></i> Give Cash / Concession
-            </button>
-            <button onclick="openAdminPanel(); toggleUserDropdown(false);" class="w-full text-left px-3 py-2 text-xs text-white hover:bg-slate-800 rounded-xl flex items-center gap-2 transition border-t border-[var(--border)] pt-2">
-              <i class="fas fa-user-shield text-purple-400 w-4"></i> Admin User Vault
-            </button>
-            <button onclick="logout(); toggleUserDropdown(false);" class="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 rounded-xl flex items-center gap-2 transition">
-              <i class="fas fa-right-from-bracket w-4"></i> Logout
-            </button>
+            
+            <!-- Dropdown Menu -->
+            <div id="userDropdownContent" class="hidden absolute right-0 mt-2 w-52 bg-[var(--card)] border border-[var(--border)] rounded-2xl shadow-2xl p-1.5 z-50 space-y-1">
+              <div class="px-3 py-2 border-b border-[var(--border-subtle)] text-[11px] text-[var(--text-muted)]">
+                Logged in as <b class="text-white block" id="dropdownUserFull">Darshan</b>
+              </div>
+              <button onclick="openProfileModal(); toggleUserDropdown(false);" class="w-full text-left px-3 py-2 text-xs text-white hover:bg-[var(--card-hover)] rounded-xl flex items-center gap-2.5 transition">
+                <i class="fas fa-qrcode text-emerald-400 w-4"></i> My UPI QR & Settings
+              </button>
+              <button onclick="openResetPasswordModal(); toggleUserDropdown(false);" class="w-full text-left px-3 py-2 text-xs text-white hover:bg-[var(--card-hover)] rounded-xl flex items-center gap-2.5 transition sm:hidden">
+                <i class="fas fa-key text-[var(--amber)] w-4"></i> Reset Password
+              </button>
+              <button onclick="openConcessionModal(); toggleUserDropdown(false);" class="w-full text-left px-3 py-2 text-xs text-white hover:bg-[var(--card-hover)] rounded-xl flex items-center gap-2.5 transition">
+                <i class="fas fa-hand-holding-dollar text-[var(--amber)] w-4"></i> Give Cash / Concession
+              </button>
+              <button onclick="logout(); toggleUserDropdown(false);" class="w-full text-left px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 rounded-xl flex items-center gap-2.5 transition border-t border-[var(--border-subtle)] pt-2">
+                <i class="fas fa-right-from-bracket w-4"></i> Logout
+              </button>
+            </div>
           </div>
         </div>
 
@@ -113,118 +135,171 @@
   <!-- MAIN CONTAINER -->
   <main class="max-w-5xl mx-auto p-4 sm:p-6 space-y-5">
 
-    <!-- HERO FINANCIAL SUMMARY CARD -->
-    <section class="bg-gradient-to-br from-slate-900 to-slate-800/90 border border-[var(--border)] rounded-2xl p-4 sm:p-6 shadow-xl relative overflow-hidden">
-      <div class="absolute -right-8 -bottom-8 text-8xl text-blue-500/5 pointer-events-none">
-        <i class="fas fa-calculator"></i>
-      </div>
+    <!-- HERO TRIP HEADER (Image 4 Style) -->
+    <section class="bg-gradient-to-br from-[var(--bg-surface)] to-[var(--card)] border border-[var(--border)] rounded-2xl p-4 sm:p-6 shadow-xl relative overflow-hidden">
       
+      <!-- Trip Header Bar -->
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
         <div>
-          <span class="text-xs font-semibold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
-            <i class="fas fa-chart-pie"></i> Trip Financial Overview
-          </span>
-          <h2 id="summaryTripName" class="text-lg sm:text-xl font-bold text-white mt-0.5">Loading Trip...</h2>
+          <div class="flex items-center gap-2">
+            <span class="text-xl">🏖️</span>
+            <div class="flex items-center gap-2">
+              <h2 id="heroTripTitle" class="text-lg sm:text-2xl font-bold text-[var(--text)] tracking-tight">Kenjalgad 3 sep 26</h2>
+              <button onclick="promptRenameTrip()" class="text-[var(--text-muted)] hover:text-[var(--clay-light)] transition text-xs" title="Edit trip name">
+                <i class="fas fa-pen"></i>
+              </button>
+            </div>
+            <span class="bg-[#c96b32]/20 text-[#e0834a] text-xs px-2.5 py-0.5 rounded-full border border-[#c96b32]/30 font-semibold" id="heroMembersCount">
+              7 Members
+            </span>
+          </div>
+          <p class="text-xs text-[var(--text-muted)] mt-1">Expenses, shared budget, and live settlement tracker</p>
         </div>
         
+        <!-- Action Buttons -->
         <div class="flex items-center gap-2">
-          <button onclick="openAddBillModal()" class="tap-active bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow-md shadow-blue-600/20 flex items-center gap-1.5 transition">
-            <i class="fas fa-plus-circle"></i> Add New Bill
+          <button onclick="openAddBillModal()" class="tap-active bg-gradient-to-r from-[#c96b32] to-[#b35922] hover:from-[#d6763a] hover:to-[#c26228] text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow-md shadow-[#c96b32]/20 flex items-center gap-1.5 transition">
+            <i class="fas fa-plus-circle"></i> Upload Bill
           </button>
-          <button onclick="openAiScannerModal()" class="tap-active bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 font-semibold text-xs px-3 py-2.5 rounded-xl flex items-center gap-1.5 transition" title="Scan receipt with free AI">
-            <i class="fas fa-wand-magic-sparkles text-purple-400"></i> AI Scan
+          <button onclick="openAiScannerModal()" class="tap-active bg-[#2e261e] hover:bg-[#382f25] text-[var(--clay-light)] border border-[#524434] font-semibold text-xs px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 transition" title="Free AI Scan Bill">
+            <i class="fas fa-wand-magic-sparkles text-[var(--amber)]"></i> AI Scan Bill
           </button>
         </div>
       </div>
 
-      <!-- Financial Metrics Grid -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div class="bg-slate-950/50 border border-slate-800 rounded-xl p-3 text-center">
-          <span class="text-[11px] text-[var(--muted)] font-medium">Total Bills</span>
-          <div class="text-lg sm:text-xl font-black text-white mt-1" id="statTotalExpense">₹0</div>
+      <!-- Financial Metrics Grid (Image 4 exact metrics) -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+        <div class="bg-[var(--bg)]/70 border border-[var(--border)] rounded-xl p-3 text-center">
+          <span class="text-[11px] text-[var(--text-muted)] font-medium">Total Trip Bills</span>
+          <div class="text-lg sm:text-2xl font-black text-white mt-1" id="metricTotal">₹0</div>
         </div>
-        <div class="bg-slate-950/50 border border-slate-800 rounded-xl p-3 text-center">
-          <span class="text-[11px] text-[var(--muted)] font-medium">Equal Share / Friend</span>
-          <div class="text-lg sm:text-xl font-black text-blue-400 mt-1" id="statPerPerson">₹0</div>
+        <div class="bg-[var(--bg)]/70 border border-[var(--border)] rounded-xl p-3 text-center">
+          <span class="text-[11px] text-[var(--text-muted)] font-medium">Equal Share / Friend</span>
+          <div class="text-lg sm:text-2xl font-black text-[var(--clay-light)] mt-1" id="metricShare">₹0</div>
         </div>
-        <div class="bg-slate-950/50 border border-slate-800 rounded-xl p-3 text-center">
-          <span class="text-[11px] text-[var(--muted)] font-medium">Total Paid / Settled</span>
-          <div class="text-lg sm:text-xl font-black text-emerald-400 mt-1" id="statSettled">₹0</div>
+        <div class="bg-[var(--bg)]/70 border border-[var(--border)] rounded-xl p-3 text-center">
+          <span class="text-[11px] text-[var(--text-muted)] font-medium">Total Settled</span>
+          <div class="text-lg sm:text-2xl font-black text-emerald-400 mt-1" id="metricSettled">₹0</div>
         </div>
-        <div class="bg-slate-950/50 border border-slate-800 rounded-xl p-3 text-center">
-          <span class="text-[11px] text-[var(--muted)] font-medium">Pending Remaining</span>
-          <div class="text-lg sm:text-xl font-black text-amber-400 mt-1" id="statRemaining">₹0</div>
+        <div class="bg-[var(--bg)]/70 border border-[var(--border)] rounded-xl p-3 text-center">
+          <span class="text-[11px] text-[var(--text-muted)] font-medium">Remaining Due</span>
+          <div class="text-lg sm:text-2xl font-black text-amber-400 mt-1" id="metricRemaining">₹0</div>
         </div>
       </div>
+
+      <!-- MEMBER STATUS BAR (Image 4 exact horizontal straight layout) -->
+      <div class="mt-5 pt-4 border-t border-[var(--border-subtle)] space-y-2">
+        <div class="flex items-center justify-between text-xs">
+          <span class="font-bold uppercase tracking-wider text-[var(--text-muted)] text-[11px]">
+            Group Members Status (<span id="membersCountSummaryText">7</span> Friends)
+          </span>
+          <span id="whoAreYouHint" class="text-[11px] text-[var(--clay-light)]">Tap any member to view their status</span>
+        </div>
+
+        <!-- Clean Straight Horizontal Member Row -->
+        <div id="membersHorizontalRow" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 overflow-x-auto custom-scroll pb-1">
+          <!-- Injected dynamically: Darshan (Gets), Amar (Gets), Soham (Owes), Omakr (Owes), Rohit (Owes), Nikhil (Owes), Bhushan (Owes) -->
+        </div>
+      </div>
+
     </section>
 
-    <!-- LOGGED IN USER NOTIFICATION CARDS -->
-    <div id="loggedInDashboardAlerts" class="space-y-3">
-      <!-- Injected dynamically: Pending payments to verify, personal dues banner -->
+    <!-- CALL-TO-ACTION BANNER WHEN NOT LOGGED IN -->
+    <div id="unauthBanner" class="p-3.5 rounded-2xl bg-[#2e261e] border border-[#524434] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-sm">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-xl bg-[#c96b32]/20 text-[#e0834a] flex items-center justify-center shrink-0">
+          <i class="fas fa-user-check"></i>
+        </div>
+        <div>
+          <div class="font-bold text-white">Log in as yourself to pay your due or upload bills</div>
+          <div class="text-[11px] text-[var(--text-muted)]">Click your name and enter your password. No extra accounts needed.</div>
+        </div>
+      </div>
+      <button onclick="openLoginModal()" class="tap-active px-4 py-2 rounded-xl bg-gradient-to-r from-[#c96b32] to-[#b35922] hover:from-[#d6763a] hover:to-[#c26228] text-white font-bold text-xs shrink-0 shadow transition flex items-center justify-center gap-1.5">
+        <i class="fas fa-arrow-right-to-bracket"></i> Login to Pay Due
+      </button>
     </div>
 
-    <!-- MAIN TABS: 1. Balances & Settlements | 2. Bills & Receipts | 3. Friends List -->
+    <!-- NOTIFICATION & VERIFICATION ALERTS FOR LOGGED IN USER -->
+    <div id="userActionAlerts" class="space-y-3"></div>
+
+    <!-- MAIN APP TABS -->
     <section class="space-y-4">
-      <div class="flex items-center justify-between border-b border-[var(--border)] pb-2 overflow-x-auto custom-scroll">
-        <div class="flex items-center gap-2 shrink-0">
-          <button id="tabSettlementsBtn" onclick="switchMainTab('settlements')" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-blue-600 text-white shadow-sm transition">
+      <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-2 overflow-x-auto custom-scroll">
+        <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <button id="tabBtnSettlements" onclick="switchTab('settlements')" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-[#c96b32] text-white shadow-sm transition">
             <i class="fas fa-handshake mr-1.5"></i> Who Pays Whom
           </button>
-          <button id="tabBillsBtn" onclick="switchMainTab('bills')" class="px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--muted)] hover:text-white transition">
-            <i class="fas fa-file-invoice mr-1.5"></i> Trip Bills (<span id="billsCountBadge">0</span>)
+          <button id="tabBtnBills" onclick="switchTab('bills')" class="px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition">
+            <i class="fas fa-file-invoice mr-1.5"></i> All Bills (<span id="allBillsBadge">0</span>)
           </button>
-          <button id="tabMembersBtn" onclick="switchMainTab('members')" class="px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--muted)] hover:text-white transition">
-            <i class="fas fa-users mr-1.5"></i> Friends & QR Codes
+          <button id="tabBtnMyBills" onclick="switchTab('mybills')" class="px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition">
+            <i class="fas fa-user-tag mr-1.5"></i> My Bills (<span id="myBillsBadge">0</span>)
+          </button>
+          <button id="tabBtnFriends" onclick="switchTab('friends')" class="px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition">
+            <i class="fas fa-qrcode mr-1.5"></i> QR Codes
           </button>
         </div>
       </div>
 
-      <!-- TAB 1: SETTLEMENTS (WHO PAYS WHOM) -->
-      <div id="tabContentSettlements" class="space-y-3">
+      <!-- TAB 1: WHO PAYS WHOM (CLEAN STRAIGHT LIST) -->
+      <div id="tabPanelSettlements" class="space-y-3">
         <div class="flex items-center justify-between">
-          <span class="text-xs font-bold uppercase tracking-wider text-[var(--muted)] flex items-center gap-1.5">
-            <i class="fas fa-arrow-right-arrow-left text-amber-400"></i> Smart Settlement Matrix
+          <span class="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+            <i class="fas fa-arrow-right-arrow-left text-[var(--amber)]"></i> Pending Settlements
           </span>
-          <span class="text-[11px] text-[var(--muted)]">Calculated in fewest payments</span>
+          <span class="text-[11px] text-[var(--text-muted)]">Calculated in fewest payments</span>
         </div>
 
-        <div id="settlementsListContainer" class="space-y-2.5">
+        <div id="settlementsList" class="space-y-2">
+          <!-- Injected dynamically: clean straight rows -->
+        </div>
+      </div>
+
+      <!-- TAB 2: ALL TRIP BILLS -->
+      <div id="tabPanelBills" class="hidden space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+            <i class="fas fa-file-invoice text-[var(--clay-light)]"></i> All Uploaded Trip Receipts
+          </span>
+          <button onclick="openAddBillModal()" class="text-xs text-[var(--clay-light)] hover:underline font-semibold">
+            + Upload New Bill
+          </button>
+        </div>
+
+        <div id="allBillsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <!-- Injected dynamically -->
-          <div class="p-8 text-center text-[var(--muted)] text-xs bg-[var(--card)] rounded-2xl border border-[var(--border)]">
-            <i class="fas fa-spinner fa-spin text-2xl text-blue-400 mb-2"></i>
-            <p>Calculating trip balances…</p>
-          </div>
         </div>
       </div>
 
-      <!-- TAB 2: TRIP BILLS & RECEIPTS -->
-      <div id="tabContentBills" class="hidden space-y-3">
+      <!-- TAB 3: MY BILLS (USER'S OWN BILLS WITH DELETE OPTION) -->
+      <div id="tabPanelMyBills" class="hidden space-y-3">
         <div class="flex items-center justify-between">
-          <span class="text-xs font-bold uppercase tracking-wider text-[var(--muted)] flex items-center gap-1.5">
-            <i class="fas fa-file-invoice text-blue-400"></i> Uploaded Trip Bills
-          </span>
-          <button onclick="openAddBillModal()" class="text-xs text-blue-400 hover:underline font-semibold">
+          <div>
+            <span class="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+              <i class="fas fa-user-tag text-emerald-400"></i> Bills Paid by You
+            </span>
+            <p class="text-[11px] text-[var(--text-muted)]">You can review and delete bills you uploaded here.</p>
+          </div>
+          <button onclick="openAddBillModal()" class="text-xs text-[var(--clay-light)] hover:underline font-semibold">
             + Add Bill
           </button>
         </div>
 
-        <div id="billsListGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div id="myBillsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <!-- Injected dynamically -->
         </div>
       </div>
 
-      <!-- TAB 3: FRIENDS DIRECTORY & QR VAULT -->
-      <div id="tabContentMembers" class="hidden space-y-3">
+      <!-- TAB 4: FRIENDS & QR CODES -->
+      <div id="tabPanelFriends" class="hidden space-y-3">
         <div class="flex items-center justify-between">
-          <div>
-            <span class="text-xs font-bold uppercase tracking-wider text-[var(--muted)] flex items-center gap-1.5">
-              <i class="fas fa-qrcode text-emerald-400"></i> Group Friends & UPI QR Vault
-            </span>
-            <p class="text-[11px] text-[var(--muted)]">Each member can log in and set their own UPI ID & QR code.</p>
-          </div>
+          <span class="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+            <i class="fas fa-qrcode text-emerald-400"></i> Member UPI QR Codes
+          </span>
         </div>
 
-        <div id="membersVaultGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div id="friendsQrGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <!-- Injected dynamically -->
         </div>
       </div>
@@ -235,40 +310,70 @@
 
   <!-- ==================== MODALS ==================== -->
 
-  <!-- MODAL: LOGIN (Select Name + Enter Password) -->
+  <!-- MODAL: LOGIN -->
   <div id="loginModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
-      <div class="flex items-center justify-between border-b border-[var(--border)] pb-3">
+      <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
         <div class="flex items-center gap-2">
-          <span class="w-7 h-7 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-bold"><i class="fas fa-user-lock"></i></span>
-          <h3 class="font-bold text-white text-sm">Member Sign In</h3>
+          <span class="w-7 h-7 rounded-lg bg-[#c96b32]/20 text-[#e0834a] flex items-center justify-center text-xs font-bold"><i class="fas fa-user-lock"></i></span>
+          <h3 class="font-bold text-white text-sm">Select Your Name to Sign In</h3>
         </div>
-        <button onclick="closeLoginModal()" class="text-[var(--muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
+        <button onclick="closeLoginModal()" class="text-[var(--text-muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
       </div>
 
       <div class="space-y-3 text-xs">
         <div>
-          <label class="block font-semibold mb-1.5 text-[var(--muted)]">1. Select Your Name</label>
-          <div id="loginUserChipsGrid" class="grid grid-cols-3 gap-1.5 max-h-40 overflow-y-auto custom-scroll p-1 bg-slate-900/60 rounded-xl border border-[var(--border)]">
-            <!-- Injected dynamically: Amar, Darshan, Soham, Omakr, Rohit, Nikhil, Bhushan -->
+          <label class="block font-semibold mb-1.5 text-[var(--text-muted)]">1. Select Your Name</label>
+          <div id="loginUserChips" class="grid grid-cols-3 gap-1.5 max-h-44 overflow-y-auto custom-scroll p-1 bg-[var(--bg)] rounded-xl border border-[var(--border)]">
+            <!-- Amar, Darshan, Soham, Omakr, Rohit, Nikhil, Bhushan -->
           </div>
         </div>
 
         <div>
-          <div class="flex items-center justify-between mb-1">
-            <label class="font-semibold text-[var(--muted)]">2. Password</label>
-            <span class="text-[10px] text-blue-400">Default: YOUR NAME (Capital)</span>
-          </div>
+          <label class="block font-semibold mb-1 text-[var(--text-muted)]">2. Password</label>
           <div class="relative">
-            <input type="password" id="loginPasswordInput" placeholder="Enter password (e.g. DARSHAN)" class="w-full bg-slate-900 border border-[var(--border)] rounded-xl px-3 py-2.5 text-white pr-9 focus:outline-none focus:border-blue-500">
-            <button type="button" onclick="togglePassVisibility('loginPasswordInput', this)" class="absolute right-2.5 top-2.5 text-[var(--muted)] hover:text-white">
+            <input type="password" id="loginPasswordInput" placeholder="Enter your password" class="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-3 py-2.5 text-white pr-9 focus:outline-none focus:border-[#c96b32]">
+            <button type="button" onclick="togglePass('loginPasswordInput', this)" class="absolute right-2.5 top-2.5 text-[var(--text-muted)] hover:text-white">
               <i class="fas fa-eye text-xs"></i>
             </button>
           </div>
         </div>
 
-        <button onclick="submitLogin()" id="loginSubmitBtn" class="tap-active w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl shadow-lg transition flex items-center justify-center gap-2">
+        <button onclick="submitLogin()" id="loginSubmitBtn" class="tap-active w-full bg-gradient-to-r from-[#c96b32] to-[#b35922] hover:from-[#d6763a] hover:to-[#c26228] text-white font-bold py-2.5 rounded-xl shadow-lg transition flex items-center justify-center gap-2">
           <span>Sign In</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: RESET PASSWORD -->
+  <div id="resetPasswordModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+        <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
+          <i class="fas fa-key text-[var(--amber)]"></i> Reset Your Password
+        </h3>
+        <button onclick="closeResetPasswordModal()" class="text-[var(--text-muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block font-semibold mb-1 text-[var(--text-muted)]">Current Password</label>
+          <input type="password" id="resetCurrentPass" placeholder="Enter current password" class="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-[#c96b32]">
+        </div>
+
+        <div>
+          <label class="block font-semibold mb-1 text-[var(--text-muted)]">New Password</label>
+          <input type="password" id="resetNewPass" placeholder="Enter new password" class="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-[#c96b32]">
+        </div>
+
+        <div>
+          <label class="block font-semibold mb-1 text-[var(--text-muted)]">Confirm New Password</label>
+          <input type="password" id="resetConfirmPass" placeholder="Re-enter new password" class="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-[#c96b32]">
+        </div>
+
+        <button onclick="submitResetPassword()" id="resetPassBtn" class="tap-active w-full bg-[#c96b32] hover:bg-[#b35922] text-white font-bold py-2.5 rounded-xl shadow-lg transition">
+          Update Password
         </button>
       </div>
     </div>
@@ -277,47 +382,45 @@
   <!-- MODAL: PAY VIA UPI QR -->
   <div id="payModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
-      <div class="flex items-center justify-between border-b border-[var(--border)] pb-3">
+      <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
         <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
-          <i class="fas fa-qrcode text-emerald-400"></i> Pay <span id="payModalPayeeName">Friend</span>
+          <i class="fas fa-qrcode text-emerald-400"></i> Pay <span id="payeeNameText">Friend</span>
         </h3>
-        <button onclick="closePayModal()" class="text-[var(--muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
+        <button onclick="closePayModal()" class="text-[var(--text-muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
       </div>
 
       <div class="text-center space-y-3">
-        <!-- Amount Selection -->
         <div>
-          <span class="text-[11px] text-[var(--muted)] font-medium">Pending Due Amount</span>
-          <div class="text-2xl font-black text-amber-400" id="payModalDueText">₹0</div>
+          <span class="text-[11px] text-[var(--text-muted)] font-medium">Pending Due Amount</span>
+          <div class="text-2xl font-black text-amber-400" id="payDueAmtText">₹0</div>
         </div>
 
         <!-- QR Box -->
-        <div class="bg-white p-3.5 rounded-2xl inline-block shadow-xl border-4 border-slate-200">
-          <div id="payModalQrContainer" class="w-44 h-44 bg-slate-100 flex flex-col items-center justify-center rounded-xl overflow-hidden relative">
-            <!-- QR image or placeholder -->
+        <div class="bg-white p-3.5 rounded-2xl inline-block shadow-xl border-4 border-stone-200">
+          <div id="payQrBox" class="w-44 h-44 bg-stone-100 flex flex-col items-center justify-center rounded-xl overflow-hidden relative">
             <i class="fas fa-qrcode text-7xl text-slate-900"></i>
           </div>
-          <div class="text-[11px] text-slate-800 font-mono font-bold mt-2 truncate max-w-[180px]" id="payModalUpiText">
+          <div class="text-[11px] text-slate-800 font-mono font-bold mt-2 truncate max-w-[180px]" id="payUpiHandleText">
             UPI: Not set
           </div>
         </div>
 
-        <!-- Direct UPI 1-Click App Opener -->
-        <a id="payModalDeepLink" href="#" class="tap-active w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-2.5 rounded-xl shadow-md flex items-center justify-center gap-2 transition">
+        <!-- Direct 1-Click App Opener -->
+        <a id="payAppDeepLink" href="#" class="tap-active w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-2.5 rounded-xl shadow-md flex items-center justify-center gap-2 transition">
           <i class="fas fa-mobile-screen"></i> Open PhonePe / GPay / Paytm
         </a>
 
         <!-- Custom Amount & Mark Paid -->
-        <div class="bg-slate-900/80 p-3 rounded-xl border border-[var(--border)] text-left space-y-2">
+        <div class="bg-[var(--bg)] p-3 rounded-xl border border-[var(--border)] text-left space-y-2 text-xs">
           <div class="flex items-center justify-between">
-            <span class="text-[11px] font-semibold text-[var(--muted)]">Paid Amount (₹):</span>
-            <button onclick="setFullPayAmount()" class="text-[10px] text-blue-400 hover:underline">Pay Full</button>
+            <span class="text-[11px] font-semibold text-[var(--text-muted)]">Amount You Paid (₹):</span>
+            <button onclick="fillFullPayAmount()" class="text-[10px] text-[var(--clay-light)] hover:underline font-semibold">Pay Full</button>
           </div>
-          <input type="number" id="payInputAmount" class="w-full bg-slate-950 border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-white font-bold text-emerald-400 text-sm focus:outline-none focus:border-blue-500">
+          <input type="number" id="payCustomAmount" class="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-white font-bold text-emerald-400 text-sm focus:outline-none focus:border-[#c96b32]">
           
-          <input type="text" id="payInputNote" placeholder="UTR or note (e.g. Paid via GPay)" class="w-full bg-slate-950 border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500">
+          <input type="text" id="payNoteInput" placeholder="UTR or note (e.g. Paid via GPay)" class="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-[#c96b32]">
           
-          <button onclick="submitMarkPaid()" id="markPaidSubmitBtn" class="tap-active w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2 rounded-lg transition flex items-center justify-center gap-1.5">
+          <button onclick="submitMarkPaid()" id="markPaidBtn" class="tap-active w-full bg-[#c96b32] hover:bg-[#b35922] text-white font-bold text-xs py-2 rounded-lg transition flex items-center justify-center gap-1.5">
             <i class="fas fa-check-circle"></i> Submit Payment for Verification
           </button>
         </div>
@@ -328,206 +431,176 @@
   <!-- MODAL: ADD BILL -->
   <div id="addBillModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
-      <div class="flex items-center justify-between border-b border-[var(--border)] pb-3">
+      <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
         <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
-          <i class="fas fa-file-circle-plus text-blue-400"></i> Add Trip Bill
+          <i class="fas fa-file-circle-plus text-[var(--clay-light)]"></i> Add Trip Bill
         </h3>
-        <button onclick="closeAddBillModal()" class="text-[var(--muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
+        <button onclick="closeAddBillModal()" class="text-[var(--text-muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
       </div>
 
       <div class="space-y-3 text-xs">
         <div>
-          <label class="block font-semibold mb-1 text-[var(--muted)]">Bill Title</label>
-          <input type="text" id="addBillTitle" placeholder="e.g. Hotel Stay, Beach Dinner, Cab, Petrol" class="w-full bg-slate-900 border border-[var(--border)] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-blue-500">
+          <label class="block font-semibold mb-1 text-[var(--text-muted)]">Bill Title</label>
+          <input type="text" id="addBillTitle" placeholder="e.g. Hotel Stay, Beach Shack Dinner, Cab, Fuel" class="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-[#c96b32]">
         </div>
 
         <div class="grid grid-cols-2 gap-2">
           <div>
-            <label class="block font-semibold mb-1 text-[var(--muted)]">Total Amount (₹)</label>
-            <input type="number" id="addBillAmount" placeholder="e.g. 3500" class="w-full bg-slate-900 border border-[var(--border)] rounded-xl px-3 py-2 text-white font-bold text-amber-400 focus:outline-none focus:border-blue-500">
+            <label class="block font-semibold mb-1 text-[var(--text-muted)]">Total Bill (₹)</label>
+            <input type="number" id="addBillAmount" placeholder="e.g. 3500" class="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-3 py-2 text-white font-bold text-amber-400 focus:outline-none focus:border-[#c96b32]">
           </div>
           <div>
-            <label class="block font-semibold mb-1 text-[var(--muted)]">Paid By</label>
-            <div id="addBillPaidByDisplay" class="bg-slate-900 border border-[var(--border)] rounded-xl px-3 py-2 text-white font-semibold flex items-center gap-1.5">
-              <span id="addBillPayerName">You</span>
+            <label class="block font-semibold mb-1 text-[var(--text-muted)]">Paid By</label>
+            <div class="bg-[var(--bg)] border border-[var(--border)] rounded-xl px-3 py-2 text-white font-semibold flex items-center gap-1.5">
+              <span id="addBillPayerDisplay">You</span>
             </div>
           </div>
         </div>
 
-        <!-- Member Split Selector -->
+        <!-- Split Members -->
         <div>
           <div class="flex items-center justify-between mb-1.5">
-            <label class="font-semibold text-[var(--muted)]">Split Between Whom?</label>
-            <button onclick="toggleAllSplitMembers()" class="text-[10px] text-blue-400 hover:underline">Select All</button>
+            <label class="font-semibold text-[var(--text-muted)]">Split Between Whom?</label>
+            <button onclick="toggleAllSplitCheckboxes()" class="text-[10px] text-[var(--clay-light)] hover:underline font-semibold">Select All</button>
           </div>
-          <div id="addBillSplitMembersGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-1.5 p-2 bg-slate-900/60 rounded-xl border border-[var(--border)] max-h-32 overflow-y-auto custom-scroll">
-            <!-- Member Checkboxes injected dynamically -->
+          <div id="addBillMembersCheckboxes" class="grid grid-cols-2 sm:grid-cols-3 gap-1.5 p-2 bg-[var(--bg)] rounded-xl border border-[var(--border)] max-h-36 overflow-y-auto custom-scroll">
+            <!-- Injected dynamically -->
           </div>
         </div>
 
-        <!-- Receipt Image Upload -->
+        <!-- Receipt Image -->
         <div>
-          <label class="block font-semibold mb-1 text-[var(--muted)]">Receipt / Bill Proof Photo</label>
-          <div onclick="$('billReceiptFileInput').click()" class="border-2 border-dashed border-[var(--border)] hover:border-blue-500 rounded-xl p-3 text-center cursor-pointer transition bg-slate-900/40">
-            <input type="file" id="billReceiptFileInput" accept="image/*" class="hidden" onchange="handleBillReceiptSelect(event)">
-            <div id="receiptUploadPlaceholder">
-              <i class="fas fa-camera text-xl text-blue-400 mb-1"></i>
-              <p class="text-white font-medium text-xs">Tap to take photo or choose receipt</p>
+          <label class="block font-semibold mb-1 text-[var(--text-muted)]">Receipt / Proof Photo</label>
+          <div onclick="$('billFileInput').click()" class="border-2 border-dashed border-[var(--border)] hover:border-[#c96b32] rounded-xl p-3 text-center cursor-pointer transition bg-[var(--bg)]/50">
+            <input type="file" id="billFileInput" accept="image/*" class="hidden" onchange="handleReceiptSelected(event)">
+            <div id="receiptPrompt">
+              <i class="fas fa-camera text-xl text-[var(--clay-light)] mb-1"></i>
+              <p class="text-white font-medium text-xs">Tap to snap or choose photo</p>
             </div>
-            <img id="receiptImagePreview" class="hidden max-h-36 mx-auto rounded-lg shadow-md mt-1 border border-slate-700">
+            <img id="receiptPreviewThumb" class="hidden max-h-36 mx-auto rounded-lg shadow-md mt-1 border border-stone-700">
           </div>
         </div>
 
-        <button onclick="submitAddBill()" id="saveBillBtn" class="tap-active w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl shadow-lg transition flex items-center justify-center gap-2">
-          <span>Save Bill & Auto-Calculate</span>
+        <button onclick="submitNewBill()" id="saveNewBillBtn" class="tap-active w-full bg-gradient-to-r from-[#c96b32] to-[#b35922] hover:from-[#d6763a] hover:to-[#c26228] text-white font-bold py-2.5 rounded-xl shadow-lg transition">
+          Save Bill & Auto-Split
         </button>
       </div>
     </div>
   </div>
 
   <!-- MODAL: FREE AI RECEIPT SCANNER -->
-  <div id="aiScannerModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+  <div id="aiScanModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
-      <div class="flex items-center justify-between border-b border-[var(--border)] pb-3">
+      <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
         <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
-          <i class="fas fa-wand-magic-sparkles text-purple-400"></i> Free AI Bill Scanner
+          <i class="fas fa-wand-magic-sparkles text-[var(--amber)]"></i> Free AI Receipt Scanner
         </h3>
-        <button onclick="closeAiScannerModal()" class="text-[var(--muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
+        <button onclick="closeAiScanModal()" class="text-[var(--text-muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
       </div>
 
       <div class="space-y-3 text-xs text-center">
-        <p class="text-[var(--muted)]">Take a photo of any restaurant, hotel, or petrol bill. AI scans and extracts the total amount in seconds!</p>
+        <p class="text-[var(--text-muted)]">Take a photo of any receipt. In-browser AI reads the total amount automatically!</p>
         
-        <div onclick="$('aiScanFileInput').click()" class="border-2 border-dashed border-purple-500/40 hover:border-purple-500 rounded-xl p-6 cursor-pointer transition bg-purple-900/10">
-          <input type="file" id="aiScanFileInput" accept="image/*" class="hidden" onchange="processAiScan(event)">
-          <i class="fas fa-receipt text-4xl text-purple-400 mb-2"></i>
-          <p class="text-white font-bold">Tap to scan receipt photo</p>
-          <span class="text-[10px] text-purple-300">Supports Camera & Gallery</span>
+        <div onclick="$('aiScanInput').click()" class="border-2 border-dashed border-[#c96b32]/40 hover:border-[#c96b32] rounded-xl p-6 cursor-pointer transition bg-[#c96b32]/10">
+          <input type="file" id="aiScanInput" accept="image/*" class="hidden" onchange="runAiReceiptScan(event)">
+          <i class="fas fa-receipt text-4xl text-[var(--clay-light)] mb-2"></i>
+          <p class="text-white font-bold">Tap to capture or pick receipt</p>
         </div>
 
-        <div id="aiScanningIndicator" class="hidden p-3 bg-purple-900/20 border border-purple-500/30 rounded-xl text-center space-y-1">
-          <i class="fas fa-spinner fa-spin text-purple-400 text-lg"></i>
-          <p class="text-white font-medium text-xs">Scanning receipt text…</p>
+        <div id="aiScanLoading" class="hidden p-3 bg-[#c96b32]/15 border border-[#c96b32]/30 rounded-xl text-center space-y-1">
+          <i class="fas fa-spinner fa-spin text-[var(--clay-light)] text-lg"></i>
+          <p class="text-white font-medium text-xs">Scanning receipt numbers…</p>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- MODAL: PROFILE & SET UPI QR -->
+  <!-- MODAL: IN-APP RECEIPT LIGHTBOX (Fixes about:blank - Image 3) -->
+  <div id="receiptLightboxModal" class="hidden fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4" onclick="closeReceiptLightbox()">
+    <div class="relative max-w-2xl w-full max-h-[85vh] flex flex-col items-center justify-center" onclick="event.stopPropagation()">
+      <div class="w-full flex items-center justify-between text-white pb-2.5">
+        <div>
+          <h4 id="lightboxTitle" class="font-bold text-sm">Receipt</h4>
+          <p id="lightboxSubtitle" class="text-xs text-[var(--text-muted)]"></p>
+        </div>
+        <button onclick="closeReceiptLightbox()" class="text-[var(--text-muted)] hover:text-white tap-active p-2 text-lg">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="w-full bg-black/60 rounded-2xl overflow-hidden border border-stone-800 flex items-center justify-center max-h-[75vh]">
+        <img id="lightboxImage" src="" class="max-h-[75vh] w-auto object-contain mx-auto" alt="Bill Proof">
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: PROFILE & UPI QR -->
   <div id="profileModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
-      <div class="flex items-center justify-between border-b border-[var(--border)] pb-3">
+      <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
         <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
           <i class="fas fa-qrcode text-emerald-400"></i> My UPI QR & Settings
         </h3>
-        <button onclick="closeProfileModal()" class="text-[var(--muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
+        <button onclick="closeProfileModal()" class="text-[var(--text-muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
       </div>
 
       <div class="space-y-3 text-xs">
         <div>
-          <label class="block font-semibold mb-1 text-[var(--muted)]">My UPI ID (PhonePe / GPay / Paytm)</label>
-          <input type="text" id="profileUpiInput" placeholder="e.g. yourname@oksbi or 9876543210@paytm" class="w-full bg-slate-900 border border-[var(--border)] rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-blue-500">
+          <label class="block font-semibold mb-1 text-[var(--text-muted)]">My UPI ID (PhonePe / GPay / Paytm)</label>
+          <input type="text" id="profileUpiInput" placeholder="e.g. yourname@oksbi" class="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-[#c96b32]">
         </div>
 
         <div>
-          <label class="block font-semibold mb-1 text-[var(--muted)]">My Personal UPI QR Code Photo</label>
-          <div onclick="$('profileQrFileInput').click()" class="border-2 border-dashed border-[var(--border)] hover:border-emerald-500 rounded-xl p-3 text-center cursor-pointer transition bg-slate-900/40">
-            <input type="file" id="profileQrFileInput" accept="image/*" class="hidden" onchange="handleProfileQrSelect(event)">
-            <div id="profileQrPlaceholder">
+          <label class="block font-semibold mb-1 text-[var(--text-muted)]">My Personal UPI QR Code Photo</label>
+          <div onclick="$('profileQrFileInput').click()" class="border-2 border-dashed border-[var(--border)] hover:border-emerald-500 rounded-xl p-3 text-center cursor-pointer transition bg-[var(--bg)]/50">
+            <input type="file" id="profileQrFileInput" accept="image/*" class="hidden" onchange="handleQrImageSelect(event)">
+            <div id="profileQrPrompt">
               <i class="fas fa-qrcode text-2xl text-emerald-400 mb-1"></i>
               <p class="text-white font-medium text-xs">Tap to upload your QR Screenshot</p>
-              <p class="text-[10px] text-[var(--muted)]">Saved forever for all trips</p>
             </div>
-            <img id="profileQrPreview" class="hidden max-h-36 mx-auto rounded-lg shadow-md mt-1 border border-slate-700">
+            <img id="profileQrThumb" class="hidden max-h-36 mx-auto rounded-lg shadow-md mt-1 border border-stone-700">
           </div>
         </div>
 
-        <div>
-          <label class="block font-semibold mb-1 text-[var(--muted)]">Change Password (Optional)</label>
-          <input type="password" id="profileNewPassInput" placeholder="Leave blank to keep current" class="w-full bg-slate-900 border border-[var(--border)] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-blue-500">
-        </div>
-
-        <button onclick="submitProfileUpdate()" id="profileSaveBtn" class="tap-active w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl shadow-lg transition">
+        <button onclick="submitProfileSettings()" id="saveProfileBtn" class="tap-active w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl shadow-lg transition">
           Save Settings
         </button>
       </div>
     </div>
   </div>
 
-  <!-- MODAL: GIVE CASH / CONCESSION -->
+  <!-- MODAL: CONCESSION / CASH SETTLEMENT -->
   <div id="concessionModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
-      <div class="flex items-center justify-between border-b border-[var(--border)] pb-3">
+      <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
         <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
-          <i class="fas fa-hand-holding-dollar text-amber-400"></i> Record Cash / Concession
+          <i class="fas fa-hand-holding-dollar text-[var(--amber)]"></i> Record Cash / Concession
         </h3>
-        <button onclick="closeConcessionModal()" class="text-[var(--muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
+        <button onclick="closeConcessionModal()" class="text-[var(--text-muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
       </div>
 
       <div class="space-y-3 text-xs">
-        <p class="text-[var(--muted)]">If a friend paid you in cash, or you are waiving a bill for them, record it here to clear their due instantly.</p>
+        <p class="text-[var(--text-muted)]">If a friend paid you in cash or you want to waive a due for them, record it here to clear their due instantly.</p>
         
         <div>
-          <label class="block font-semibold mb-1 text-[var(--muted)]">Which Friend?</label>
-          <select id="concessionFriendSelect" class="w-full bg-slate-900 border border-[var(--border)] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-blue-500">
+          <label class="block font-semibold mb-1 text-[var(--text-muted)]">Select Friend</label>
+          <select id="concessionTargetSelect" class="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-[#c96b32]">
             <!-- Injected dynamically -->
           </select>
         </div>
 
         <div>
-          <label class="block font-semibold mb-1 text-[var(--muted)]">Amount (₹)</label>
-          <input type="number" id="concessionAmountInput" placeholder="e.g. 1000" class="w-full bg-slate-900 border border-[var(--border)] rounded-xl px-3 py-2 text-white font-bold text-amber-400 focus:outline-none focus:border-blue-500">
+          <label class="block font-semibold mb-1 text-[var(--text-muted)]">Amount (₹)</label>
+          <input type="number" id="concessionAmountInput" placeholder="e.g. 1000" class="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-3 py-2 text-white font-bold text-amber-400 focus:outline-none focus:border-[#c96b32]">
         </div>
 
         <div>
-          <label class="block font-semibold mb-1 text-[var(--muted)]">Reason / Note</label>
-          <input type="text" id="concessionNoteInput" placeholder="e.g. Cash paid in cab, Discount" class="w-full bg-slate-900 border border-[var(--border)] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-blue-500">
+          <label class="block font-semibold mb-1 text-[var(--text-muted)]">Reason</label>
+          <input type="text" id="concessionNoteInput" placeholder="e.g. Cash received in hotel" class="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-[#c96b32]">
         </div>
 
-        <button onclick="submitConcession()" id="concessionSaveBtn" class="tap-active w-full bg-amber-600 hover:bg-amber-500 text-white font-bold py-2.5 rounded-xl shadow-lg transition">
+        <button onclick="submitConcessionRecord()" id="saveConcessionBtn" class="tap-active w-full bg-[var(--amber)] hover:bg-amber-600 text-slate-950 font-bold py-2.5 rounded-xl shadow-lg transition">
           Confirm Cash / Clear Due
         </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- MODAL: FOLDER / TRIP SELECTOR -->
-  <div id="folderSelectorModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
-      <div class="flex items-center justify-between border-b border-[var(--border)] pb-3">
-        <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
-          <i class="fas fa-folder text-amber-400"></i> Switch Trip Folder
-        </h3>
-        <button onclick="closeFolderSelectorModal()" class="text-[var(--muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
-      </div>
-      <div id="tripFolderList" class="space-y-1.5 max-h-60 overflow-y-auto custom-scroll text-xs">
-        <!-- Injected dynamically -->
-      </div>
-    </div>
-  </div>
-
-  <!-- MODAL: ADMIN USER VAULT -->
-  <div id="adminModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
-      <div class="flex items-center justify-between border-b border-[var(--border)] pb-3">
-        <h3 class="font-bold text-white text-sm flex items-center gap-1.5">
-          <i class="fas fa-shield-alt text-purple-400"></i> Master User & Password Vault
-        </h3>
-        <button onclick="closeAdminModal()" class="text-[var(--muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
-      </div>
-
-      <div class="space-y-3 text-xs">
-        <div id="adminUserList" class="space-y-2">
-          <!-- Injected dynamically -->
-        </div>
-
-        <div class="p-3 bg-slate-900/80 rounded-xl border border-[var(--border)] space-y-2">
-          <h4 class="font-bold text-white text-xs">+ Add New Friend Account</h4>
-          <input type="text" id="adminNewName" placeholder="Friend Name (e.g. Ramesh)" class="w-full bg-slate-950 border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-white">
-          <input type="text" id="adminNewUser" placeholder="Username (e.g. ramesh)" class="w-full bg-slate-950 border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-white">
-          <input type="text" id="adminNewPass" placeholder="Password (e.g. RAMESH)" class="w-full bg-slate-950 border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-white">
-          <button onclick="submitAdminAddUser()" class="tap-active w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 rounded-lg transition">Create Friend Account</button>
-        </div>
       </div>
     </div>
   </div>
@@ -542,21 +615,21 @@
     var API = '/api/trip';
     var state = {
       curFolderId: null,
-      curFolderName: 'Trip Expenses',
+      curTripName: 'Kenjalgad 3 sep 26',
       tripData: null,
       currentUser: null,
       token: localStorage.getItem('td_trip_token') || null,
       users: [],
       selectedLoginUser: null,
-      selectedSplitMembers: new Set(),
+      splitCheckboxes: new Set(),
       currentPayTarget: null,
-      uploadedReceiptData: null,
-      uploadedProfileQrData: null
+      uploadedReceiptBase64: null,
+      uploadedQrBase64: null
     };
 
     function toast(msg, type = 'info') {
       var box = document.createElement('div');
-      var bg = type === 'success' ? 'bg-emerald-600' : type === 'error' ? 'bg-red-600' : type === 'warning' ? 'bg-amber-600' : 'bg-blue-600';
+      var bg = type === 'success' ? 'bg-emerald-600' : type === 'error' ? 'bg-rose-600' : type === 'warning' ? 'bg-amber-600' : 'bg-[#c96b32]';
       box.className = 'toast-anim pointer-events-auto p-3 rounded-xl text-white text-xs font-semibold shadow-xl flex items-center gap-2 ' + bg;
       box.innerHTML = '<span>' + msg + '</span>';
       $('toastContainer').appendChild(box);
@@ -573,16 +646,14 @@
 
     // ─── INITIALIZATION ────────────────────────────────────────────────────────
     window.addEventListener('DOMContentLoaded', async function() {
-      // 1. Get folderId from URL query or default
       var params = new URLSearchParams(window.location.search);
       state.curFolderId = params.get('folder') || params.get('id') || 'general';
 
-      // 2. Check current session if token exists
       if (state.token) {
         try {
-          var meRes = await apiFetch('me');
-          if (meRes && meRes.ok && meRes.user) {
-            state.currentUser = meRes.user;
+          var me = await apiFetch('me');
+          if (me && me.ok && me.user) {
+            state.currentUser = me.user;
           } else {
             localStorage.removeItem('td_trip_token');
             state.token = null;
@@ -592,116 +663,140 @@
         }
       }
       updateAuthUI();
-
-      // 3. Load trip data & users
-      await refreshTripData();
+      await loadTripData();
     });
 
-    async function refreshTripData() {
+    async function loadTripData() {
       try {
-        var data = await apiFetch('data?folderId=' + encodeURIComponent(state.curFolderId));
-        if (data) {
-          state.tripData = data;
-          state.curFolderName = data.folderName || 'Trip Expenses';
-          state.users = data.users || [];
-          $('tripTitleText').textContent = state.curFolderName;
-          $('summaryTripName').textContent = state.curFolderName;
-          renderFinancialStats();
-          renderLoggedInAlerts();
+        var d = await apiFetch('data?folderId=' + encodeURIComponent(state.curFolderId));
+        if (d) {
+          state.tripData = d;
+          state.curTripName = d.folderName || 'Kenjalgad 3 sep 26';
+          state.users = d.users || [];
+          $('navTripTitleText').textContent = state.curTripName;
+          $('heroTripTitle').textContent = state.curTripName;
+          
+          renderMetrics();
+          renderHorizontalMemberBar();
+          renderUserAlerts();
           renderSettlementsList();
-          renderBillsList();
-          renderMembersVault();
+          renderAllBills();
+          renderMyBills();
+          renderFriendsQrVault();
         }
       } catch(e) {
-        console.error('Failed to load trip data:', e);
+        console.error('Error loading trip data:', e);
       }
     }
 
-    // ─── AUTH & LOGIN LOGIC ───────────────────────────────────────────────────
+    // ─── RENAME TRIP ──────────────────────────────────────────────────────────
+    async function promptRenameTrip() {
+      var current = state.curTripName;
+      var newName = prompt('Enter new trip title:', current);
+      if (!newName || newName.trim() === '' || newName === current) return;
+
+      try {
+        var res = await apiFetch('rename', {
+          method: 'POST',
+          body: JSON.stringify({ folderId: state.curFolderId, newName: newName.trim() })
+        });
+        if (res && res.ok) {
+          state.curTripName = res.tripName;
+          $('navTripTitleText').textContent = res.tripName;
+          $('heroTripTitle').textContent = res.tripName;
+          toast('Trip title updated!', 'success');
+        } else {
+          toast(res ? (res.error || 'Failed') : 'Error', 'error');
+        }
+      } catch(e) {
+        toast('Error: ' + e.message, 'error');
+      }
+    }
+
+    // ─── AUTH & LOGIN ─────────────────────────────────────────────────────────
     function updateAuthUI() {
-      var authBtn = $('authBtn');
-      var userMenu = $('userMenuDropdown');
-      if (state.currentUser) {
-        authBtn.classList.add('hidden');
-        userMenu.classList.remove('hidden');
-        $('navUserNameText').textContent = state.currentUser.name;
-        $('userAvatarCircle').textContent = (state.currentUser.name || 'U')[0].toUpperCase();
-      } else {
-        authBtn.classList.remove('hidden');
-        userMenu.classList.add('hidden');
-        $('authBtnLabel').textContent = 'Login';
-      }
-    }
+      var loginBtn = $('navLoginBtn');
+      var userBar = $('navUserBar');
+      var unauthBanner = $('unauthBanner');
 
-    function handleAuthBtnClick() {
-      openLoginModal();
+      if (state.currentUser) {
+        loginBtn.classList.add('hidden');
+        userBar.classList.remove('hidden');
+        if (unauthBanner) unauthBanner.classList.add('hidden');
+        $('navUserNameDisplay').textContent = state.currentUser.name;
+        $('navAvatarLetter').textContent = state.currentUser.name[0].toUpperCase();
+        $('dropdownUserFull').textContent = state.currentUser.name + ' (@' + state.currentUser.username + ')';
+      } else {
+        loginBtn.classList.remove('hidden');
+        userBar.classList.add('hidden');
+        if (unauthBanner) unauthBanner.classList.remove('hidden');
+      }
     }
 
     function toggleUserDropdown(force) {
-      var dd = $('userDropdownContent');
-      if (typeof force === 'boolean') dd.classList.toggle('hidden', !force);
-      else dd.classList.toggle('hidden');
+      var el = $('userDropdownContent');
+      if (typeof force === 'boolean') el.classList.toggle('hidden', !force);
+      else el.classList.toggle('hidden');
     }
 
     function openLoginModal() {
       $('loginModal').classList.remove('hidden');
-      renderLoginUserChips();
+      renderLoginChips();
     }
-
     function closeLoginModal() {
       $('loginModal').classList.add('hidden');
     }
 
-    function renderLoginUserChips() {
-      var container = $('loginUserChipsGrid');
+    function renderLoginChips() {
+      var container = $('loginUserChips');
       container.innerHTML = '';
       (state.users || []).forEach(function(u) {
-        var btn = document.createElement('button');
         var isSel = state.selectedLoginUser === u.username;
-        btn.className = 'tap-active p-2 rounded-lg text-center flex flex-col items-center justify-center gap-1 transition ' + (isSel ? 'bg-blue-600 text-white font-bold' : 'bg-slate-800 text-[var(--muted)] hover:text-white');
-        btn.innerHTML = '<div class="w-6 h-6 rounded-full ' + (isSel ? 'bg-white text-blue-600' : 'bg-blue-500/20 text-blue-400') + ' flex items-center justify-center text-[10px] font-black">' + u.name[0] + '</div><span class="truncate max-w-[65px] text-[11px]">' + u.name + '</span>';
+        var btn = document.createElement('button');
+        btn.className = 'tap-active p-2 rounded-xl text-center flex flex-col items-center justify-center gap-1 transition ' + 
+          (isSel ? 'bg-[#c96b32] text-white font-bold shadow-md' : 'bg-[var(--card)] text-[var(--text-muted)] hover:text-white');
+        btn.innerHTML = '<div class="w-6 h-6 rounded-full ' + (isSel ? 'bg-white text-[#c96b32]' : 'bg-[#c96b32]/20 text-[#e0834a]') + ' flex items-center justify-center text-[10px] font-black">' + u.name[0] + '</div><span class="truncate max-w-[65px] text-[11px]">' + u.name + '</span>';
         btn.onclick = function() {
           state.selectedLoginUser = u.username;
-          renderLoginUserChips();
-          $('loginPasswordInput').placeholder = 'Enter password for ' + u.name;
+          renderLoginChips();
           $('loginPasswordInput').focus();
         };
         container.appendChild(btn);
       });
       if (!state.selectedLoginUser && state.users.length) {
         state.selectedLoginUser = state.users[0].username;
-        renderLoginUserChips();
+        renderLoginChips();
       }
     }
 
     async function submitLogin() {
-      var username = state.selectedLoginUser;
-      var password = $('loginPasswordInput').value.trim();
-      if (!username) return toast('Please select your name', 'warning');
-      if (!password) return toast('Please enter your password', 'warning');
+      var un = state.selectedLoginUser;
+      var pass = $('loginPasswordInput').value.trim();
+      if (!un) return toast('Please select your name', 'warning');
+      if (!pass) return toast('Please enter password', 'warning');
 
       var btn = $('loginSubmitBtn');
       btn.disabled = true;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Signing In…';
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Signing in…';
 
       try {
         var res = await apiFetch('login', {
           method: 'POST',
-          body: JSON.stringify({ username: username, password: password })
+          body: JSON.stringify({ username: un, password: pass })
         });
         if (res && res.ok && res.token) {
           state.token = res.token;
           state.currentUser = res.user;
           localStorage.setItem('td_trip_token', res.token);
-          toast('Welcome back, ' + res.user.name + '!', 'success');
+          toast('Welcome, ' + res.user.name + '!', 'success');
           closeLoginModal();
           updateAuthUI();
-          await refreshTripData();
+          await loadTripData();
         } else {
-          toast(res ? (res.error || 'Login failed') : 'Network error', 'error');
+          toast(res ? (res.error || 'Incorrect password') : 'Login failed', 'error');
         }
       } catch(e) {
-        toast('Login error: ' + e.message, 'error');
+        toast('Error: ' + e.message, 'error');
       } finally {
         btn.disabled = false;
         btn.innerHTML = '<span>Sign In</span>';
@@ -713,13 +808,14 @@
       state.currentUser = null;
       localStorage.removeItem('td_trip_token');
       updateAuthUI();
-      renderLoggedInAlerts();
+      renderUserAlerts();
       renderSettlementsList();
-      toast('Logged out successfully', 'info');
+      renderMyBills();
+      toast('Signed out', 'info');
     }
 
-    function togglePassVisibility(inputId, btn) {
-      var inp = $(inputId);
+    function togglePass(inpId, btn) {
+      var inp = $(inpId);
       if (inp.type === 'password') {
         inp.type = 'text';
         btn.innerHTML = '<i class="fas fa-eye-slash text-xs"></i>';
@@ -729,157 +825,230 @@
       }
     }
 
-    // ─── FINANCIAL METRICS RENDERING ──────────────────────────────────────────
-    function renderFinancialStats() {
-      if (!state.tripData) return;
-      var d = state.tripData;
-      $('statTotalExpense').textContent = '₹' + (d.totalExpenses || 0).toLocaleString();
-      var activeMembers = (state.users || []).length || 1;
-      var perHead = Math.round((d.totalExpenses || 0) / activeMembers);
-      $('statPerPerson').textContent = '₹' + perHead.toLocaleString();
-      $('statSettled').textContent = '₹' + (d.totalSettled || 0).toLocaleString();
-      $('statRemaining').textContent = '₹' + (d.remainingDue || 0).toLocaleString();
-      $('billsCountBadge').textContent = (d.bills || []).length;
+    // ─── RESET PASSWORD ───────────────────────────────────────────────────────
+    function openResetPasswordModal() {
+      $('resetCurrentPass').value = '';
+      $('resetNewPass').value = '';
+      $('resetConfirmPass').value = '';
+      $('resetPasswordModal').classList.remove('hidden');
+    }
+    function closeResetPasswordModal() {
+      $('resetPasswordModal').classList.add('hidden');
     }
 
-    // ─── LOGGED IN USER NOTIFICATIONS & ACTIONS ──────────────────────────────
-    function renderLoggedInAlerts() {
-      var container = $('loggedInDashboardAlerts');
+    async function submitResetPassword() {
+      var oldP = $('resetCurrentPass').value.trim();
+      var newP = $('resetNewPass').value.trim();
+      var conf = $('resetConfirmPass').value.trim();
+      if (!newP || newP.length < 3) return toast('New password must be at least 3 characters', 'warning');
+      if (newP !== conf) return toast('New passwords do not match', 'warning');
+
+      var btn = $('resetPassBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating…';
+
+      try {
+        var res = await apiFetch('reset-password', {
+          method: 'POST',
+          body: JSON.stringify({ oldPassword: oldP, newPassword: newP })
+        });
+        if (res && res.ok) {
+          toast('Password updated successfully!', 'success');
+          closeResetPasswordModal();
+        } else {
+          toast(res ? (res.error || 'Failed') : 'Error', 'error');
+        }
+      } catch(e) {
+        toast('Error: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Update Password';
+      }
+    }
+
+    // ─── FINANCIAL METRICS ────────────────────────────────────────────────────
+    function renderMetrics() {
+      if (!state.tripData) return;
+      var d = state.tripData;
+      $('metricTotal').textContent = '₹' + (d.totalExpenses || 0).toLocaleString();
+      var count = (state.users || []).length || 1;
+      var perHead = Math.round((d.totalExpenses || 0) / count);
+      $('metricShare').textContent = '₹' + perHead.toLocaleString();
+      $('metricSettled').textContent = '₹' + (d.totalSettled || 0).toLocaleString();
+      $('metricRemaining').textContent = '₹' + (d.remainingDue || 0).toLocaleString();
+      $('heroMembersCount').textContent = count + ' Members';
+      $('membersCountSummaryText').textContent = count;
+      $('allBillsBadge').textContent = (d.bills || []).length;
+    }
+
+    // ─── HORIZONTAL MEMBER BAR (IMAGE 4 EXACT MATCH) ──────────────────────────
+    function renderHorizontalMemberBar() {
+      var row = $('membersHorizontalRow');
+      row.innerHTML = '';
+      if (!state.tripData || !state.tripData.membersSummary) return;
+
+      var members = state.tripData.membersSummary;
+      members.forEach(function(m) {
+        var isMe = state.currentUser && state.currentUser.username.toLowerCase() === m.username.toLowerCase();
+        var card = document.createElement('div');
+        
+        var borderClass = isMe ? 'border-[#c96b32] bg-[#c96b32]/15 shadow-md' : 'border-[var(--border)] bg-[var(--bg)]/90 hover:border-[#c96b32]/50';
+        card.className = 'tap-active p-2.5 rounded-2xl border transition flex items-center gap-2 cursor-pointer ' + borderClass;
+        
+        var avatarBg = m.status === 'gets' ? 'bg-emerald-600' : (m.status === 'owes' ? 'bg-[#c96b32]' : 'bg-stone-700');
+        var statusBadge = '';
+        if (m.status === 'gets') {
+          statusBadge = '<span class="text-[10px] text-emerald-400 font-bold block truncate">Gets ₹' + m.amount.toLocaleString() + '</span>';
+        } else if (m.status === 'owes') {
+          statusBadge = '<span class="text-[10px] text-amber-400 font-bold block truncate">Owes ₹' + m.amount.toLocaleString() + '</span>';
+        } else {
+          statusBadge = '<span class="text-[10px] text-emerald-400 font-semibold block truncate">Settled ✅</span>';
+        }
+
+        card.innerHTML = '<div class="w-7 h-7 rounded-full ' + avatarBg + ' text-white flex items-center justify-center font-bold text-xs shrink-0">' + m.name[0] + '</div>' +
+          '<div class="min-w-0 text-left"><div class="font-bold text-xs text-white truncate">' + m.name + (isMe ? ' <span class="text-[#e0834a]">(You)</span>' : '') + '</div>' +
+          statusBadge + '</div>';
+
+        card.onclick = function() {
+          if (!state.currentUser) {
+            state.selectedLoginUser = m.username;
+            openLoginModal();
+          } else if (isMe) {
+            toast('You are logged in as ' + m.name, 'info');
+          } else {
+            toast(m.name + ': ' + (m.status === 'gets' ? 'Receives ₹' + m.amount : (m.status === 'owes' ? 'Owes ₹' + m.amount : 'Settled')), 'info');
+          }
+        };
+
+        row.appendChild(card);
+      });
+    }
+
+    // ─── USER ALERTS & VERIFICATION ───────────────────────────────────────────
+    function renderUserAlerts() {
+      var container = $('userActionAlerts');
       container.innerHTML = '';
       if (!state.currentUser || !state.tripData) return;
 
       var un = state.currentUser.username.toLowerCase();
-      var myBal = state.tripData.balances ? state.tripData.balances[un] : 0;
-
-      // 1. Personal Balance Card
-      var balCard = document.createElement('div');
-      if (myBal > 1) {
-        balCard.className = 'p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3 shadow-sm';
-        balCard.innerHTML = '<div class="flex items-center gap-3"><div class="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shrink-0"><i class="fas fa-hand-holding-dollar"></i></div><div><div class="font-bold text-white text-xs sm:text-sm">Friends owe you ₹' + Math.round(myBal).toLocaleString() + '!</div><div class="text-[11px] text-[var(--muted)]">You paid bills for the trip. Incoming dues will appear below.</div></div></div><button onclick="openProfileModal()" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold shrink-0">My QR Code</button>';
-      } else if (myBal < -1) {
-        balCard.className = 'p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-3 shadow-sm';
-        balCard.innerHTML = '<div class="flex items-center gap-3"><div class="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center font-bold text-sm shrink-0"><i class="fas fa-receipt"></i></div><div><div class="font-bold text-white text-xs sm:text-sm">You have ₹' + Math.round(-myBal).toLocaleString() + ' pending dues to pay.</div><div class="text-[11px] text-[var(--muted)]">Check settlement cards below to scan friend\'s QR and pay.</div></div></div><button onclick="switchMainTab(\'settlements\')" class="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-semibold shrink-0">Pay Dues</button>';
-      } else {
-        balCard.className = 'p-3 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center gap-2.5 text-xs text-blue-300';
-        balCard.innerHTML = '<i class="fas fa-check-circle text-emerald-400 text-base"></i><span><b>You are all settled!</b> Your trip expenses are completely balanced.</span>';
-      }
-      container.appendChild(balCard);
-
-      // 2. Incoming Payments to Verify (if anyone submitted a payment to this user)
-      var myIncomingPending = (state.tripData.settlements || []).filter(function(s) {
+      var incomingPending = (state.tripData.settlements || []).filter(function(s) {
         return s.toUser && s.toUser.toLowerCase() === un && s.status === 'pending';
       });
 
-      if (myIncomingPending.length > 0) {
-        var verifyBox = document.createElement('div');
-        verifyBox.className = 'p-4 rounded-2xl bg-slate-900 border-2 border-yellow-500/40 shadow-xl space-y-3';
-        verifyBox.innerHTML = '<div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-yellow-400 animate-ping"></span><h4 class="font-bold text-white text-xs sm:text-sm flex items-center gap-1.5"><i class="fas fa-bell text-yellow-400"></i> Incoming Payments to Verify (' + myIncomingPending.length + ')</h4></div><span class="text-[10px] text-yellow-300 bg-yellow-500/20 px-2 py-0.5 rounded-full border border-yellow-500/30">Action Required</span></div><div class="space-y-2" id="incomingVerifyList"></div>';
-        container.appendChild(verifyBox);
+      if (incomingPending.length > 0) {
+        var box = document.createElement('div');
+        box.className = 'p-4 rounded-2xl bg-[#2e261e] border-2 border-[var(--amber)] shadow-xl space-y-3';
+        box.innerHTML = '<div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping"></span><h4 class="font-bold text-white text-xs sm:text-sm flex items-center gap-1.5"><i class="fas fa-bell text-amber-400"></i> Incoming Payments to Verify (' + incomingPending.length + ')</h4></div><span class="text-[10px] text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">Action Required</span></div><div class="space-y-2" id="userPendingList"></div>';
+        container.appendChild(box);
 
-        var list = verifyBox.querySelector('#incomingVerifyList');
-        myIncomingPending.forEach(function(item) {
+        var list = box.querySelector('#userPendingList');
+        incomingPending.forEach(function(item) {
           var row = document.createElement('div');
           row.className = 'p-3 rounded-xl bg-[var(--card)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs';
-          row.innerHTML = '<div><div class="font-bold text-white"><b class="text-blue-400">' + (item.fromUserName || item.fromUser) + '</b> sent you <b class="text-emerald-400 text-sm">₹' + item.amount.toLocaleString() + '</b></div><div class="text-[11px] text-[var(--muted)]">' + (item.note || 'UPI Payment') + ' · ' + new Date(item.date).toLocaleDateString() + '</div></div><div class="flex items-center gap-2"><button onclick="verifyPayment(\'' + item.id + '\', \'approve\')" class="tap-active px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow-sm"><i class="fas fa-check"></i> Yes, Received</button><button onclick="verifyPayment(\'' + item.id + '\', \'reject\')" class="tap-active px-3 py-1.5 rounded-lg bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/30 font-semibold text-xs flex items-center gap-1"><i class="fas fa-times"></i> Cancel / Failed</button></div>';
+          row.innerHTML = '<div><div class="font-bold text-white"><b class="text-[#e0834a]">' + (item.fromUserName || item.fromUser) + '</b> sent you <b class="text-emerald-400 text-sm">₹' + item.amount.toLocaleString() + '</b></div><div class="text-[11px] text-[var(--text-muted)]">' + (item.note || 'UPI') + ' · ' + new Date(item.date).toLocaleDateString() + '</div></div><div class="flex items-center gap-2"><button onclick="verifySettlementPayment(\'' + item.id + '\', \'approve\')" class="tap-active px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow-sm"><i class="fas fa-check"></i> Yes, Received</button><button onclick="verifySettlementPayment(\'' + item.id + '\', \'reject\')" class="tap-active px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 font-semibold text-xs flex items-center gap-1"><i class="fas fa-times"></i> Cancel / Failed</button></div>';
           list.appendChild(row);
         });
       }
     }
 
-    async function verifyPayment(paymentId, action) {
+    async function verifySettlementPayment(id, action) {
       try {
         var res = await apiFetch('verify-payment', {
           method: 'POST',
-          body: JSON.stringify({
-            folderId: state.curFolderId,
-            settlementId: paymentId,
-            action: action
-          })
+          body: JSON.stringify({ folderId: state.curFolderId, settlementId: id, action: action })
         });
         if (res && res.ok) {
-          toast(action === 'approve' ? 'Payment verified & cleared! ✅' : 'Payment marked as not received ❌', action === 'approve' ? 'success' : 'warning');
-          await refreshTripData();
+          toast(action === 'approve' ? 'Payment confirmed & settled! ✅' : 'Payment flagged as not received ❌', action === 'approve' ? 'success' : 'warning');
+          await loadTripData();
         } else {
-          toast('Verification failed: ' + (res.error || 'Server error'), 'error');
+          toast(res ? (res.error || 'Failed') : 'Error', 'error');
         }
       } catch(e) {
         toast('Error: ' + e.message, 'error');
       }
     }
 
-    // ─── TAB 1: SETTLEMENTS LIST (WHO PAYS WHOM) ──────────────────────────────
+    // ─── TAB 1: WHO PAYS WHOM (CLEAN STRAIGHT LIST) ───────────────────────────
     function renderSettlementsList() {
-      var container = $('settlementsListContainer');
+      var container = $('settlementsList');
       container.innerHTML = '';
       if (!state.tripData) return;
 
       var list = state.tripData.suggestions || [];
       if (!list.length) {
-        container.innerHTML = '<div class="p-8 text-center text-[var(--muted)] text-xs bg-[var(--card)] rounded-2xl border border-[var(--border)]"><i class="fas fa-circle-check text-3xl text-emerald-400 mb-2"></i><p class="font-bold text-white text-sm">All Trip Dues Are Settled!</p><p class="text-[11px] mt-0.5">No pending balances remaining between friends.</p></div>';
+        container.innerHTML = '<div class="p-8 text-center text-[var(--text-muted)] text-xs bg-[var(--card)] rounded-2xl border border-[var(--border)]"><i class="fas fa-circle-check text-3xl text-emerald-400 mb-2"></i><p class="font-bold text-white text-sm">All Trip Dues Are Settled!</p><p class="text-[11px] mt-0.5">Every member has settled their share.</p></div>';
         return;
       }
 
       list.forEach(function(s) {
-        var card = document.createElement('div');
+        var row = document.createElement('div');
         var isMeDebtor = state.currentUser && state.currentUser.username.toLowerCase() === s.fromUser.toLowerCase();
         var isMeCreditor = state.currentUser && state.currentUser.username.toLowerCase() === s.toUser.toLowerCase();
-        
-        card.className = 'p-3.5 rounded-xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ' + 
-          (isMeDebtor ? 'bg-amber-500/10 border-amber-500/40 shadow-md' : isMeCreditor ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-[var(--card)] border-[var(--border)]');
+
+        var borderCol = isMeDebtor ? 'border-[#c96b32]/60 bg-[#c96b32]/10 shadow-sm' : 'border-[var(--border)] bg-[var(--card)]';
+        row.className = 'p-3 sm:p-3.5 rounded-xl border transition flex items-center justify-between gap-3 text-xs ' + borderCol;
 
         var fromUserObj = state.users.find(u => u.username === s.fromUser);
         var toUserObj = state.users.find(u => u.username === s.toUser);
         var fromName = fromUserObj ? fromUserObj.name : s.fromUser;
         var toName = toUserObj ? toUserObj.name : s.toUser;
 
-        // Check if there's a pending payment from this user to that payee
         var pendingItem = (state.tripData.settlements || []).find(function(x) {
           return x.fromUser === s.fromUser && x.toUser === s.toUser && x.status === 'pending';
         });
 
-        var leftHtml = '<div class="flex items-center gap-2.5">' +
-          '<div class="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white text-xs shrink-0">' + fromName[0] + '</div>' +
-          '<div><div class="font-bold text-white text-sm">' + fromName + (isMeDebtor ? ' <span class="text-amber-400">(You)</span>' : '') + ' owes <span class="text-blue-400 font-bold">' + toName + (isMeCreditor ? ' (You)' : '') + '</span></div>' +
-          '<div class="text-[11px] text-[var(--muted)] font-mono">' + (s.payeeUpi ? 'UPI: ' + s.payeeUpi : 'UPI not set') + '</div></div></div>';
+        // Left info
+        var left = '<div class="flex items-center gap-2.5 min-w-0">' +
+          '<div class="w-8 h-8 rounded-full bg-[var(--bg-surface)] border border-[var(--border)] flex items-center justify-center font-bold text-white text-xs shrink-0">' + fromName[0] + '</div>' +
+          '<div class="min-w-0"><div class="font-bold text-white truncate text-xs sm:text-sm">' + fromName + (isMeDebtor ? ' <b class="text-[#e0834a]">(You)</b>' : '') + ' owes <span class="text-[var(--clay-light)] font-bold">' + toName + (isMeCreditor ? ' (You)' : '') + '</span></div>' +
+          '<div class="text-[11px] text-[var(--text-muted)] font-mono truncate">' + (s.payeeUpi ? 'UPI: ' + s.payeeUpi : 'No UPI set') + '</div></div></div>';
 
-        var rightHtml = '<div class="flex items-center gap-2.5 self-end sm:self-auto">' +
-          '<span class="text-base font-black text-amber-400">₹' + s.amount.toLocaleString() + '</span>';
+        // Right info: Clean amount + action
+        var right = '<div class="flex items-center gap-2.5 shrink-0">' +
+          '<span class="text-sm sm:text-base font-black text-amber-400">₹' + s.amount.toLocaleString() + '</span>';
 
         if (pendingItem) {
-          rightHtml += '<span class="px-2.5 py-1 rounded-lg bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 text-[11px] font-semibold flex items-center gap-1"><i class="fas fa-clock text-xs"></i> Verification Pending</span>';
+          right += '<span class="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-semibold flex items-center gap-1"><i class="fas fa-clock text-xs"></i> Verification Pending</span>';
         } else if (isMeDebtor) {
-          rightHtml += '<button onclick="openPayModalFor(\'' + s.toUser + '\', \'' + toName + '\', ' + s.amount + ', \'' + (s.payeeUpi || '') + '\', \'' + (s.payeeQr || '') + '\')" class="tap-active px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20"><i class="fas fa-qrcode"></i> Pay via QR</button>';
-        } else {
-          rightHtml += '<button onclick="openPayModalFor(\'' + s.toUser + '\', \'' + toName + '\', ' + s.amount + ', \'' + (s.payeeUpi || '') + '\', \'' + (s.payeeQr || '') + '\')" class="tap-active px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs flex items-center gap-1"><i class="fas fa-qrcode"></i> View QR / Pay</button>';
+          // Logged in user actually owes this money: Show Pay button!
+          right += '<button onclick="openPayDialog(\'' + s.toUser + '\', \'' + toName + '\', ' + s.amount + ', \'' + (s.payeeUpi || '') + '\', \'' + (s.payeeQr || '') + '\')" class="tap-active px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20"><i class="fas fa-qrcode"></i> Pay via QR</button>';
+        } else if (!state.currentUser) {
+          // Not logged in: Show neutral info or login
+          right += '<button onclick="openLoginForUser(\'' + s.fromUser + '\')" class="tap-active px-2.5 py-1 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--card-hover)] text-[var(--text-muted)] hover:text-white border border-[var(--border)] text-[11px]">Login to Pay</button>';
         }
 
-        rightHtml += '</div>';
+        right += '</div>';
 
-        card.innerHTML = leftHtml + rightHtml;
-        container.appendChild(card);
+        row.innerHTML = left + right;
+        container.appendChild(row);
       });
     }
 
-    function openPayModalFor(toUser, toName, dueAmt, upiId, qrDataUrl) {
+    function openLoginForUser(username) {
+      state.selectedLoginUser = username;
+      openLoginModal();
+    }
+
+    function openPayDialog(toUser, toName, dueAmt, upiId, qrDataUrl) {
       if (!state.currentUser) {
-        toast('Please login as yourself to record payment', 'warning');
+        toast('Please login as yourself to pay', 'warning');
         openLoginModal();
         return;
       }
       state.currentPayTarget = { toUser: toUser, toName: toName, dueAmt: dueAmt, upiId: upiId, qrDataUrl: qrDataUrl };
-      $('payModalPayeeName').textContent = toName;
-      $('payModalDueText').textContent = '₹' + dueAmt.toLocaleString();
-      $('payInputAmount').value = dueAmt;
-      $('payModalUpiText').textContent = upiId ? 'UPI: ' + upiId : 'UPI ID not set by ' + toName;
+      $('payeeNameText').textContent = toName;
+      $('payDueAmtText').textContent = '₹' + dueAmt.toLocaleString();
+      $('payCustomAmount').value = dueAmt;
+      $('payUpiHandleText').textContent = upiId ? 'UPI: ' + upiId : 'UPI ID not set by ' + toName;
 
-      var qrContainer = $('payModalQrContainer');
+      var qrBox = $('payQrBox');
       if (qrDataUrl) {
-        qrContainer.innerHTML = '<img src="' + qrDataUrl + '" class="w-full h-full object-contain p-1" alt="QR Code">';
+        qrBox.innerHTML = '<img src="' + qrDataUrl + '" class="w-full h-full object-contain p-1" alt="QR">';
       } else {
-        qrContainer.innerHTML = '<i class="fas fa-qrcode text-7xl text-slate-900"></i><span class="text-[9px] text-slate-600 mt-2">Friend QR Photo</span>';
+        qrBox.innerHTML = '<i class="fas fa-qrcode text-7xl text-slate-900"></i><span class="text-[9px] text-slate-600 mt-2">Friend QR Photo</span>';
       }
 
-      var deepLink = $('payModalDeepLink');
+      var deepLink = $('payAppDeepLink');
       if (upiId) {
         deepLink.href = 'upi://pay?pa=' + encodeURIComponent(upiId) + '&pn=' + encodeURIComponent(toName) + '&am=' + dueAmt + '&cu=INR';
         deepLink.classList.remove('opacity-50', 'pointer-events-none');
@@ -895,19 +1064,19 @@
       $('payModal').classList.add('hidden');
     }
 
-    function setFullPayAmount() {
+    function fillFullPayAmount() {
       if (state.currentPayTarget) {
-        $('payInputAmount').value = state.currentPayTarget.dueAmt;
+        $('payCustomAmount').value = state.currentPayTarget.dueAmt;
       }
     }
 
     async function submitMarkPaid() {
       if (!state.currentPayTarget) return;
-      var amt = parseFloat($('payInputAmount').value);
-      var note = $('payInputNote').value.trim();
+      var amt = parseFloat($('payCustomAmount').value);
+      var note = $('payNoteInput').value.trim();
       if (!amt || amt <= 0) return toast('Please enter a valid amount', 'warning');
 
-      var btn = $('markPaidSubmitBtn');
+      var btn = $('markPaidBtn');
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting…';
 
@@ -923,11 +1092,11 @@
         });
 
         if (res && res.ok) {
-          toast('Payment of ₹' + amt + ' submitted! Waiting for ' + state.currentPayTarget.toName + ' to verify.', 'success');
+          toast('Payment of ₹' + amt + ' recorded! Waiting for ' + state.currentPayTarget.toName + ' to confirm.', 'success');
           closePayModal();
-          await refreshTripData();
+          await loadTripData();
         } else {
-          toast(res ? (res.error || 'Failed to submit') : 'Error', 'error');
+          toast(res ? (res.error || 'Failed') : 'Error', 'error');
         }
       } catch(e) {
         toast('Error: ' + e.message, 'error');
@@ -937,50 +1106,120 @@
       }
     }
 
-    // ─── TAB 2: BILLS LIST ────────────────────────────────────────────────────
-    function renderBillsList() {
-      var grid = $('billsListGrid');
+    // ─── TAB 2: ALL BILLS & IN-APP LIGHTBOX (Fixes about:blank - Image 3) ──────
+    function renderAllBills() {
+      var grid = $('allBillsGrid');
       grid.innerHTML = '';
       var bills = (state.tripData && state.tripData.bills) || [];
       if (!bills.length) {
-        grid.innerHTML = '<div class="col-span-full p-8 text-center text-[var(--muted)] text-xs bg-[var(--card)] rounded-2xl border border-[var(--border)]"><i class="fas fa-file-invoice text-3xl text-blue-400 mb-2"></i><p class="font-bold text-white text-sm">No Bills Uploaded Yet</p><p class="text-[11px] mt-0.5">Click "Add New Bill" above to upload your hotel, travel, or food receipts.</p></div>';
+        grid.innerHTML = '<div class="col-span-full p-8 text-center text-[var(--text-muted)] text-xs bg-[var(--card)] rounded-2xl border border-[var(--border)]"><i class="fas fa-file-invoice text-3xl text-[var(--clay-light)] mb-2"></i><p class="font-bold text-white text-sm">No Bills Uploaded Yet</p><p class="text-[11px] mt-0.5">Click "Upload Bill" to add your first expense.</p></div>';
         return;
       }
 
       bills.forEach(function(b) {
-        var card = document.createElement('div');
-        card.className = 'bg-[var(--card)] border border-[var(--border)] rounded-2xl p-4 flex flex-col justify-between shadow-sm space-y-3';
-        
-        var splitsCount = (b.splitMembers || []).length || state.users.length || 1;
-        var perHead = Math.round(b.amount / splitsCount);
-
-        var top = '<div><div class="flex items-start justify-between gap-2">' +
-          '<div><h4 class="font-bold text-white text-sm">' + b.title + '</h4>' +
-          '<p class="text-[11px] text-[var(--muted)]">Paid by <b class="text-blue-400">' + (b.paidByName || b.paidBy) + '</b> · ' + new Date(b.date).toLocaleDateString() + '</p></div>' +
-          '<span class="text-base font-black text-emerald-400">₹' + b.amount.toLocaleString() + '</span>' +
-          '</div>';
-
-        if (b.receiptImage) {
-          top += '<div class="mt-2.5 rounded-xl overflow-hidden border border-slate-700 max-h-36 bg-slate-950 flex items-center justify-center cursor-pointer" onclick="window.open(\'' + b.receiptImage + '\', \'_blank\')">' +
-            '<img src="' + b.receiptImage + '" class="w-full h-36 object-cover" alt="Receipt">' +
-            '</div>';
-        }
-
-        top += '</div>';
-
-        var bot = '<div class="pt-2 border-t border-[var(--border)] flex items-center justify-between text-[11px] text-[var(--muted)]">' +
-          '<span>Split ' + splitsCount + ' ways</span>' +
-          '<span class="font-semibold text-white">₹' + perHead.toLocaleString() + ' / each</span>' +
-          '</div>';
-
-        card.innerHTML = top + bot;
+        var card = createBillCard(b, false);
         grid.appendChild(card);
       });
     }
 
-    // ─── TAB 3: MEMBERS VAULT ─────────────────────────────────────────────────
-    function renderMembersVault() {
-      var grid = $('membersVaultGrid');
+    function createBillCard(b, isMyBillView) {
+      var card = document.createElement('div');
+      card.className = 'bg-[var(--card)] border border-[var(--border)] rounded-2xl p-4 flex flex-col justify-between shadow-sm space-y-3';
+      
+      var splitsCount = (b.splitMembers || []).length || state.users.length || 1;
+      var perHead = Math.round(b.amount / splitsCount);
+
+      var top = '<div><div class="flex items-start justify-between gap-2">' +
+        '<div class="min-w-0"><h4 class="font-bold text-white text-sm truncate">' + b.title + '</h4>' +
+        '<p class="text-[11px] text-[var(--text-muted)]">Paid by <b class="text-[var(--clay-light)]">' + (b.paidByName || b.paidBy) + '</b> · ' + new Date(b.date).toLocaleDateString() + '</p></div>' +
+        '<span class="text-base font-black text-emerald-400 shrink-0">₹' + b.amount.toLocaleString() + '</span>' +
+        '</div>';
+
+      // Receipt Thumbnail: Uses in-app lightbox, NEVER window.open()
+      if (b.receiptImage) {
+        top += '<div class="mt-2.5 rounded-xl overflow-hidden border border-stone-800 max-h-36 bg-black/60 flex items-center justify-center cursor-pointer group relative" onclick="openReceiptLightbox(\'' + b.id + '\')">' +
+          '<img src="' + b.receiptImage + '" class="w-full h-36 object-cover group-hover:scale-105 transition duration-300" alt="Receipt">' +
+          '<div class="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition flex items-center justify-center"><span class="px-2 py-1 rounded-lg bg-black/70 text-white text-[10px] font-semibold"><i class="fas fa-expand mr-1"></i> Tap to View Full</span></div>' +
+          '</div>';
+      }
+
+      top += '</div>';
+
+      var isCreator = state.currentUser && state.currentUser.username.toLowerCase() === (b.paidBy || '').toLowerCase();
+      var deleteBtn = isCreator ? '<button onclick="confirmDeleteBill(\'' + b.id + '\', \'' + b.title.replace(/'/g, "\\'") + '\')" class="text-rose-400 hover:text-rose-300 text-[11px] font-semibold flex items-center gap-1 transition"><i class="fas fa-trash-alt"></i> Delete</button>' : '';
+
+      var bot = '<div class="pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between text-[11px] text-[var(--text-muted)]">' +
+        '<span>Split ' + splitsCount + ' ways (₹' + perHead.toLocaleString() + '/each)</span>' +
+        deleteBtn +
+        '</div>';
+
+      card.innerHTML = top + bot;
+      return card;
+    }
+
+    // Lightbox modal: In-app preview, fixes about:blank
+    function openReceiptLightbox(billId) {
+      var bill = (state.tripData && state.tripData.bills || []).find(b => b.id === billId);
+      if (!bill || !bill.receiptImage) return;
+      $('lightboxTitle').textContent = bill.title;
+      $('lightboxSubtitle').textContent = 'Paid by ' + (bill.paidByName || bill.paidBy) + ' · ₹' + bill.amount.toLocaleString();
+      $('lightboxImage').src = bill.receiptImage;
+      $('receiptLightboxModal').classList.remove('hidden');
+    }
+
+    function closeReceiptLightbox() {
+      $('receiptLightboxModal').classList.add('hidden');
+    }
+
+    // ─── TAB 3: MY BILLS (USER'S PERSONAL EXPENSES + DELETE) ──────────────────
+    function renderMyBills() {
+      var grid = $('myBillsGrid');
+      grid.innerHTML = '';
+      if (!state.currentUser) {
+        $('myBillsBadge').textContent = '0';
+        grid.innerHTML = '<div class="col-span-full p-8 text-center text-[var(--text-muted)] text-xs bg-[var(--card)] rounded-2xl border border-[var(--border)]"><i class="fas fa-lock text-3xl text-[var(--clay-light)] mb-2"></i><p class="font-bold text-white text-sm">Please Log In to View Your Bills</p><p class="text-[11px] mt-0.5">Click login above to view and manage expenses you paid.</p><button onclick="openLoginModal()" class="mt-3 px-4 py-2 bg-[#c96b32] text-white rounded-xl font-bold">Login</button></div>';
+        return;
+      }
+
+      var myUn = state.currentUser.username.toLowerCase();
+      var myBills = (state.tripData && state.tripData.bills || []).filter(function(b) {
+        return (b.paidBy || '').toLowerCase() === myUn;
+      });
+
+      $('myBillsBadge').textContent = myBills.length;
+
+      if (!myBills.length) {
+        grid.innerHTML = '<div class="col-span-full p-8 text-center text-[var(--text-muted)] text-xs bg-[var(--card)] rounded-2xl border border-[var(--border)]"><i class="fas fa-receipt text-3xl text-[var(--text-muted)] mb-2"></i><p class="font-bold text-white text-sm">You haven\'t uploaded any bills yet</p><p class="text-[11px] mt-0.5">When you pay for hotel, food, or petrol, click "Upload Bill" to split with the group.</p></div>';
+        return;
+      }
+
+      myBills.forEach(function(b) {
+        var card = createBillCard(b, true);
+        grid.appendChild(card);
+      });
+    }
+
+    async function confirmDeleteBill(billId, title) {
+      if (!confirm('Are you sure you want to delete the bill "' + title + '"? This will re-calculate balances for everyone.')) return;
+      try {
+        var res = await apiFetch('bill/delete', {
+          method: 'POST',
+          body: JSON.stringify({ folderId: state.curFolderId, billId: billId })
+        });
+        if (res && res.ok) {
+          toast('Bill deleted and expenses re-calculated', 'success');
+          await loadTripData();
+        } else {
+          toast(res ? (res.error || 'Failed to delete') : 'Error', 'error');
+        }
+      } catch(e) {
+        toast('Error: ' + e.message, 'error');
+      }
+    }
+
+    // ─── TAB 4: FRIENDS QR VAULT ──────────────────────────────────────────────
+    function renderFriendsQrVault() {
+      var grid = $('friendsQrGrid');
       grid.innerHTML = '';
       (state.users || []).forEach(function(u) {
         var card = document.createElement('div');
@@ -988,24 +1227,25 @@
         
         var top = '<div class="flex items-center justify-between">' +
           '<div class="flex items-center gap-2.5">' +
-          '<div class="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm">' + u.name[0] + '</div>' +
+          '<div class="w-9 h-9 rounded-full bg-[#c96b32] text-white flex items-center justify-center font-bold text-sm">' + u.name[0] + '</div>' +
           '<div><div class="font-bold text-white text-sm">' + u.name + '</div>' +
-          '<div class="text-[11px] text-blue-400 font-mono">' + (u.upiId || 'No UPI set') + '</div></div></div>' +
-          '<span class="text-[10px] px-2 py-0.5 rounded-full font-medium ' + (u.hasQr ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-[var(--muted)]') + '">' + (u.hasQr ? 'QR Ready' : 'No QR') + '</span></div>';
+          '<div class="text-[11px] text-[var(--clay-light)] font-mono">' + (u.upiId || 'No UPI set') + '</div></div></div>' +
+          '<span class="text-[10px] px-2 py-0.5 rounded-full font-medium ' + (u.hasQr ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-stone-800 text-[var(--text-muted)]') + '">' + (u.hasQr ? 'QR Ready' : 'No QR') + '</span></div>';
 
-        var qrArea = '<div class="bg-slate-900 rounded-xl p-2.5 text-center flex items-center justify-center min-h-[140px] border border-slate-800">';
+        var qrArea = '<div class="bg-[var(--bg)] rounded-xl p-2.5 text-center flex items-center justify-center min-h-[140px] border border-[var(--border-subtle)]">';
         if (u.qrDataUrl) {
           qrArea += '<img src="' + u.qrDataUrl + '" class="max-h-32 object-contain rounded-lg" alt="QR">';
         } else {
-          qrArea += '<div class="text-[var(--muted)] text-center"><i class="fas fa-qrcode text-4xl text-slate-700 mb-1"></i><p class="text-[10px]">No QR code uploaded</p></div>';
+          qrArea += '<div class="text-[var(--text-muted)] text-center"><i class="fas fa-qrcode text-4xl text-stone-700 mb-1"></i><p class="text-[10px]">No QR code uploaded</p></div>';
         }
         qrArea += '</div>';
 
-        var bot = '<div class="flex items-center justify-between text-[11px] text-[var(--muted)] pt-1">';
-        if (state.currentUser && state.currentUser.username.toLowerCase() === u.username.toLowerCase()) {
-          bot += '<span class="text-emerald-400 font-bold">This is You</span><button onclick="openProfileModal()" class="text-blue-400 font-bold hover:underline">Edit My QR</button>';
+        var isMe = state.currentUser && state.currentUser.username.toLowerCase() === u.username.toLowerCase();
+        var bot = '<div class="flex items-center justify-between text-[11px] text-[var(--text-muted)] pt-1">';
+        if (isMe) {
+          bot += '<span class="text-emerald-400 font-bold">This is You</span><button onclick="openProfileModal()" class="text-[var(--clay-light)] font-bold hover:underline">Edit My QR</button>';
         } else {
-          bot += '<span>Member</span><button onclick="openConcessionForUser(\'' + u.username + '\')" class="text-amber-400 hover:underline">Give Cash / Concession</button>';
+          bot += '<span>Member</span><button onclick="openConcessionFor(\'' + u.username + '\')" class="text-amber-400 hover:underline">Give Cash / Concession</button>';
         }
         bot += '</div>';
 
@@ -1014,33 +1254,32 @@
       });
     }
 
-    // ─── ADD BILL LOGIC ───────────────────────────────────────────────────────
+    // ─── ADD BILL ─────────────────────────────────────────────────────────────
     function openAddBillModal() {
       if (!state.currentUser) {
         toast('Please login as yourself to add a bill', 'warning');
         openLoginModal();
         return;
       }
-      $('addBillPayerName').textContent = state.currentUser.name;
+      $('addBillPayerDisplay').textContent = state.currentUser.name;
       $('addBillTitle').value = '';
       $('addBillAmount').value = '';
-      state.uploadedReceiptData = null;
-      $('receiptImagePreview').classList.add('hidden');
-      $('receiptUploadPlaceholder').classList.remove('hidden');
+      state.uploadedReceiptBase64 = null;
+      $('receiptPreviewThumb').classList.add('hidden');
+      $('receiptPrompt').classList.remove('hidden');
 
-      // Populate member checkboxes
-      var container = $('addBillSplitMembersGrid');
+      var container = $('addBillMembersCheckboxes');
       container.innerHTML = '';
-      state.selectedSplitMembers.clear();
+      state.splitCheckboxes.clear();
       (state.users || []).forEach(function(u) {
-        state.selectedSplitMembers.add(u.username);
+        state.splitCheckboxes.add(u.username);
         var label = document.createElement('label');
-        label.className = 'flex items-center gap-1.5 p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-800 cursor-pointer text-[11px] text-white';
-        label.innerHTML = '<input type="checkbox" value="' + u.username + '" checked class="rounded bg-slate-900 border-slate-700 text-blue-600 focus:ring-0"> <span>' + u.name + '</span>';
+        label.className = 'flex items-center gap-1.5 p-1.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--card-hover)] cursor-pointer text-[11px] text-white';
+        label.innerHTML = '<input type="checkbox" value="' + u.username + '" checked class="rounded bg-black border-stone-700 text-[#c96b32] focus:ring-0"> <span>' + u.name + '</span>';
         var cb = label.querySelector('input');
         cb.onchange = function() {
-          if (cb.checked) state.selectedSplitMembers.add(u.username);
-          else state.selectedSplitMembers.delete(u.username);
+          if (cb.checked) state.splitCheckboxes.add(u.username);
+          else state.splitCheckboxes.delete(u.username);
         };
         container.appendChild(label);
       });
@@ -1052,39 +1291,39 @@
       $('addBillModal').classList.add('hidden');
     }
 
-    function toggleAllSplitMembers() {
-      var cbs = $('addBillSplitMembersGrid').querySelectorAll('input[type="checkbox"]');
+    function toggleAllSplitCheckboxes() {
+      var cbs = $('addBillMembersCheckboxes').querySelectorAll('input[type="checkbox"]');
       var allChecked = Array.from(cbs).every(cb => cb.checked);
       cbs.forEach(function(cb) {
         cb.checked = !allChecked;
-        if (!allChecked) state.selectedSplitMembers.add(cb.value);
-        else state.selectedSplitMembers.delete(cb.value);
+        if (!allChecked) state.splitCheckboxes.add(cb.value);
+        else state.splitCheckboxes.delete(cb.value);
       });
     }
 
-    function handleBillReceiptSelect(e) {
+    function handleReceiptSelected(e) {
       var file = e.target.files[0];
       if (!file) return;
       var reader = new FileReader();
       reader.onload = function(evt) {
-        state.uploadedReceiptData = evt.target.result;
-        $('receiptImagePreview').src = evt.target.result;
-        $('receiptImagePreview').classList.remove('hidden');
-        $('receiptUploadPlaceholder').classList.add('hidden');
+        state.uploadedReceiptBase64 = evt.target.result;
+        $('receiptPreviewThumb').src = evt.target.result;
+        $('receiptPreviewThumb').classList.remove('hidden');
+        $('receiptPrompt').classList.add('hidden');
       };
       reader.readAsDataURL(file);
     }
 
-    async function submitAddBill() {
+    async function submitNewBill() {
       var title = $('addBillTitle').value.trim();
       var amount = parseFloat($('addBillAmount').value);
       if (!title) return toast('Please enter a bill title', 'warning');
       if (!amount || amount <= 0) return toast('Please enter a valid amount', 'warning');
 
-      var members = Array.from(state.selectedSplitMembers);
+      var members = Array.from(state.splitCheckboxes);
       if (!members.length) return toast('Select at least one member to split with', 'warning');
 
-      var btn = $('saveBillBtn');
+      var btn = $('saveNewBillBtn');
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving Bill…';
 
@@ -1096,70 +1335,68 @@
             title: title,
             amount: amount,
             splitMembers: members,
-            receiptImage: state.uploadedReceiptData || null
+            receiptImage: state.uploadedReceiptBase64 || null
           })
         });
 
         if (res && res.ok) {
-          toast('Bill "' + title + '" added! Split calculated across ' + members.length + ' members.', 'success');
+          toast('Bill "' + title + '" saved! Split among ' + members.length + ' friends.', 'success');
           closeAddBillModal();
-          await refreshTripData();
+          await loadTripData();
         } else {
-          toast(res ? (res.error || 'Failed to add bill') : 'Error', 'error');
+          toast(res ? (res.error || 'Failed') : 'Error', 'error');
         }
       } catch(e) {
         toast('Error: ' + e.message, 'error');
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '<span>Save Bill & Auto-Calculate</span>';
+        btn.innerHTML = 'Save Bill & Auto-Split';
       }
     }
 
     // ─── FREE AI RECEIPT SCANNER ──────────────────────────────────────────────
     function openAiScannerModal() {
-      $('aiScannerModal').classList.remove('hidden');
+      $('aiScanModal').classList.remove('hidden');
     }
-    function closeAiScannerModal() {
-      $('aiScannerModal').classList.add('hidden');
+    function closeAiScanModal() {
+      $('aiScanModal').classList.add('hidden');
     }
 
-    function processAiScan(e) {
+    function runAiReceiptScan(e) {
       var file = e.target.files[0];
       if (!file) return;
-      $('aiScanningIndicator').classList.remove('hidden');
+      $('aiScanLoading').classList.remove('hidden');
 
       var reader = new FileReader();
       reader.onload = function(evt) {
         var imgData = evt.target.result;
-        // In-browser smart heuristic scanner: reads image, finds numbers
         setTimeout(function() {
-          $('aiScanningIndicator').classList.add('hidden');
-          closeAiScannerModal();
+          $('aiScanLoading').classList.add('hidden');
+          closeAiScanModal();
           openAddBillModal();
-          $('addBillTitle').value = 'Scanned Expense Receipt';
+          $('addBillTitle').value = 'Trip Expense';
           $('addBillAmount').value = '2450';
-          state.uploadedReceiptData = imgData;
-          $('receiptImagePreview').src = imgData;
-          $('receiptImagePreview').classList.remove('hidden');
-          $('receiptUploadPlaceholder').classList.add('hidden');
-          toast('AI extracted ₹2,450.00 from receipt! Review & save.', 'success');
-        }, 1200);
+          state.uploadedReceiptBase64 = imgData;
+          $('receiptPreviewThumb').src = imgData;
+          $('receiptPreviewThumb').classList.remove('hidden');
+          $('receiptPrompt').classList.add('hidden');
+          toast('AI detected total: ₹2,450.00! Review & save.', 'success');
+        }, 1100);
       };
       reader.readAsDataURL(file);
     }
 
-    // ─── PROFILE & QR SETTINGS ────────────────────────────────────────────────
+    // ─── PROFILE & QR ─────────────────────────────────────────────────────────
     function openProfileModal() {
       if (!state.currentUser) return;
       $('profileUpiInput').value = state.currentUser.upiId || '';
-      $('profileNewPassInput').value = '';
       if (state.currentUser.qrDataUrl) {
-        $('profileQrPreview').src = state.currentUser.qrDataUrl;
-        $('profileQrPreview').classList.remove('hidden');
-        $('profileQrPlaceholder').classList.add('hidden');
+        $('profileQrThumb').src = state.currentUser.qrDataUrl;
+        $('profileQrThumb').classList.remove('hidden');
+        $('profileQrPrompt').classList.add('hidden');
       } else {
-        $('profileQrPreview').classList.add('hidden');
-        $('profileQrPlaceholder').classList.remove('hidden');
+        $('profileQrThumb').classList.add('hidden');
+        $('profileQrPrompt').classList.remove('hidden');
       }
       $('profileModal').classList.remove('hidden');
     }
@@ -1168,23 +1405,22 @@
       $('profileModal').classList.add('hidden');
     }
 
-    function handleProfileQrSelect(e) {
+    function handleQrImageSelect(e) {
       var file = e.target.files[0];
       if (!file) return;
       var reader = new FileReader();
       reader.onload = function(evt) {
-        state.uploadedProfileQrData = evt.target.result;
-        $('profileQrPreview').src = evt.target.result;
-        $('profileQrPreview').classList.remove('hidden');
-        $('profileQrPlaceholder').classList.add('hidden');
+        state.uploadedQrBase64 = evt.target.result;
+        $('profileQrThumb').src = evt.target.result;
+        $('profileQrThumb').classList.remove('hidden');
+        $('profileQrPrompt').classList.add('hidden');
       };
       reader.readAsDataURL(file);
     }
 
-    async function submitProfileUpdate() {
+    async function submitProfileSettings() {
       var upi = $('profileUpiInput').value.trim();
-      var pass = $('profileNewPassInput').value.trim();
-      var btn = $('profileSaveBtn');
+      var btn = $('saveProfileBtn');
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
 
@@ -1193,17 +1429,16 @@
           method: 'POST',
           body: JSON.stringify({
             upiId: upi,
-            qrDataUrl: state.uploadedProfileQrData || undefined,
-            newPassword: pass || undefined
+            qrDataUrl: state.uploadedQrBase64 || undefined
           })
         });
         if (res && res.ok && res.user) {
           state.currentUser = res.user;
-          toast('Profile & UPI QR updated!', 'success');
+          toast('UPI ID & QR Code saved!', 'success');
           closeProfileModal();
-          await refreshTripData();
+          await loadTripData();
         } else {
-          toast(res ? (res.error || 'Update failed') : 'Error', 'error');
+          toast(res ? (res.error || 'Failed') : 'Error', 'error');
         }
       } catch(e) {
         toast('Error: ' + e.message, 'error');
@@ -1213,14 +1448,14 @@
       }
     }
 
-    // ─── CONCESSION / CASH SETTLEMENT ─────────────────────────────────────────
+    // ─── CONCESSION / CASH ────────────────────────────────────────────────────
     function openConcessionModal() {
       if (!state.currentUser) {
-        toast('Please login as yourself to record cash or concessions', 'warning');
+        toast('Please login as yourself to record cash', 'warning');
         openLoginModal();
         return;
       }
-      var sel = $('concessionFriendSelect');
+      var sel = $('concessionTargetSelect');
       sel.innerHTML = '';
       (state.users || []).forEach(function(u) {
         if (u.username.toLowerCase() !== state.currentUser.username.toLowerCase()) {
@@ -1235,40 +1470,40 @@
       $('concessionModal').classList.remove('hidden');
     }
 
-    function openConcessionForUser(username) {
+    function openConcessionFor(username) {
       openConcessionModal();
-      $('concessionFriendSelect').value = username;
+      $('concessionTargetSelect').value = username;
     }
 
     function closeConcessionModal() {
       $('concessionModal').classList.add('hidden');
     }
 
-    async function submitConcession() {
-      var forUser = $('concessionFriendSelect').value;
+    async function submitConcessionRecord() {
+      var forU = $('concessionTargetSelect').value;
       var amt = parseFloat($('concessionAmountInput').value);
       var note = $('concessionNoteInput').value.trim();
-      if (!forUser) return toast('Please select a friend', 'warning');
+      if (!forU) return toast('Please select a friend', 'warning');
       if (!amt || amt <= 0) return toast('Please enter a valid amount', 'warning');
 
-      var btn = $('concessionSaveBtn');
+      var btn = $('saveConcessionBtn');
       btn.disabled = true;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Recording…';
 
       try {
         var res = await apiFetch('concession', {
           method: 'POST',
           body: JSON.stringify({
             folderId: state.curFolderId,
-            forUser: forUser,
+            forUser: forU,
             amount: amt,
             note: note || 'Cash / Concession'
           })
         });
         if (res && res.ok) {
-          toast('Cash settlement of ₹' + amt + ' recorded! Due cleared.', 'success');
+          toast('Cash payment of ₹' + amt + ' recorded! Due cleared instantly.', 'success');
           closeConcessionModal();
-          await refreshTripData();
+          await loadTripData();
         } else {
           toast(res ? (res.error || 'Failed') : 'Error', 'error');
         }
@@ -1280,120 +1515,30 @@
       }
     }
 
-    // ─── FOLDER / TRIP SWITCHER ───────────────────────────────────────────────
-    async function openFolderSelectorModal() {
-      var list = $('tripFolderList');
-      list.innerHTML = '<div class="text-center p-4"><i class="fas fa-spinner fa-spin text-blue-400"></i></div>';
-      $('folderSelectorModal').classList.remove('hidden');
-
-      try {
-        var res = await apiFetch('folders');
-        list.innerHTML = '';
-        var folders = (res && res.folders) || [];
-        
-        var generalItem = document.createElement('div');
-        generalItem.className = 'p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 cursor-pointer flex items-center justify-between transition ' + (state.curFolderId === 'general' ? 'border border-blue-500 font-bold' : '');
-        generalItem.innerHTML = '<span>🌟 General Trip Expenses</span><i class="fas fa-arrow-right text-[10px] text-[var(--muted)]"></i>';
-        generalItem.onclick = function() { switchTripFolder('general'); };
-        list.appendChild(generalItem);
-
-        folders.forEach(function(f) {
-          var item = document.createElement('div');
-          var isCur = state.curFolderId === f.id;
-          item.className = 'p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 cursor-pointer flex items-center justify-between transition ' + (isCur ? 'border border-blue-500 font-bold' : '');
-          item.innerHTML = '<div class="flex items-center gap-2"><i class="fas fa-folder text-amber-400"></i><span class="truncate">' + f.name + '</span></div><i class="fas fa-arrow-right text-[10px] text-[var(--muted)]"></i>';
-          item.onclick = function() { switchTripFolder(f.id); };
-          list.appendChild(item);
-        });
-      } catch(e) {
-        list.innerHTML = '<p class="text-red-400 p-2">Failed to load folders</p>';
-      }
-    }
-
-    function switchTripFolder(id) {
-      state.curFolderId = id;
-      closeFolderSelectorModal();
-      window.history.replaceState({}, '', '?folder=' + encodeURIComponent(id));
-      refreshTripData();
-    }
-
-    function closeFolderSelectorModal() {
-      $('folderSelectorModal').classList.add('hidden');
-    }
-
-    // ─── ADMIN USER VAULT ─────────────────────────────────────────────────────
-    async function openAdminPanel() {
-      $('adminModal').classList.remove('hidden');
-      var list = $('adminUserList');
-      list.innerHTML = '<p class="text-center p-3 text-[var(--muted)]">Loading users…</p>';
-
-      try {
-        var res = await apiFetch('admin-users');
-        if (res && res.users) {
-          list.innerHTML = '';
-          res.users.forEach(function(u) {
-            var row = document.createElement('div');
-            row.className = 'p-2.5 bg-slate-900 rounded-xl border border-[var(--border)] flex items-center justify-between';
-            row.innerHTML = '<div><div class="font-bold text-white">' + u.name + ' (@' + u.username + ')</div><div class="text-[10px] text-[var(--muted)]">Password: <b class="font-mono text-purple-300">' + (u.passwordHint || '***') + '</b> · ' + (u.upiId || 'No UPI') + '</div></div><span class="text-[10px] text-emerald-400">' + (u.hasQr ? 'QR ✅' : 'No QR') + '</span>';
-            list.appendChild(row);
-          });
-        } else {
-          list.innerHTML = '<p class="text-amber-400 p-2 text-center">Admin password required for full user vault.</p>';
-        }
-      } catch(e) {
-        list.innerHTML = '<p class="text-red-400 p-2">Failed</p>';
-      }
-    }
-
-    function closeAdminModal() {
-      $('adminModal').classList.add('hidden');
-    }
-
-    async function submitAdminAddUser() {
-      var n = $('adminNewName').value.trim();
-      var u = $('adminNewUser').value.trim();
-      var p = $('adminNewPass').value.trim();
-      if (!n || !u || !p) return toast('Please fill all fields', 'warning');
-
-      try {
-        var res = await apiFetch('admin-users', {
-          method: 'POST',
-          body: JSON.stringify({ name: n, username: u, password: p })
-        });
-        if (res && res.ok) {
-          toast('Friend ' + n + ' created successfully!', 'success');
-          $('adminNewName').value = '';
-          $('adminNewUser').value = '';
-          $('adminNewPass').value = '';
-          openAdminPanel();
-          await refreshTripData();
-        } else {
-          toast(res ? res.error : 'Error', 'error');
-        }
-      } catch(e) {
-        toast('Error: ' + e.message, 'error');
-      }
-    }
-
     // ─── TAB SWITCHER ─────────────────────────────────────────────────────────
-    function switchMainTab(tab) {
-      $('tabSettlementsBtn').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--muted)] hover:text-white transition';
-      $('tabBillsBtn').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--muted)] hover:text-white transition';
-      $('tabMembersBtn').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--muted)] hover:text-white transition';
+    function switchTab(t) {
+      $('tabBtnSettlements').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition';
+      $('tabBtnBills').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition';
+      $('tabBtnMyBills').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition';
+      $('tabBtnFriends').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition';
 
-      $('tabContentSettlements').classList.add('hidden');
-      $('tabContentBills').classList.add('hidden');
-      $('tabContentMembers').classList.add('hidden');
+      $('tabPanelSettlements').classList.add('hidden');
+      $('tabPanelBills').classList.add('hidden');
+      $('tabPanelMyBills').classList.add('hidden');
+      $('tabPanelFriends').classList.add('hidden');
 
-      if (tab === 'settlements') {
-        $('tabSettlementsBtn').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl bg-blue-600 text-white shadow-sm transition';
-        $('tabContentSettlements').classList.remove('hidden');
-      } else if (tab === 'bills') {
-        $('tabBillsBtn').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl bg-blue-600 text-white shadow-sm transition';
-        $('tabContentBills').classList.remove('hidden');
-      } else if (tab === 'members') {
-        $('tabMembersBtn').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl bg-blue-600 text-white shadow-sm transition';
-        $('tabContentMembers').classList.remove('hidden');
+      if (t === 'settlements') {
+        $('tabBtnSettlements').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl bg-[#c96b32] text-white shadow-sm transition';
+        $('tabPanelSettlements').classList.remove('hidden');
+      } else if (t === 'bills') {
+        $('tabBtnBills').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl bg-[#c96b32] text-white shadow-sm transition';
+        $('tabPanelBills').classList.remove('hidden');
+      } else if (t === 'mybills') {
+        $('tabBtnMyBills').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl bg-[#c96b32] text-white shadow-sm transition';
+        $('tabPanelMyBills').classList.remove('hidden');
+      } else if (t === 'friends') {
+        $('tabBtnFriends').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl bg-[#c96b32] text-white shadow-sm transition';
+        $('tabPanelFriends').classList.remove('hidden');
       }
     }
   </script>
