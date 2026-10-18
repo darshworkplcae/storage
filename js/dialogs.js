@@ -2019,6 +2019,8 @@ async function openMedia(fileLocalId) {
   var ov = document.createElement('div');
   ov.className = 'media-ov';
 
+  var _useCloudStreamForCurrent = false;
+
   function renderCurrentFile(index) {
     if (index < 0 || index >= allContextFiles.length) return;
     curIdx = index;
@@ -2029,9 +2031,29 @@ async function openMedia(fileLocalId) {
     var driveId = curFile.driveId || _driveId || (S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : '');
     var mediaUrl = getFileDownloadUrl(curFile.googleFileId, driveId, true);
     var dlUrl = getFileDownloadUrl(curFile.googleFileId, driveId, false);
+    var gPreviewUrl = 'https://drive.google.com/file/d/' + encodeURIComponent(curFile.googleFileId) + '/preview';
     var cfg = ftCfg(curFile.name, curFile.mimeType);
     var isHeic = /\.(heic|heif)$/i.test(curFile.name) || (curFile.mimeType && curFile.mimeType.toLowerCase().includes('heic'));
+    var isMov = /\.mov$/i.test(curFile.name) || (curFile.mimeType && curFile.mimeType.toLowerCase().includes('quicktime'));
+    var isDoc = cfg.cat === 'doc' || /\.(pdf|docx?|xlsx?|pptx?|odt|ods|odp|txt|csv|rtf|json|html|xml|log|md|py|js|css)$/i.test(curFile.name);
     var displayImgUrl = isHeic ? (mediaUrl + '&thumb=1&sz=s2048') : mediaUrl;
+
+    // Preload adjacent images for zero-delay next/prev cycling
+    [-1, 1].forEach(function(offset) {
+      var adjIdx = curIdx + offset;
+      if (adjIdx >= 0 && adjIdx < allContextFiles.length) {
+        var adjF = allContextFiles[adjIdx];
+        var adjCfg = ftCfg(adjF.name, adjF.mimeType);
+        if (adjCfg.cat === 'image') {
+          var adjDId = adjF.driveId || _driveId || '';
+          var adjUrl = getFileDownloadUrl(adjF.googleFileId, adjDId, true);
+          var isAdjHeic = /\.(heic|heif)$/i.test(adjF.name) || (adjF.mimeType && adjF.mimeType.toLowerCase().includes('heic'));
+          var pSrc = isAdjHeic ? (adjUrl + '&thumb=1&sz=s2048') : adjUrl;
+          var pImg = new Image();
+          pImg.src = pSrc;
+        }
+      }
+    });
 
     var dlBtnHtml = canDownload ? '<a href="' + dlUrl + '" class="icon-btn" title="Download ' + esc(curFile.name) + '" download><i class="fas fa-download"></i></a>' : '';
     var noDlAttrs = !canDownload ? ' controlsList="nodownload noplaybackrate" disablePictureInPicture oncontextmenu="return false;" ' : ' controlsList="nodownload" ';
@@ -2041,44 +2063,118 @@ async function openMedia(fileLocalId) {
     var prevBtnHtml = allContextFiles.length > 1 ? '<button class="media-nav-btn media-prev" title="Previous File (Left Arrow)" style="' + (curIdx <= 0 ? 'display:none;' : '') + '" onclick="window._mediaNavPrev()"><i class="fas fa-chevron-left"></i></button>' : '';
     var nextBtnHtml = allContextFiles.length > 1 ? '<button class="media-nav-btn media-next" title="Next File (Right Arrow)" style="' + (curIdx >= allContextFiles.length - 1 ? 'display:none;' : '') + '" onclick="window._mediaNavNext()"><i class="fas fa-chevron-right"></i></button>' : '';
 
+    var streamToggleBtnHtml = '';
+    if (cfg.cat === 'video') {
+      streamToggleBtnHtml = '<button class="btn-ghost xs" id="mediaFastStreamBtn" onclick="window._toggleFastStream()" style="color:#00e5ff;border:1px solid rgba(0,229,255,0.35);border-radius:20px;padding:3px 10px;font-size:0.75rem;cursor:pointer;display:inline-flex;align-items:center;gap:5px" title="Switch between Direct Stream and Fast Google Cloud Stream">' +
+        (_useCloudStreamForCurrent || isMov ? '<i class="fas fa-bolt" style="color:#ffd60a"></i> Cloud Player' : '<i class="fas fa-bolt"></i> Fast Stream') +
+        '</button>';
+    }
+
     var bodyContent = '';
     if (cfg.cat === 'image') {
-      bodyContent = '<img class="media-img" src="' + displayImgUrl + '" alt="' + esc(curFile.name) + '" data-fallback="' + mediaUrl + '" onerror="if(this.src!==this.dataset.fallback&&!this.dataset.triedFallback){this.dataset.triedFallback=\'1\';this.src=this.dataset.fallback;}" oncontextmenu="' + (!canDownload ? 'return false;' : '') + '">';
+      bodyContent = '<img class="media-img" src="' + displayImgUrl + '" alt="' + esc(curFile.name) + '" data-fallback="' + mediaUrl + '" onload="var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';" onerror="if(this.src!==this.dataset.fallback&&!this.dataset.triedFallback){this.dataset.triedFallback=\'1\';this.src=this.dataset.fallback;}else{var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';}" oncontextmenu="' + (!canDownload ? 'return false;' : '') + '">';
     } else if (cfg.cat === 'video') {
-      bodyContent = '<video class="media-vid" src="' + mediaUrl + '" controls' + noDlAttrs + 'autoplay playsinline></video>';
+      // For iPhone .MOV files or when Cloud Stream is enabled, use Google Drive Preview player
+      if (_useCloudStreamForCurrent || isMov) {
+        bodyContent = '<div class="media-video-container" style="position:relative;width:100%;max-width:1000px;height:75vh;display:flex;align-items:center;justify-content:center">' +
+          '<iframe id="mediaIframePlayer" src="' + gPreviewUrl + '" onload="var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';" style="width:100%;height:100%;border:none;border-radius:12px;background:#000" allow="autoplay; encrypted-media" allowfullscreen></iframe>' +
+          '</div>';
+      } else {
+        bodyContent = '<div class="media-video-container" style="position:relative;width:100%;max-width:1000px;display:flex;flex-direction:column;align-items:center;justify-content:center">' +
+          '<video id="mediaVideoPlayer" class="media-vid" src="' + mediaUrl + '" controls ' + noDlAttrs + ' autoplay playsinline ' +
+          'onloadeddata="var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';" ' +
+          'onerror="window._handleVideoError(\'' + gPreviewUrl + '\')"></video>' +
+          '<div style="margin-top:8px;font-size:0.75rem;color:var(--text3);display:flex;align-items:center;gap:6px">' +
+          '<span>Slow loading?</span> <a href="javascript:void(0)" onclick="window._toggleFastStream()" style="color:#00e5ff;text-decoration:underline">Switch to Fast Cloud Stream</a>' +
+          '</div>' +
+          '</div>';
+      }
     } else if (cfg.cat === 'audio') {
-      bodyContent = '<audio src="' + mediaUrl + '" controls' + noDlAttrs + 'autoplay style="width:80%;max-width:500px"></audio>';
+      bodyContent = '<audio src="' + mediaUrl + '" controls ' + noDlAttrs + ' autoplay onloadeddata="var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';" style="width:80%;max-width:500px"></audio>';
+    } else if (isDoc) {
+      bodyContent = '<div class="media-doc-container" style="width:100%;max-width:1050px;height:82vh;display:flex;align-items:center;justify-content:center;position:relative">' +
+        '<iframe src="' + gPreviewUrl + '" onload="var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';" style="width:100%;height:100%;border:none;border-radius:12px;background:#18181b;box-shadow:0 12px 40px rgba(0,0,0,0.6)" allow="autoplay" allowfullscreen></iframe>' +
+        '</div>';
     } else {
-      bodyContent = '<div style="text-align:center;padding:2rem"><i class="fas fa-file" style="font-size:3rem;color:var(--text2)"></i><p style="margin:1rem 0">Preview not available for this file type</p>' + (canDownload ? '<a href="' + dlUrl + '" class="btn-primary"><i class="fas fa-download"></i> Download File</a>' : '') + '</div>';
+      bodyContent = '<div style="text-align:center;padding:2.5rem;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:16px;max-width:450px">' +
+        '<i class="fas ' + cfg.icon + '" style="font-size:3.5rem;color:' + cfg.col + ';margin-bottom:1rem"></i>' +
+        '<div style="font-weight:700;font-size:1.1rem;color:var(--text1);margin-bottom:0.4rem">' + esc(curFile.name) + '</div>' +
+        '<div style="color:var(--text3);font-size:0.8rem;margin-bottom:1.5rem">' + formatBytes(curFile.size) + '</div>' +
+        '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">' +
+        (canDownload ? '<a href="' + dlUrl + '" class="btn-primary sm" download><i class="fas fa-download"></i> Download</a>' : '') +
+        '<a href="' + gPreviewUrl + '" target="_blank" class="btn-ghost sm" style="color:#00e5ff"><i class="fas fa-arrow-up-right-from-square"></i> Open Google Preview</a>' +
+        '</div></div>';
     }
 
     ov.innerHTML = '<div class="media-hd">' +
       '<div class="media-title">' +
       '<i class="fas ' + cfg.icon + '" style="color:' + cfg.col + '"></i> ' +
-      '<span class="truncate" style="max-width:calc(100vw - 230px)">' + esc(curFile.name) + '</span>' +
+      '<span class="truncate" style="max-width:calc(100vw - 320px)">' + esc(curFile.name) + '</span>' +
       counterHtml +
       '</div>' +
       '<div style="display:flex;gap:.5rem;align-items:center">' +
+      streamToggleBtnHtml +
       dlBtnHtml +
       '<button class="icon-btn" onclick="window._closeMediaOverlay()"><i class="fas fa-times"></i></button>' +
       '</div></div>' +
       '<div class="media-body" style="position:relative">' +
       prevBtnHtml +
+      '<div id="mediaLoadingSpinner" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:10;transition:opacity 0.2s">' +
+      '<div style="background:rgba(0,0,0,0.65);border:1px solid rgba(255,255,255,0.12);padding:10px 16px;border-radius:30px;display:flex;align-items:center;gap:8px;backdrop-filter:blur(8px)">' +
+      '<i class="fas fa-circle-notch fa-spin" style="color:var(--primary);font-size:1rem"></i>' +
+      '<span style="font-size:0.78rem;color:var(--text2);font-weight:600">Loading…</span>' +
+      '</div></div>' +
       bodyContent +
       nextBtnHtml +
       '</div>';
   }
 
+  window._toggleFastStream = function() {
+    _useCloudStreamForCurrent = !_useCloudStreamForCurrent;
+    renderCurrentFile(curIdx);
+  };
+
+  window._handleVideoError = function(gUrl) {
+    _useCloudStreamForCurrent = true;
+    renderCurrentFile(curIdx);
+    toast('Switched to Fast Google Cloud Stream for smooth playback', 'info', 4000);
+  };
+
   window._mediaNavPrev = function() {
-    if (curIdx > 0) renderCurrentFile(curIdx - 1);
+    if (curIdx > 0) {
+      _useCloudStreamForCurrent = false;
+      renderCurrentFile(curIdx - 1);
+    }
   };
   window._mediaNavNext = function() {
-    if (curIdx < allContextFiles.length - 1) renderCurrentFile(curIdx + 1);
+    if (curIdx < allContextFiles.length - 1) {
+      _useCloudStreamForCurrent = false;
+      renderCurrentFile(curIdx + 1);
+    }
   };
   window._closeMediaOverlay = function() {
     window.removeEventListener('keydown', handleMediaKey);
     ov.remove();
   };
+
+  // Touch Swipe Support for iPhone / Android mobile
+  var touchStartX = 0;
+  var touchEndX = 0;
+  ov.addEventListener('touchstart', function(e) {
+    if (e.changedTouches && e.changedTouches[0]) {
+      touchStartX = e.changedTouches[0].screenX;
+    }
+  }, { passive: true });
+  ov.addEventListener('touchend', function(e) {
+    if (e.changedTouches && e.changedTouches[0]) {
+      touchEndX = e.changedTouches[0].screenX;
+      var diffX = touchEndX - touchStartX;
+      if (Math.abs(diffX) > 60) {
+        if (diffX < 0) window._mediaNavNext();
+        else window._mediaNavPrev();
+      }
+    }
+  }, { passive: true });
 
   function handleMediaKey(e) {
     if (!document.body.contains(ov)) {

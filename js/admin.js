@@ -168,13 +168,6 @@ function renderSettingsPage() {
     '</div>',
     '</div>',
 
-    // TripSplit Accounts & Lifetime Ledgers
-    '<div class="settings-section" id="tripAdminSection">',
-    '<div class="sect-hd"><i class="fas fa-receipt" style="color:#e0834a"></i><div><h3>TripSplit — Trip Expenses & Member Lifetime Ledgers</h3><p>View member plain passwords, lifetime amount paid vs owed, and all trip expense folders.</p></div>',
-    '<a href="/trip" target="_blank" class="btn-primary sm" style="background:linear-gradient(135deg,#c96b32,#a34c1b);border:none;display:inline-flex;align-items:center;gap:6px;text-decoration:none"><i class="fas fa-external-link-alt"></i> Open TripSplit</a></div>',
-    '<div id="tripAdminContainer"><div class="empty-small"><i class="fas fa-spinner fa-spin" style="color:#e0834a"></i><p>Loading trip members and lifetime ledgers…</p></div></div>',
-    '</div>',
-
     // Database Maintenance & Backup
     '<div class="settings-section">',
     '<h3 class="sect-title"><i class="fas fa-database" style="color:var(--primary)"></i> Database Backup & Restore</h3>',
@@ -199,7 +192,6 @@ function renderSettingsPage() {
   loadAdminFolderVisibility();
   loadAdminLockedFolders();
   loadAdminDestroyedFolders();
-  loadAdminTripSplitPanel();
 }
 
 async function loadAdminFolderVisibility() {
@@ -1070,9 +1062,33 @@ async function submitPastedDBBackup() {
   }
 }
 
-// ─── TripSplit Admin Panel & Lifetime Ledgers ────────────────────────────────
-async function loadAdminTripSplitPanel() {
-  var el = document.getElementById('tripAdminContainer');
+// ─── Dedicated TripSplit Admin Page & Lifetime Ledgers ────────────────────────
+async function renderTripAdminPage() {
+  var pc = $('pageContent');
+  if (!pc) return;
+
+  pc.innerHTML = [
+    '<div class="inner-page">',
+    '<div class="page-hd">',
+    '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">',
+    '<div>',
+    '<h2><i class="fas fa-receipt" style="color:var(--primary);margin-right:8px"></i> TripSplit Admin — Member Ledgers & Bill Archive</h2>',
+    '<p>Group lifetime expenditures, friend account passwords, and individual uploaded bill archives</p>',
+    '</div>',
+    '<div style="display:flex;gap:8px">',
+    '<a href="/trip" target="_blank" class="btn-primary sm" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px"><i class="fas fa-arrow-up-right-from-square"></i> Open Live TripSplit</a>',
+    '</div>',
+    '</div>',
+    '</div>',
+    '<div id="tripAdminFullContainer"><div class="empty-small"><i class="fas fa-spinner fa-spin" style="color:var(--primary)"></i><p>Loading TripSplit member ledgers and bill archives…</p></div></div>',
+    '</div>'
+  ].join('');
+
+  loadFullTripAdminPanel();
+}
+
+async function loadFullTripAdminPanel() {
+  var el = document.getElementById('tripAdminFullContainer');
   if (!el) return;
 
   try {
@@ -1085,30 +1101,39 @@ async function loadAdminTripSplitPanel() {
     var users = res.users || [];
     var trips = res.trips || [];
     var sum = res.summary || {};
+    var billsByUser = res.billsByUser || {};
 
-    var summaryHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:1.2rem">' +
-      '<div style="background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center">' +
-      '<div style="font-size:0.75rem;color:var(--text3);text-transform:uppercase;font-weight:600">Lifetime Expenses</div>' +
-      '<div style="font-size:1.25rem;font-weight:800;color:var(--text1);margin-top:2px">₹' + (sum.totalLifetimeExpenses || 0).toLocaleString() + '</div>' +
+    // 1. Group Lifetime Financial Summary (4 Metric Cards)
+    var summaryHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:1.6rem">' +
+      '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:14px;padding:16px;text-align:center">' +
+      '<div style="font-size:0.75rem;color:var(--text3);text-transform:uppercase;font-weight:700;letter-spacing:0.5px">Total Group Spend</div>' +
+      '<div style="font-size:1.6rem;font-weight:900;color:var(--text1);margin-top:4px">₹' + (sum.totalLifetimeExpenses || 0).toLocaleString() + '</div>' +
+      '<div style="font-size:0.72rem;color:var(--text3);margin-top:2px">Across all trip folders</div>' +
       '</div>' +
-      '<div style="background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center">' +
-      '<div style="font-size:0.75rem;color:var(--text3);text-transform:uppercase;font-weight:600">Lifetime Settled</div>' +
-      '<div style="font-size:1.25rem;font-weight:800;color:#30d158;margin-top:2px">₹' + (sum.totalLifetimeSettled || 0).toLocaleString() + '</div>' +
+      '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:14px;padding:16px;text-align:center">' +
+      '<div style="font-size:0.75rem;color:var(--text3);text-transform:uppercase;font-weight:700;letter-spacing:0.5px">Total Settled</div>' +
+      '<div style="font-size:1.6rem;font-weight:900;color:#30d158;margin-top:4px">₹' + (sum.totalLifetimeSettled || 0).toLocaleString() + '</div>' +
+      '<div style="font-size:0.72rem;color:#30d158;margin-top:2px">Verified dues paid</div>' +
       '</div>' +
-      '<div style="background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center">' +
-      '<div style="font-size:0.75rem;color:var(--text3);text-transform:uppercase;font-weight:600">Remaining Due</div>' +
-      '<div style="font-size:1.25rem;font-weight:800;color:#ff9f0a;margin-top:2px">₹' + (sum.totalLifetimeDue || 0).toLocaleString() + '</div>' +
+      '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:14px;padding:16px;text-align:center">' +
+      '<div style="font-size:0.75rem;color:var(--text3);text-transform:uppercase;font-weight:700;letter-spacing:0.5px">Remaining Due</div>' +
+      '<div style="font-size:1.6rem;font-weight:900;color:#ff9f0a;margin-top:4px">₹' + (sum.totalLifetimeDue || 0).toLocaleString() + '</div>' +
+      '<div style="font-size:0.72rem;color:#ff9f0a;margin-top:2px">Unsettled group balance</div>' +
       '</div>' +
-      '<div style="background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center">' +
-      '<div style="font-size:0.75rem;color:var(--text3);text-transform:uppercase;font-weight:600">Active Friends</div>' +
-      '<div style="font-size:1.25rem;font-weight:800;color:#64d2ff;margin-top:2px">' + users.length + ' Users</div>' +
+      '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:14px;padding:16px;text-align:center">' +
+      '<div style="font-size:0.75rem;color:var(--text3);text-transform:uppercase;font-weight:700;letter-spacing:0.5px">Active Friends</div>' +
+      '<div style="font-size:1.6rem;font-weight:900;color:#64d2ff;margin-top:4px">' + users.length + ' Users</div>' +
+      '<div style="font-size:0.72rem;color:var(--text3);margin-top:2px">Group member accounts</div>' +
       '</div>' +
       '</div>';
 
-    var usersTable = '<div class="table-wrap" style="margin-bottom:1.4rem;overflow-x:auto">' +
+    // 2. Member Passwords & Lifetime Balance Table
+    var usersTable = '<div class="settings-section" style="margin-bottom:1.8rem">' +
+      '<div class="sect-hd"><i class="fas fa-user-lock" style="color:var(--primary)"></i><div><h3>Friend Account Credentials & Lifetime Balances</h3><p>Every member account password, UPI configuration, and lifetime net position</p></div></div>' +
+      '<div class="table-wrap" style="overflow-x:auto">' +
       '<table class="data-table" style="width:100%">' +
       '<thead><tr>' +
-      '<th>Member</th>' +
+      '<th>Friend Name</th>' +
       '<th>Plain Password</th>' +
       '<th>UPI / QR</th>' +
       '<th style="text-align:right">Lifetime Paid</th>' +
@@ -1130,13 +1155,13 @@ async function loadAdminTripSplitPanel() {
         return '<tr>' +
           '<td>' +
           '<div style="display:flex;align-items:center;gap:8px">' +
-          '<div style="width:28px;height:28px;border-radius:50%;background:#c96b32;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.75rem">' + esc(u.name)[0] + '</div>' +
-          '<div><div style="font-weight:700;font-size:0.86rem;color:var(--text1)">' + esc(u.name) + '</div><div style="font-size:0.72rem;color:var(--text3)">@' + esc(u.username) + '</div></div>' +
+          '<div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#007aff,#5856d6);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:0.8rem">' + esc(u.name)[0] + '</div>' +
+          '<div><div style="font-weight:700;font-size:0.88rem;color:var(--text1)">' + esc(u.name) + '</div><div style="font-size:0.72rem;color:var(--text3)">@' + esc(u.username) + '</div></div>' +
           '</div>' +
           '</td>' +
           '<td>' +
-          '<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,0,0,0.3);padding:3px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.08)">' +
-          '<span id="tripPassVal_' + u.id + '" style="font-family:monospace;font-size:0.82rem;letter-spacing:1px;color:#ffd60a">••••••••</span>' +
+          '<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,0,0,0.35);padding:4px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.08)">' +
+          '<span id="tripPassVal_' + u.id + '" style="font-family:monospace;font-size:0.84rem;letter-spacing:1px;color:#ffd60a">••••••••</span>' +
           '<button class="icon-btn xs" onclick="toggleTripPlainPass(\'' + u.id + '\', \'' + esc(u.password).replace(/'/g, "\\'") + '\')" title="Show / Hide Plain Password"><i class="fas fa-eye" id="tripPassIco_' + u.id + '"></i></button>' +
           '<button class="icon-btn xs" onclick="copyTripPass(\'' + esc(u.password).replace(/'/g, "\\'") + '\')" title="Copy Password"><i class="fas fa-copy"></i></button>' +
           '</div>' +
@@ -1152,27 +1177,134 @@ async function loadAdminTripSplitPanel() {
           '</td>' +
           '</tr>';
       }).join('') +
-      '</tbody></table></div>';
+      '</tbody></table></div></div>';
 
+    // 3. Member Bill Folders ("a folder that have everyone names and inside that all bill they uploaded by date")
+    var memberFoldersHtml = '<div class="settings-section" style="margin-bottom:1.8rem">' +
+      '<div class="sect-hd"><i class="fas fa-folder-open" style="color:#ffd60a"></i><div><h3>Friend Bill Archives (Uploaded Receipts)</h3><p>Browse folders for each friend to inspect all bills they uploaded, sorted by date with receipt images</p></div></div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">' +
+      users.map(function(u) {
+        var uBills = billsByUser[u.username.toLowerCase()] || [];
+        var totalPaid = uBills.reduce(function(acc, b) { return acc + (b.amount || 0); }, 0);
+        var drawerId = 'userBillDrawer_' + u.id;
+        var arrowId = 'userBillArrow_' + u.id;
+
+        var billsRows = uBills.length === 0
+          ? '<div style="padding:16px;text-align:center;color:var(--text3);font-size:0.8rem">No bills uploaded by ' + esc(u.name) + ' yet.</div>'
+          : '<div style="max-height:380px;overflow-y:auto;padding:6px">' +
+            uBills.map(function(b) {
+              var dateStr = b.date ? new Date(b.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : 'Unknown date';
+              var proofBtn = b.proofPhoto
+                ? '<button class="btn-ghost xs" style="color:#64d2ff;border-color:rgba(100,210,255,0.3)" onclick="showTripReceiptLightbox(\'' + esc(b.title).replace(/'/g, "\\'") + '\', \'' + esc(b.proofPhoto).replace(/'/g, "\\'") + '\')"><i class="fas fa-receipt"></i> View Receipt</button>'
+                : '<span style="font-size:0.7rem;color:var(--text3)">No receipt photo</span>';
+
+              return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">' +
+                '<div>' +
+                '<div style="font-weight:700;font-size:0.86rem;color:var(--text1)">' + esc(b.title) + '</div>' +
+                '<div style="font-size:0.72rem;color:var(--text3);margin-top:2px"><i class="fas fa-calendar-day"></i> ' + dateStr + ' · <span style="color:#e0834a">🏖️ ' + esc(b.tripName) + '</span></div>' +
+                '</div>' +
+                '<div style="display:flex;align-items:center;gap:10px">' +
+                '<div style="text-align:right"><div style="font-size:0.95rem;font-weight:800;color:#ffd60a">₹' + (b.amount || 0).toLocaleString() + '</div><div style="font-size:0.7rem;color:var(--text3)">' + (b.splitMembers ? b.splitMembers.length : 7) + ' members</div></div>' +
+                proofBtn +
+                '<button class="icon-btn xs danger" onclick="adminDeleteTripBill(\'' + b.folderId + '\', \'' + b.id + '\')" title="Delete this bill"><i class="fas fa-trash-alt"></i></button>' +
+                '</div>' +
+                '</div>';
+            }).join('') +
+            '</div>';
+
+        return '<div style="background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:14px;overflow:hidden">' +
+          '<div style="padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;background:rgba(255,255,255,0.02)" onclick="toggleFriendBillDrawer(\'' + drawerId + '\', \'' + arrowId + '\')">' +
+          '<div style="display:flex;align-items:center;gap:10px">' +
+          '<div style="width:36px;height:36px;border-radius:10px;background:rgba(255,214,10,0.12);border:1px solid rgba(255,214,10,0.25);color:#ffd60a;display:flex;align-items:center;justify-content:center;font-size:1.1rem"><i class="fas fa-folder"></i></div>' +
+          '<div>' +
+          '<div style="font-weight:800;font-size:0.9rem;color:var(--text1)">' + esc(u.name) + '\'s Bills</div>' +
+          '<div style="font-size:0.74rem;color:var(--text3)">' + uBills.length + ' bill(s) · Paid ₹' + totalPaid.toLocaleString() + '</div>' +
+          '</div>' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:8px">' +
+          '<span class="badge sm" style="background:rgba(255,255,255,0.06);color:var(--text2)">' + uBills.length + ' Bills</span>' +
+          '<i class="fas fa-chevron-down" id="' + arrowId + '" style="font-size:0.8rem;color:var(--text3);transition:transform 0.2s"></i>' +
+          '</div>' +
+          '</div>' +
+          '<div id="' + drawerId + '" style="display:none;border-top:1px solid var(--border);background:rgba(0,0,0,0.2)">' +
+          billsRows +
+          '</div>' +
+          '</div>';
+      }).join('') +
+      '</div></div>';
+
+    // 4. Connected Trips Section
     var tripsHtml = '';
     if (trips.length > 0) {
-      tripsHtml = '<h4 style="font-size:0.86rem;margin-bottom:0.6rem;color:#e0834a;display:flex;align-items:center;gap:6px"><i class="fas fa-map-location-dot"></i> Connected Trip Expense Folders (' + trips.length + ')</h4>' +
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px">' +
+      tripsHtml = '<div class="settings-section">' +
+        '<div class="sect-hd"><i class="fas fa-map-location-dot" style="color:#e0834a"></i><div><h3>Active Trip Expense Folders (' + trips.length + ')</h3><p>Manage and open connected trips in TripSplit</p></div></div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">' +
         trips.map(function(t) {
-          return '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-direction:column;justify-content:space-between;gap:8px">' +
-            '<div><div style="font-weight:700;font-size:0.92rem;color:var(--text1)">🏖️ ' + esc(t.name) + '</div>' +
-            '<div style="font-size:0.75rem;color:var(--text3);margin-top:2px">' + t.billsCount + ' bills · Total: <b style="color:var(--text1)">₹' + t.totalExpenses.toLocaleString() + '</b></div>' +
-            '<div style="font-size:0.75rem;color:var(--text3)">Settled: <b style="color:#30d158">₹' + t.totalSettled.toLocaleString() + '</b> · Due: <b style="color:#ff9f0a">₹' + t.remainingDue.toLocaleString() + '</b></div></div>' +
+          return '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:14px;display:flex;flex-direction:column;justify-content:space-between;gap:10px">' +
+            '<div><div style="font-weight:800;font-size:0.95rem;color:var(--text1)">🏖️ ' + esc(t.name) + '</div>' +
+            '<div style="font-size:0.76rem;color:var(--text3);margin-top:3px">' + t.billsCount + ' bills · Total: <b style="color:var(--text1)">₹' + t.totalExpenses.toLocaleString() + '</b></div>' +
+            '<div style="font-size:0.76rem;color:var(--text3)">Settled: <b style="color:#30d158">₹' + t.totalSettled.toLocaleString() + '</b> · Due: <b style="color:#ff9f0a">₹' + t.remainingDue.toLocaleString() + '</b></div></div>' +
             '<div style="display:flex;gap:6px">' +
-            '<a href="/trip?folder=' + encodeURIComponent(t.folderId) + '" target="_blank" class="btn-primary xs" style="background:#c96b32;border:none;flex:1;text-align:center;text-decoration:none"><i class="fas fa-arrow-up-right-from-square"></i> Open TripSplit</a>' +
+            '<a href="/trip?folder=' + encodeURIComponent(t.folderId) + '" target="_blank" class="btn-primary xs" style="background:#007aff;border:none;flex:1;text-align:center;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px"><i class="fas fa-arrow-up-right-from-square"></i> Open in TripSplit</a>' +
             '</div></div>';
         }).join('') +
-        '</div>';
+        '</div></div>';
     }
 
-    el.innerHTML = summaryHtml + usersTable + tripsHtml;
+    el.innerHTML = summaryHtml + usersTable + memberFoldersHtml + tripsHtml;
   } catch(e) {
     el.innerHTML = '<div class="empty-small"><i class="fas fa-triangle-exclamation" style="color:var(--danger)"></i><p>Error: ' + e.message + '</p></div>';
+  }
+}
+
+function toggleFriendBillDrawer(drawerId, arrowId) {
+  var drawer = document.getElementById(drawerId);
+  var arrow = document.getElementById(arrowId);
+  if (!drawer) return;
+  if (drawer.style.display === 'none' || !drawer.style.display) {
+    drawer.style.display = 'block';
+    if (arrow) arrow.style.transform = 'rotate(180deg)';
+  } else {
+    drawer.style.display = 'none';
+    if (arrow) arrow.style.transform = 'rotate(0deg)';
+  }
+}
+
+function showTripReceiptLightbox(title, imgUrl) {
+  var existing = document.getElementById('adminTripReceiptLightbox');
+  if (existing) existing.remove();
+  var modal = document.createElement('div');
+  modal.id = 'adminTripReceiptLightbox';
+  modal.className = 'modal-backdrop';
+  modal.style.zIndex = '9999';
+  modal.innerHTML = '<div class="modal" style="max-width:650px;background:#18181b;border:1px solid rgba(255,255,255,0.12);padding:1.2rem;border-radius:16px;text-align:center">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem">' +
+    '<h3 style="font-size:0.95rem;font-weight:700;color:#fff;margin:0"><i class="fas fa-receipt" style="color:#00e5ff;margin-right:6px"></i> ' + esc(title) + '</h3>' +
+    '<button class="icon-btn xs" onclick="document.getElementById(\'adminTripReceiptLightbox\').remove()"><i class="fas fa-times"></i></button>' +
+    '</div>' +
+    '<div style="max-height:75vh;overflow:auto;display:flex;align-items:center;justify-content:center;background:#09090b;border-radius:12px;padding:8px">' +
+    '<img src="' + imgUrl + '" style="max-width:100%;max-height:70vh;object-fit:contain;border-radius:8px" alt="Bill Receipt">' +
+    '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+}
+
+async function adminDeleteTripBill(folderId, billId) {
+  if (!confirm('Are you sure you want to delete this trip bill?')) return;
+  toast('Deleting bill…', 'info');
+  try {
+    var res = await apiFetch('trip/bill/delete', {
+      method: 'POST',
+      body: JSON.stringify({ folderId: folderId, billId: billId })
+    });
+    if (res && res.ok) {
+      toast('Bill deleted successfully', 'success');
+      loadFullTripAdminPanel();
+    } else {
+      toast(res ? (res.error || 'Failed') : 'Error', 'error');
+    }
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
   }
 }
 
@@ -1220,7 +1352,7 @@ async function adminQuickResetTripPass(username, name) {
     });
     if (res && res.ok) {
       toast('Password updated for ' + name + '!', 'success');
-      loadAdminTripSplitPanel();
+      loadFullTripAdminPanel();
     } else {
       toast(res ? (res.error || 'Failed') : 'Error', 'error');
     }

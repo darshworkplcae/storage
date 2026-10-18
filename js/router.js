@@ -63,6 +63,7 @@ function navTo(page, driveId, folderId) {
     else if (page==='activity') { if(S.ses.role==='admin') renderActivityPage(); else navTo('files'); }
     else if (page==='settings') { if(S.ses.role==='admin') renderSettingsPage(); else navTo('files'); }
     else if (page==='apikeys')  { if(S.ses.role==='admin') renderApiKeysPage(); else navTo('files'); }
+    else if (page==='trip-admin') { if(S.ses.role==='admin') renderTripAdminPage(); else navTo('files'); }
     else if (page==='starred')  renderStarredPage();
     else if (page==='trash')    renderTrashPage();
     else renderFilesPage(null, null);
@@ -102,7 +103,7 @@ function getFolderChain(folderId) {
 function handleInitialHash() {
   var h = window.location.hash.replace('#/','').split('/').filter(Boolean);
   if(!h.length||h[0]==='') { navTo('files'); return; }
-  var valid = ['files','quota','recent','starred','trash','activity','settings','apikeys'];
+  var valid = ['files','quota','recent','starred','trash','activity','settings','apikeys','trip-admin'];
   var page = h[0], driveId = h[1]||null, folderId = h[2]||null;
   navTo(valid.indexOf(page)>=0?page:'files', driveId, folderId);
 }

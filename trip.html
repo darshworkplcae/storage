@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
   <title>TripSplit — Trip Bills & UPI Expense Splitter</title>
   <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     :root {
@@ -482,16 +483,29 @@
           </div>
         </div>
 
-        <!-- Receipt Image -->
+        <!-- Receipt Image with Camera & Gallery Options -->
         <div>
           <label class="block font-semibold mb-1 text-[var(--text-muted)]">Receipt / Proof Photo</label>
-          <div onclick="$('billFileInput').click()" class="border-2 border-dashed border-[var(--border)] hover:border-[#c96b32] rounded-xl p-3 text-center cursor-pointer transition bg-[var(--bg)]/50">
-            <input type="file" id="billFileInput" accept="image/*" class="hidden" onchange="handleReceiptSelected(event)">
+          <input type="file" id="billCameraInput" accept="image/*" capture="environment" class="hidden" onchange="handleReceiptSelected(event)">
+          <input type="file" id="billFileInput" accept="image/*" class="hidden" onchange="handleReceiptSelected(event)">
+          
+          <div class="grid grid-cols-2 gap-2 mb-2">
+            <button type="button" onclick="$('billCameraInput').click()" class="tap-active py-2 px-3 bg-[#c96b32]/15 hover:bg-[#c96b32]/25 border border-[#c96b32]/40 rounded-xl text-white font-semibold flex items-center justify-center gap-1.5 transition">
+              <i class="fas fa-camera text-[#e0834a]"></i> Take Photo
+            </button>
+            <button type="button" onclick="$('billFileInput').click()" class="tap-active py-2 px-3 bg-[var(--bg)] hover:bg-[var(--card-hover)] border border-[var(--border)] rounded-xl text-white font-semibold flex items-center justify-center gap-1.5 transition">
+              <i class="fas fa-images text-stone-400"></i> Gallery / Files
+            </button>
+          </div>
+
+          <div id="receiptBox" class="border-2 border-dashed border-[var(--border)] rounded-xl p-3 text-center bg-[var(--bg)]/50 relative">
             <div id="receiptPrompt">
-              <i class="fas fa-camera text-xl text-[var(--clay-light)] mb-1"></i>
-              <p class="text-white font-medium text-xs">Tap to snap or choose photo</p>
+              <p class="text-[var(--text-muted)] text-[11px]">No receipt selected (optional)</p>
             </div>
             <img id="receiptPreviewThumb" class="hidden max-h-36 mx-auto rounded-lg shadow-md mt-1 border border-stone-700">
+            <button type="button" id="receiptRemoveBtn" onclick="clearReceiptSelection()" class="hidden absolute top-2 right-2 bg-black/70 hover:bg-black text-rose-400 rounded-full w-6 h-6 flex items-center justify-center text-xs">
+              <i class="fas fa-times"></i>
+            </button>
           </div>
         </div>
 
@@ -515,10 +529,18 @@
       <div class="space-y-3 text-xs text-center">
         <p class="text-[var(--text-muted)]">Take a photo of any receipt. In-browser AI reads the total amount automatically!</p>
         
-        <div onclick="$('aiScanInput').click()" class="border-2 border-dashed border-[#c96b32]/40 hover:border-[#c96b32] rounded-xl p-6 cursor-pointer transition bg-[#c96b32]/10">
-          <input type="file" id="aiScanInput" accept="image/*" class="hidden" onchange="runAiReceiptScan(event)">
-          <i class="fas fa-receipt text-4xl text-[var(--clay-light)] mb-2"></i>
-          <p class="text-white font-bold">Tap to capture or pick receipt</p>
+        <input type="file" id="aiScanCameraInput" accept="image/*" capture="environment" class="hidden" onchange="runAiReceiptScan(event)">
+        <input type="file" id="aiScanInput" accept="image/*" class="hidden" onchange="runAiReceiptScan(event)">
+
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" onclick="$('aiScanCameraInput').click()" class="tap-active p-4 bg-[#c96b32]/15 hover:bg-[#c96b32]/25 border border-[#c96b32]/40 rounded-xl text-white font-semibold flex flex-col items-center justify-center gap-2 transition">
+            <i class="fas fa-camera text-2xl text-[#e0834a]"></i>
+            <span class="text-xs">Take Photo</span>
+          </button>
+          <button type="button" onclick="$('aiScanInput').click()" class="tap-active p-4 bg-[var(--bg)] hover:bg-[var(--card-hover)] border border-[var(--border)] rounded-xl text-white font-semibold flex flex-col items-center justify-center gap-2 transition">
+            <i class="fas fa-images text-2xl text-stone-400"></i>
+            <span class="text-xs">Upload Receipt</span>
+          </button>
         </div>
 
         <div id="aiScanLoading" class="hidden p-3 bg-[#c96b32]/15 border border-[#c96b32]/30 rounded-xl text-center space-y-1">
@@ -565,11 +587,24 @@
 
         <div>
           <label class="block font-semibold mb-1 text-[var(--text-muted)]">My Personal UPI QR Code Photo</label>
-          <div onclick="$('profileQrFileInput').click()" class="border-2 border-dashed border-[var(--border)] hover:border-emerald-500 rounded-xl p-3 text-center cursor-pointer transition bg-[var(--bg)]/50">
-            <input type="file" id="profileQrFileInput" accept="image/*" class="hidden" onchange="handleQrImageSelect(event)">
+          <input type="file" id="profileQrCameraInput" accept="image/*" capture="environment" class="hidden" onchange="handleQrImageSelect(event)">
+          <input type="file" id="profileQrFileInput" accept="image/*" class="hidden" onchange="handleQrImageSelect(event)">
+          
+          <div class="grid grid-cols-2 gap-2 mb-2">
+            <button type="button" onclick="$('profileQrCameraInput').click()" class="tap-active py-2 px-3 bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-600/40 rounded-xl text-white font-semibold flex items-center justify-center gap-1.5 transition">
+              <i class="fas fa-camera text-emerald-400"></i> Camera / Scan
+            </button>
+            <button type="button" onclick="$('profileQrFileInput').click()" class="tap-active py-2 px-3 bg-[var(--bg)] hover:bg-[var(--card-hover)] border border-[var(--border)] rounded-xl text-white font-semibold flex items-center justify-center gap-1.5 transition">
+              <i class="fas fa-image text-emerald-400"></i> Upload Image
+            </button>
+          </div>
+
+          <div id="detectedUpiNotice" class="hidden mb-2 p-2 bg-emerald-950/60 border border-emerald-500/50 rounded-xl text-emerald-300 font-mono text-[11px] text-center font-bold"></div>
+
+          <div id="profileQrBox" class="border-2 border-dashed border-[var(--border)] rounded-xl p-3 text-center bg-[var(--bg)]/50 relative">
             <div id="profileQrPrompt">
-              <i class="fas fa-qrcode text-2xl text-emerald-400 mb-1"></i>
-              <p class="text-white font-medium text-xs">Tap to upload your QR Screenshot</p>
+              <i class="fas fa-qrcode text-2xl text-emerald-400/60 mb-1"></i>
+              <p class="text-[var(--text-muted)] text-[11px]">Upload QR to auto-extract UPI ID</p>
             </div>
             <img id="profileQrThumb" class="hidden max-h-36 mx-auto rounded-lg shadow-md mt-1 border border-stone-700">
           </div>
@@ -1376,6 +1411,12 @@
       state.uploadedReceiptBase64 = null;
       $('receiptPreviewThumb').classList.add('hidden');
       $('receiptPrompt').classList.remove('hidden');
+      var remBtn = $('receiptRemoveBtn');
+      if (remBtn) remBtn.classList.add('hidden');
+      var fi = $('billFileInput');
+      if (fi) fi.value = '';
+      var ci = $('billCameraInput');
+      if (ci) ci.value = '';
 
       var container = $('addBillMembersCheckboxes');
       container.innerHTML = '';
@@ -1400,6 +1441,23 @@
       $('addBillModal').classList.add('hidden');
     }
 
+    function clearReceiptSelection() {
+      state.uploadedReceiptBase64 = null;
+      var thumb = $('receiptPreviewThumb');
+      if (thumb) {
+        thumb.src = '';
+        thumb.classList.add('hidden');
+      }
+      var prompt = $('receiptPrompt');
+      if (prompt) prompt.classList.remove('hidden');
+      var remBtn = $('receiptRemoveBtn');
+      if (remBtn) remBtn.classList.add('hidden');
+      var fi = $('billFileInput');
+      if (fi) fi.value = '';
+      var ci = $('billCameraInput');
+      if (ci) ci.value = '';
+    }
+
     function toggleAllSplitCheckboxes() {
       var cbs = $('addBillMembersCheckboxes').querySelectorAll('input[type="checkbox"]');
       var allChecked = Array.from(cbs).every(cb => cb.checked);
@@ -1416,9 +1474,12 @@
       var reader = new FileReader();
       reader.onload = function(evt) {
         state.uploadedReceiptBase64 = evt.target.result;
-        $('receiptPreviewThumb').src = evt.target.result;
-        $('receiptPreviewThumb').classList.remove('hidden');
+        var thumb = $('receiptPreviewThumb');
+        thumb.src = evt.target.result;
+        thumb.classList.remove('hidden');
         $('receiptPrompt').classList.add('hidden');
+        var remBtn = $('receiptRemoveBtn');
+        if (remBtn) remBtn.classList.remove('hidden');
       };
       reader.readAsDataURL(file);
     }
@@ -1486,9 +1547,12 @@
           $('addBillTitle').value = 'Trip Expense';
           $('addBillAmount').value = '2450';
           state.uploadedReceiptBase64 = imgData;
-          $('receiptPreviewThumb').src = imgData;
-          $('receiptPreviewThumb').classList.remove('hidden');
+          var thumb = $('receiptPreviewThumb');
+          thumb.src = imgData;
+          thumb.classList.remove('hidden');
           $('receiptPrompt').classList.add('hidden');
+          var remBtn = $('receiptRemoveBtn');
+          if (remBtn) remBtn.classList.remove('hidden');
           toast('AI detected total: ₹2,450.00! Review & save.', 'success');
         }, 1100);
       };
@@ -1499,6 +1563,13 @@
     function openProfileModal() {
       if (!state.currentUser) return;
       $('profileUpiInput').value = state.currentUser.upiId || '';
+      var notice = $('detectedUpiNotice');
+      if (notice) notice.classList.add('hidden');
+      var qf = $('profileQrFileInput');
+      if (qf) qf.value = '';
+      var qc = $('profileQrCameraInput');
+      if (qc) qc.value = '';
+
       if (state.currentUser.qrDataUrl) {
         $('profileQrThumb').src = state.currentUser.qrDataUrl;
         $('profileQrThumb').classList.remove('hidden');
@@ -1519,12 +1590,73 @@
       if (!file) return;
       var reader = new FileReader();
       reader.onload = function(evt) {
-        state.uploadedQrBase64 = evt.target.result;
-        $('profileQrThumb').src = evt.target.result;
+        var dataUrl = evt.target.result;
+        state.uploadedQrBase64 = dataUrl;
+        $('profileQrThumb').src = dataUrl;
         $('profileQrThumb').classList.remove('hidden');
         $('profileQrPrompt').classList.add('hidden');
+
+        // Auto-extract UPI ID from QR Code
+        scanAndExtractUpiFromImage(dataUrl);
       };
       reader.readAsDataURL(file);
+    }
+
+    function scanAndExtractUpiFromImage(dataUrl) {
+      var img = new Image();
+      img.onload = async function() {
+        var detectedText = null;
+        // Method 1: BarcodeDetector API (Built into modern iOS Safari / Android Chrome)
+        if ('BarcodeDetector' in window) {
+          try {
+            var detector = new BarcodeDetector({ formats: ['qr_code'] });
+            var barcodes = await detector.detect(img);
+            if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+              detectedText = barcodes[0].rawValue;
+            }
+          } catch(e) {}
+        }
+
+        // Method 2: jsQR Canvas fallback
+        if (!detectedText && typeof jsQR === 'function') {
+          try {
+            var canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            var ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, img.width, img.height);
+            var imgData = ctx.getImageData(0, 0, img.width, img.height);
+            var code = jsQR(imgData.data, imgData.width, imgData.height, {
+              inversionAttempts: 'attemptBoth'
+            });
+            if (code && code.data) {
+              detectedText = code.data;
+            }
+          } catch(e) {}
+        }
+
+        if (detectedText) {
+          var upiId = null;
+          var paMatch = /[?&]pa=([^&]+)/i.exec(detectedText);
+          if (paMatch && paMatch[1]) {
+            upiId = decodeURIComponent(paMatch[1]);
+          } else {
+            var vpaMatch = /[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}/.exec(detectedText);
+            if (vpaMatch) upiId = vpaMatch[0];
+          }
+
+          if (upiId) {
+            $('profileUpiInput').value = upiId;
+            var notice = $('detectedUpiNotice');
+            if (notice) {
+              notice.innerHTML = '<i class="fas fa-check-circle text-emerald-400"></i> Auto-Detected UPI: <span class="text-white underline">' + upiId + '</span>';
+              notice.classList.remove('hidden');
+            }
+            toast('🎉 Auto-detected UPI: ' + upiId, 'success', 5000);
+          }
+        }
+      };
+      img.src = dataUrl;
     }
 
     async function submitProfileSettings() {

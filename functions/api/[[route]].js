@@ -671,8 +671,7 @@ async function doScanDrive(env, driveId, initialPageToken, db){
       for (const gf of allGoogleFolders) {
         if (!validGoogleFolderIds.has(gf.id)) {
           const hasValidParent = gf.parents && gf.parents.some(p => validGoogleFolderIds.has(p));
-          const isTopLevelInDrive = !gf.parents || !gf.parents.length || !allGoogleFolders.some(other => other.id === gf.parents[0]);
-          if (hasValidParent || isTopLevelInDrive) {
+          if (hasValidParent) {
             validGoogleFolderIds.add(gf.id);
             addedAny = true;
           }
@@ -761,16 +760,7 @@ async function doScanDrive(env, driveId, initialPageToken, db){
             if (matchedParentGId) {
               isBelongingToTeleDrive = true;
               parentLocalId = gFolderToLocalId.get(matchedParentGId);
-            } else {
-              const isUnderOtherGFolder = item.parents.some(p => allGoogleFolders.some(gf => gf.id === p));
-              if (!isUnderOtherGFolder) {
-                isBelongingToTeleDrive = true;
-                parentLocalId = null;
-              }
             }
-          } else {
-            isBelongingToTeleDrive = true;
-            parentLocalId = null;
           }
 
           if (!isBelongingToTeleDrive) continue;
@@ -1950,6 +1940,64 @@ async function hDebugDB(req, env) {
     const drvId = url.searchParams.get('driveId') || 'mv3txae19acz2';
     const pageToken = url.searchParams.get('pageToken') || '';
     return doScanDrive(env, drvId, pageToken, db);
+  }
+
+  if (action === 'cleanup-drive2-personal') {
+    const drvId = 'mv3txae19acz2';
+    const allowedRootFolders = new Set(['mv3txforb0oog', 'mv3txforwpu2v', 'mvcsx0pq23xxt']);
+    const validFolderIds = new Set(allowedRootFolders);
+    
+    let added;
+    do {
+      added = false;
+      for (const f of (db.folders||[])) {
+        if (f.driveId === drvId && f.parentId && validFolderIds.has(f.parentId) && !validFolderIds.has(f.id)) {
+          validFolderIds.add(f.id);
+          added = true;
+        }
+      }
+    } while (added);
+
+    const removedFolders = [];
+    const keptFolders = [];
+    for (const f of (db.folders||[])) {
+      if (f.driveId === drvId) {
+        if (validFolderIds.has(f.id)) {
+          keptFolders.push(f);
+        } else {
+          removedFolders.push({ id: f.id, name: f.name });
+        }
+      } else {
+        keptFolders.push(f);
+      }
+    }
+
+    const keptFiles = [];
+    let removedFilesCount = 0;
+    for (const fi of (db.files||[])) {
+      if (fi.driveId === drvId) {
+        if (!fi.folderId || validFolderIds.has(fi.folderId)) {
+          keptFiles.push(fi);
+        } else {
+          removedFilesCount++;
+        }
+      } else {
+        keptFiles.push(fi);
+      }
+    }
+
+    db.folders = keptFolders;
+    db.files = keptFiles;
+    await uSet(env, 'td:db', db);
+
+    return J({
+      ok: true,
+      removedFoldersCount: removedFolders.length,
+      removedFolders: removedFolders.map(x => x.name),
+      removedFilesCount,
+      remainingDrive2Folders: keptFolders.filter(f => f.driveId === drvId).map(f => f.name),
+      remainingDrive2FilesCount: keptFiles.filter(f => f.driveId === drvId).length
+    });
   }
 
   if (action === 'drives-summary') {
@@ -4544,6 +4592,35 @@ async function hTripAPI(req, env, subpath, method) {
       });
     });
 
+    // Group all bills by user sorted by date descending (newest first)
+    const billsByUser = {};
+    (db.tripUsers || []).forEach(u => {
+      billsByUser[u.username.toLowerCase()] = [];
+    });
+    Object.keys(db.tripData || {}).forEach(folderId => {
+      const trip = db.tripData[folderId];
+      if (!trip) return;
+      const folderObj = (db.folders || []).find(f => f.id === folderId);
+      const tripTitle = trip.tripName || (folderObj ? folderObj.name : 'Trip ' + folderId);
+      (trip.bills || []).forEach(b => {
+        const payerUn = (b.paidBy || '').toLowerCase();
+        if (!billsByUser[payerUn]) billsByUser[payerUn] = [];
+        billsByUser[payerUn].push({
+          id: b.id,
+          title: b.title || 'Untitled Bill',
+          amount: parseFloat(b.amount) || 0,
+          folderId: folderId,
+          tripName: tripTitle,
+          date: b.date || new Date().toISOString(),
+          proofPhoto: b.proofPhoto || null,
+          splitMembers: b.splitMembers || []
+        });
+      });
+    });
+    Object.keys(billsByUser).forEach(un => {
+      billsByUser[un].sort((a, b) => new Date(b.date) - new Date(a.date));
+    });
+
     const usersWithStats = (db.tripUsers || []).map(u => {
       const un = u.username.toLowerCase();
       const st = lifetimeStats[un] || { lifetimePaid: 0, lifetimeShare: 0, lifetimeSettledDelta: 0, billsCreatedCount: 0 };
@@ -4566,6 +4643,7 @@ async function hTripAPI(req, env, subpath, method) {
     return J({
       users: usersWithStats,
       trips: tripFoldersList,
+      billsByUser: billsByUser,
       summary: {
         totalLifetimeExpenses: Math.round(totalLifetimeExpenses),
         totalLifetimeSettled: Math.round(totalLifetimeSettled),
