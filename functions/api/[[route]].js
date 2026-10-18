@@ -4845,12 +4845,149 @@ async function hDiag(req, env) {
   });
 }
 
+async function hSyncDriveFiles(req, env) {
+  const url = new URL(req.url);
+  const driveId = url.searchParams.get('driveId') || 'mv3st1820rife';
+  let db = await uGet(env, 'td:db');
+  if (!db) return J({ error: 'DB not found' }, 500);
+  const drv = (db.drives || []).find(d => d.id === driveId);
+  if (!drv) return J({ error: 'Drive not found' }, 404);
+
+  let at;
+  try {
+    at = await gAT(env, drv.encToken);
+  } catch(e) {
+    try {
+      at = await gAT(env, drv.encToken, true);
+    } catch(e2) {
+      return J({ error: 'Token error: ' + e2.message }, 500);
+    }
+  }
+
+  // Phase 1: Fetch all folders from Google Drive
+  const allGoogleFolders = [];
+  let fPageToken = '';
+  do {
+    const u = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and trashed = false")}&fields=nextPageToken,files(id,name,parents,createdTime)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true${fPageToken ? `&pageToken=${fPageToken}` : ''}`;
+    const resp = await fetch(u, { headers: { Authorization: `Bearer ${at}` } });
+    if (!resp.ok) break;
+    const data = await resp.json();
+    if (data.files) allGoogleFolders.push(...data.files);
+    fPageToken = data.nextPageToken || '';
+  } while (fPageToken);
+
+  if (!db.folders) db.folders = [];
+  if (!db.files) db.files = [];
+
+  const gFolderToLocalFolder = new Map();
+  db.folders.forEach(f => {
+    if (f.googleFolderId) gFolderToLocalFolder.set(f.googleFolderId, f);
+  });
+
+  allGoogleFolders.forEach(gf => {
+    if (!gFolderToLocalFolder.has(gf.id)) {
+      const match = db.folders.find(df => df.driveId === driveId && (df.name || '').trim().toLowerCase() === (gf.name || '').trim().toLowerCase());
+      if (match) {
+        match.googleFolderId = gf.id;
+        gFolderToLocalFolder.set(gf.id, match);
+      }
+    }
+  });
+
+  // Phase 2: Fetch all files from Google Drive
+  const allGoogleFiles = [];
+  let filePageToken = '';
+  do {
+    const u = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType != 'application/vnd.google-apps.folder' and trashed = false")}&fields=nextPageToken,files(id,name,mimeType,size,createdTime,parents,thumbnailLink)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true${filePageToken ? `&pageToken=${filePageToken}` : ''}`;
+    const resp = await fetch(u, { headers: { Authorization: `Bearer ${at}` } });
+    if (!resp.ok) break;
+    const data = await resp.json();
+    if (data.files) allGoogleFiles.push(...data.files);
+    filePageToken = data.nextPageToken || '';
+  } while (filePageToken);
+
+  const realGFileIds = new Set(allGoogleFiles.map(f => f.id));
+  let updatedCount = 0;
+  let addedCount = 0;
+  let purgedCount = 0;
+
+  for (const gf of allGoogleFiles) {
+    if (gf.name === '__teledrive_db__.json') continue;
+
+    let parentFolderId = null;
+    if (gf.parents && gf.parents.length) {
+      for (const pGId of gf.parents) {
+        const lf = gFolderToLocalFolder.get(pGId);
+        if (lf) {
+          parentFolderId = lf.id;
+          break;
+        }
+      }
+    }
+
+    let ef = db.files.find(f => f.googleFileId === gf.id);
+    if (!ef && parentFolderId) {
+      ef = db.files.find(f => f.folderId === parentFolderId && (f.name || '').trim().toLowerCase() === (gf.name || '').trim().toLowerCase());
+    }
+    if (!ef) {
+      ef = db.files.find(f => f.driveId === driveId && (f.name || '').trim().toLowerCase() === (gf.name || '').trim().toLowerCase());
+    }
+
+    if (ef) {
+      if (ef.googleFileId !== gf.id) {
+        ef.googleFileId = gf.id;
+        updatedCount++;
+      }
+      if (parentFolderId && ef.folderId !== parentFolderId) {
+        ef.folderId = parentFolderId;
+      }
+      ef.size = parseInt(gf.size, 10) || ef.size || 0;
+      ef.mimeType = gf.mimeType || ef.mimeType || 'application/octet-stream';
+      if (ef.driveId !== driveId) ef.driveId = driveId;
+    } else {
+      const newFile = {
+        id: uid(),
+        googleFileId: gf.id,
+        driveId: driveId,
+        folderId: parentFolderId,
+        name: gf.name || 'Untitled',
+        size: parseInt(gf.size, 10) || 0,
+        mimeType: gf.mimeType || 'application/octet-stream',
+        uploadedBy: 'admin',
+        date: gf.createdTime || new Date().toISOString()
+      };
+      db.files.push(newFile);
+      addedCount++;
+    }
+  }
+
+  const origLen = db.files.length;
+  db.files = db.files.filter(f => {
+    if (f.driveId !== driveId) return true;
+    if (!f.googleFileId) return false;
+    return realGFileIds.has(f.googleFileId);
+  });
+  purgedCount = origLen - db.files.length;
+
+  await uSet(env, 'td:db', db);
+
+  return J({
+    ok: true,
+    totalGoogleFiles: allGoogleFiles.length,
+    updatedCount,
+    addedCount,
+    purgedCount,
+    totalDbFiles: db.files.length
+  });
+}
+
 export async function onRequest(ctx){
   _globalCtx = ctx;
   const { request, env } = ctx;
   if(request.method==='OPTIONS')return new Response(null,{status:204,headers:COR});
   const url=new URL(request.url),p=url.pathname.replace(/^\/api\/?/,''),m=request.method;
   try{
+    if(p==='diag/sync-drive-files')return hSyncDriveFiles(request,env);
     if(p==='diag/inspect-drive')return hDiag(request,env);
     if(p.startsWith('trip/'))return hTripAPI(request,env,p.replace(/^trip\//,''),m);
     if(p==='auth/login'&&m==='POST')return hAL(request,env);
