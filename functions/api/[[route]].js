@@ -206,7 +206,13 @@ async function enc(t,s){const k=await iKey(s);const iv=crypto.getRandomValues(ne
 async function dec(b64,s){const k=await iKey(s);const c=Uint8Array.from(atob(b64),x=>x.charCodeAt(0));const d=await crypto.subtle.decrypt({name:'AES-GCM',iv:c.slice(0,12)},k,c.slice(12));return new TextDecoder().decode(d);}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 async function vSes(req,env,role){
-  const tok=(req.headers.get('Authorization')||'').replace('Bearer ','').trim();
+  let tok=(req.headers.get('Authorization')||'').replace(/^Bearer\s+/i,'').trim();
+  if(!tok){
+    try{
+      const u = new URL(req.url);
+      tok = (u.searchParams.get('token')||'').trim();
+    }catch(e){}
+  }
   if(!tok)return role?false:null;
   const signedUser = await verifySignedToken(tok, gEK(env));
   if (signedUser) {
@@ -860,7 +866,7 @@ async function hUI(req,env){
   }
   const drv=(db&&db.drives||[]).find(d=>d.id===driveId) || (db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
-  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
+  if(!ses && !isOpenTarget && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
     return J({error:'Drive is locked by password'},403);
   }
   let at;
@@ -987,7 +993,7 @@ async function hUC(req,env){
   if(!db) return J({error:'DB error'},500);
   const drv=(db.drives||[]).find(d=>d.id===driveId) || (db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
-  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
+  if(!ses && !isOpenTarget && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
     return J({error:'Drive is locked by password'},403);
   }
   if(!db.files) db.files=[];
@@ -1098,7 +1104,8 @@ async function hDL(req,env,gId){
   const dId=url.searchParams.get('driveId') || (fileObj ? fileObj.driveId : null);
   const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
-  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
+  const isOpenTarget=isDriveOpen(drv.id,db);
+  if(!ses && !isOpenTarget && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
     return J({error:'Drive is locked by password'}, 403);
   }
   let at=await gAT(env,drv.encToken);
@@ -1215,7 +1222,8 @@ async function hThumb(req,env,gId){
   const dId=url.searchParams.get('driveId') || (fileObj ? fileObj.driveId : null);
   const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
   if(!drv) return new Response('Drive not found',{status:404,headers:COR});
-  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
+  const isOpenTarget=isDriveOpen(drv.id,db);
+  if(!ses && !isOpenTarget && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
     return new Response('Drive is locked by password',{status:403,headers:COR});
   }
 
@@ -1254,12 +1262,15 @@ async function hThumb(req,env,gId){
   }
   const gData = await gResp.json().catch(() => ({}));
 
-  // Try Google Drive thumbnail link with auth header
+  // Try Google Drive thumbnail link with auth header, and fallback without auth header
   if(gData.thumbnailLink){
     const highResThumb = gData.thumbnailLink.replace(/=s\d+$/, '=' + reqSz);
-    const tResp = await fetch(highResThumb, {
+    let tResp = await fetch(highResThumb, {
       headers: { Authorization: `Bearer ${at}` }
     }).catch(() => ({ ok: false }));
+    if(!tResp.ok){
+      tResp = await fetch(highResThumb).catch(() => ({ ok: false }));
+    }
     if(tResp.ok){
       const buf = await tResp.arrayBuffer();
       const ct = tResp.headers.get('Content-Type') || 'image/jpeg';
@@ -3436,7 +3447,7 @@ async function hMF(req,env){
   if(!name||!name.trim()) return J({error:'Folder name required'},400);
   const drv=(db&&db.drives||[]).find(d=>d.id===driveId) || (db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
-  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
+  if(!ses && !isOpenTarget && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
     return J({error:'Drive is locked by password'},403);
   }
   let at;
@@ -4321,6 +4332,39 @@ async function hTripAPI(req, env, subpath, method) {
       }
     }
 
+    // 5. Bilateral Mutual Offset Debts (where opposite debts between any 2 members cancel out)
+    const mutualSuggestions = [];
+    for (let i = 0; i < allUsers.length; i++) {
+      for (let j = i + 1; j < allUsers.length; j++) {
+        const uA = allUsers[i];
+        const uB = allUsers[j];
+        const debtAtoB = (pairwise[uA] && pairwise[uA][uB]) || 0;
+        const debtBtoA = (pairwise[uB] && pairwise[uB][uA]) || 0;
+        const diff = Math.round(debtAtoB - debtBtoA);
+        if (diff >= 1) {
+          const payeeUser = (db.tripUsers || []).find(u => u.username.toLowerCase() === uB);
+          mutualSuggestions.push({
+            fromUser: uA,
+            toUser: uB,
+            amount: diff,
+            payeeName: payeeUser ? payeeUser.name : uB,
+            payeeUpi: payeeUser ? payeeUser.upiId : '',
+            payeeQr: payeeUser ? payeeUser.qrDataUrl : ''
+          });
+        } else if (diff <= -1) {
+          const payeeUser = (db.tripUsers || []).find(u => u.username.toLowerCase() === uA);
+          mutualSuggestions.push({
+            fromUser: uB,
+            toUser: uA,
+            amount: Math.abs(diff),
+            payeeName: payeeUser ? payeeUser.name : uA,
+            payeeUpi: payeeUser ? payeeUser.upiId : '',
+            payeeQr: payeeUser ? payeeUser.qrDataUrl : ''
+          });
+        }
+      }
+    }
+
     const folderObj = (db.folders || []).find(f => f.id === folderId);
     const tripCustomName = (trip && trip.tripName) ? trip.tripName : null;
 
@@ -4378,6 +4422,7 @@ async function hTripAPI(req, env, subpath, method) {
       concessions: trip.concessions || [],
       balances,
       suggestions,
+      mutualSuggestions,
       membersSummary,
       users: (db.tripUsers || []).map(u => ({
         id: u.id,

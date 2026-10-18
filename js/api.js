@@ -70,6 +70,7 @@ function isDriveUnlocked(driveId, drive) {
     }
   }
   if (!drive || !drive.hasPassword) return true;
+  if (isDriveOpen(driveId, (typeof S !== 'undefined' && S.db) ? S.db : null)) return true;
   return !!getDriveUnlockToken(driveId || (drive ? drive.id : null));
 }
 

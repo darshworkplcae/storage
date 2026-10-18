@@ -265,11 +265,17 @@
 
       <!-- TAB 1: WHO PAYS WHOM (CLEAN STRAIGHT LIST) -->
       <div id="tabPanelSettlements" class="space-y-3">
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
           <span class="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
             <i class="fas fa-arrow-right-arrow-left text-[var(--amber)]"></i> Pending Settlements
           </span>
-          <span class="text-[11px] text-[var(--text-muted)]">Calculated in fewest payments</span>
+          <div class="flex items-center gap-2">
+            <span class="text-[11px] text-[var(--text-muted)] hidden sm:inline" id="mutualToggleLabel">Direct 1-by-1 Shares</span>
+            <button id="btnMutualToggle" onclick="toggleMutualSettlement()" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition border border-white/10 bg-white/5 hover:bg-white/10 text-[var(--text-muted)] select-none shadow-sm" title="Toggle between Pure 1-by-1 Shares and Net Mutual Settlement">
+              <span class="w-2 h-2 rounded-full bg-slate-400 transition-colors" id="mutualToggleDot"></span>
+              <span id="mutualToggleText">Mutual Offset: OFF</span>
+            </button>
+          </div>
         </div>
 
         <div id="settlementsList" class="space-y-2">
@@ -726,7 +732,8 @@
       splitCheckboxes: new Set(),
       currentPayTarget: null,
       uploadedReceiptBase64: null,
-      uploadedQrBase64: null
+      uploadedQrBase64: null,
+      mutualSettlementEnabled: localStorage.getItem('td_mutual_settlement') === '1'
     };
 
     function toast(msg, type = 'info') {
@@ -1098,13 +1105,41 @@
       }
     }
 
+    function updateMutualToggleBtn() {
+      var btn = $('btnMutualToggle');
+      var dot = $('mutualToggleDot');
+      var txt = $('mutualToggleText');
+      var lbl = $('mutualToggleLabel');
+      if (!btn) return;
+      if (state.mutualSettlementEnabled) {
+        btn.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.15)] select-none';
+        if (dot) dot.className = 'w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]';
+        if (txt) txt.textContent = 'Mutual Offset: ON';
+        if (lbl) lbl.textContent = 'Net Bilateral Offset';
+      } else {
+        btn.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition border border-white/10 bg-white/5 hover:bg-white/10 text-[var(--text-muted)] select-none shadow-sm';
+        if (dot) dot.className = 'w-2 h-2 rounded-full bg-slate-400';
+        if (txt) txt.textContent = 'Mutual Offset: OFF';
+        if (lbl) lbl.textContent = 'Direct 1-by-1 Shares';
+      }
+    }
+
+    function toggleMutualSettlement() {
+      state.mutualSettlementEnabled = !state.mutualSettlementEnabled;
+      try { localStorage.setItem('td_mutual_settlement', state.mutualSettlementEnabled ? '1' : '0'); } catch(e) {}
+      updateMutualToggleBtn();
+      renderSettlementsList();
+      toast(state.mutualSettlementEnabled ? 'Switched to Mutual Offset (debts between pairs netted out)' : 'Switched to Direct 1-by-1 (each member pays bill share directly)', 'info', 3000);
+    }
+
     // ─── TAB 1: WHO PAYS WHOM (EXPANDABLE TREE SETTLEMENTS) ───────────────────
     function renderSettlementsList() {
+      updateMutualToggleBtn();
       var container = $('settlementsList');
       container.innerHTML = '';
       if (!state.tripData) return;
 
-      var list = state.tripData.suggestions || [];
+      var list = (state.mutualSettlementEnabled && state.tripData.mutualSuggestions) ? state.tripData.mutualSuggestions : (state.tripData.suggestions || []);
       if (!list.length) {
         container.innerHTML = '<div class="p-8 text-center text-[var(--text-muted)] text-xs bg-[var(--card)] rounded-2xl border border-[var(--border)]"><i class="fas fa-circle-check text-3xl text-emerald-400 mb-2"></i><p class="font-bold text-white text-sm">All Trip Dues Are Settled!</p><p class="text-[11px] mt-0.5">Every member has settled their share.</p></div>';
         return;
