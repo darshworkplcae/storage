@@ -89,14 +89,22 @@ function syncLiveQuota() {
   apiDriveQuota().then(function(res){
     if (res && res.drives && S.db && S.db.drives) {
       var changed = false;
+      var expiredDrives = [];
       res.drives.forEach(function(qd){
         var d = S.db.drives.find(function(x){ return x.id === qd.id; });
+        if (qd.error && String(qd.error).includes('invalid_grant')) {
+          expiredDrives.push(d ? d.name : qd.id);
+        }
         if (d && !qd.error && (d.capacity !== qd.capacity || d.usedBytes !== qd.usedBytes)) {
           d.capacity = qd.capacity;
           d.usedBytes = qd.usedBytes;
           changed = true;
         }
       });
+      if (expiredDrives.length > 0 && S.ses && S.ses.role === 'admin' && !window._hasAlertedDriveExpired) {
+        window._hasAlertedDriveExpired = true;
+        toast('⚠️ Google Drive token expired for: ' + expiredDrives.join(', ') + '. Please open Settings and click Reconnect Drive!', 'warning', 10000);
+      }
       if (changed) {
         renderSidebarStorage();
         if (_curPage === 'files' && !_driveId) renderFilesPage(null, null);

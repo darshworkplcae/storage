@@ -54,6 +54,7 @@ function renderSettingsPage() {
             '<div class="dc-bar"><div class="dc-fill" style="width:'+usedPct+'%;background:'+d.color+'"></div></div>' +
             '<div class="dc-usage">'+fmt(used)+' / '+fmt(cap)+' ('+usedPct+'%) · <span style="color:#30d158;font-weight:600">'+fmt(free)+' free</span></div>' +
             '<div style="margin-top:.6rem;display:flex;gap:6px;flex-wrap:wrap">' +
+              '<button class="btn-primary xs" style="flex:1;background:#e0834a;border:none;color:#fff;font-weight:700" onclick="connectDrive()" title="Re-authorize Google account to refresh expired tokens"><i class="fas fa-plug"></i> Reconnect</button>' +
               '<button class="btn-ghost xs" style="flex:1" onclick="promptRenameDrive(\''+d.id+'\',\''+esc(d.name).replace(/'/g,"\\'")+'\')"><i class="fas fa-pen"></i> Rename</button>' +
               '<button class="btn-ghost xs" style="flex:1" onclick="toggleOpenDrive(\''+d.id+'\')"><i class="fas fa-users"></i> '+(isOpen?'Disable Open':'Make Open')+'</button>' +
               '<button class="btn-ghost xs '+(d.hasPassword?'active-lock':'')+'" style="flex:1;'+(d.hasPassword?'color:#ff9f0a;border-color:rgba(255,159,10,0.4);background:rgba(255,159,10,0.1)':'')+'" onclick="showSetDrivePasswordDialog(\''+d.id+'\','+(d.hasPassword?true:false)+',\''+esc(d.name).replace(/'/g,"\\'")+'\',\''+esc(d.passwordHint||'').replace(/'/g,"\\'")+'\')" title="Set Password for Drive Access"><i class="fas '+(d.hasPassword?'fa-lock':'fa-key')+'"></i> '+(d.hasPassword?'Pass Set':'Drive Pass')+'</button>' +

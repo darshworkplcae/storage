@@ -155,7 +155,7 @@ async function uSet(env,key,val,ttl){
     if (now - _lastGDriveSave > 60000 && !_isGDriveSaving) {
       _lastGDriveSave = now;
       if (_globalCtx && typeof _globalCtx.waitUntil === 'function') {
-        _globalCtx.waitUntil(saveDBToGDrive(env, val));
+        _globalCtx.waitUntil(saveDBToGDrive(env, val).catch(() => {}));
       } else {
         saveDBToGDrive(env, val).catch(() => {});
       }
@@ -1219,30 +1219,47 @@ async function hThumb(req,env,gId){
     return new Response('Drive is locked by password',{status:403,headers:COR});
   }
 
-  let at=await gAT(env,drv.encToken);
-  let gResp=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?fields=id,name,mimeType,thumbnailLink,hasThumbnail&supportsAllDrives=true`,{
+  let at = null;
+  try {
+    at = await gAT(env, drv.encToken);
+  } catch(e) {
+    try {
+      at = await gAT(env, drv.encToken, true);
+    } catch(e2) {
+      if (String(e2.message).includes('invalid_grant')) {
+        return new Response(JSON.stringify({ error: 'GOOGLE_TOKEN_EXPIRED', driveId: drv.id, driveName: drv.name }), {
+          status: 401,
+          headers: { ...COR, 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response('Thumbnail not available', { status: 404, headers: COR });
+    }
+  }
+
+  let gResp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?fields=id,name,mimeType,thumbnailLink,hasThumbnail&supportsAllDrives=true`,{
     headers:{Authorization:`Bearer ${at}`}
-  });
+  }).catch(() => ({ ok: false, status: 500 }));
+
   if(gResp.status === 401){
     try {
-      at=await gAT(env,drv.encToken,true); // Force refresh token
-      gResp=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?fields=id,name,mimeType,thumbnailLink,hasThumbnail&supportsAllDrives=true`,{
+      at = await gAT(env, drv.encToken, true);
+      gResp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?fields=id,name,mimeType,thumbnailLink,hasThumbnail&supportsAllDrives=true`,{
         headers:{Authorization:`Bearer ${at}`}
-      });
+      }).catch(() => ({ ok: false, status: 500 }));
     } catch(e){}
   }
 
   if(!gResp.ok){
     return new Response('Thumbnail not available',{status:404,headers:{...COR,'Cache-Control':'no-cache, no-store, must-revalidate'}});
   }
-  const gData=await gResp.json();
+  const gData = await gResp.json().catch(() => ({}));
 
   // Try Google Drive thumbnail link with auth header
   if(gData.thumbnailLink){
     const highResThumb = gData.thumbnailLink.replace(/=s\d+$/, '=' + reqSz);
     const tResp = await fetch(highResThumb, {
       headers: { Authorization: `Bearer ${at}` }
-    });
+    }).catch(() => ({ ok: false }));
     if(tResp.ok){
       const buf = await tResp.arrayBuffer();
       const ct = tResp.headers.get('Content-Type') || 'image/jpeg';
@@ -1261,7 +1278,7 @@ async function hThumb(req,env,gId){
       });
       try {
         if (_globalCtx && typeof _globalCtx.waitUntil === 'function') {
-          _globalCtx.waitUntil(caches.default.put(req, thumbResp.clone()));
+          _globalCtx.waitUntil(caches.default.put(req, thumbResp.clone()).catch(()=>{}));
         } else {
           caches.default.put(req, thumbResp.clone()).catch(()=>{});
         }
@@ -1275,7 +1292,7 @@ async function hThumb(req,env,gId){
   if(isImageFile){
     const imgResp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gId)}?alt=media&supportsAllDrives=true`, {
       headers: { Authorization: `Bearer ${at}` }
-    });
+    }).catch(() => ({ ok: false }));
     if(imgResp.ok){
       const buf = await imgResp.arrayBuffer();
       let ct = imgResp.headers.get('Content-Type') || (fileObj ? fileObj.mimeType : 'image/jpeg');
@@ -1295,7 +1312,7 @@ async function hThumb(req,env,gId){
       });
       try {
         if (_globalCtx && typeof _globalCtx.waitUntil === 'function') {
-          _globalCtx.waitUntil(caches.default.put(req, imgThumbResp.clone()));
+          _globalCtx.waitUntil(caches.default.put(req, imgThumbResp.clone()).catch(()=>{}));
         } else {
           caches.default.put(req, imgThumbResp.clone()).catch(()=>{});
         }
@@ -4222,29 +4239,42 @@ async function hTripAPI(req, env, subpath, method) {
       concessions: []
     };
 
-    // Calculate balances
-    const balances = {}; // username -> net balance (positive = owed to them, negative = they owe)
-    (db.tripUsers || []).forEach(u => balances[u.username] = 0);
+    // Clean stale test settlement mvcsd0nug1mh7 if present
+    if (trip.settlements) {
+      const origLen = trip.settlements.length;
+      trip.settlements = trip.settlements.filter(s => s.id !== 'mvcsd0nug1mh7');
+      if (trip.settlements.length !== origLen) {
+        await uSet(env, 'td:db', db);
+      }
+    }
 
-    // Sum bills
+    // Direct Pairwise Debt Matrix: pairwise[debtor][creditor]
+    const allUsers = (db.tripUsers || []).map(u => u.username.toLowerCase());
+    const pairwise = {};
+    for (const u1 of allUsers) {
+      pairwise[u1] = {};
+      for (const u2 of allUsers) {
+        pairwise[u1][u2] = 0;
+      }
+    }
+
+    // 1. Accumulate each friend's share directly to the bill's payer
     let totalExpenses = 0;
     (trip.bills || []).forEach(b => {
       const amt = parseFloat(b.amount) || 0;
       totalExpenses += amt;
       const payer = (b.paidBy || '').toLowerCase();
-      const splits = b.splitMembers || (db.tripUsers || []).map(u => u.username);
+      const splits = (b.splitMembers && b.splitMembers.length > 0) ? b.splitMembers.map(m => m.toLowerCase()) : allUsers;
       const share = splits.length > 0 ? (amt / splits.length) : 0;
 
-      // Payer gets full amount credited
-      balances[payer] = (balances[payer] || 0) + amt;
-      // Each participant owes their share
       splits.forEach(m => {
-        const mu = m.toLowerCase();
-        balances[mu] = (balances[mu] || 0) - share;
+        if (m !== payer && pairwise[m] && pairwise[m][payer] !== undefined) {
+          pairwise[m][payer] += share;
+        }
       });
     });
 
-    // Account for verified settlements
+    // 2. Verified settlements: payer paid payee, reducing pairwise debt
     let totalSettled = 0;
     (trip.settlements || []).forEach(s => {
       if (s.status === 'verified') {
@@ -4252,55 +4282,55 @@ async function hTripAPI(req, env, subpath, method) {
         totalSettled += amt;
         const fromU = (s.fromUser || '').toLowerCase();
         const toU = (s.toUser || '').toLowerCase();
-        balances[fromU] = (balances[fromU] || 0) + amt;
-        balances[toU] = (balances[toU] || 0) - amt;
+        if (pairwise[fromU] && pairwise[fromU][toU] !== undefined) {
+          pairwise[fromU][toU] -= amt;
+        }
       }
     });
 
-    // Account for concessions (instant clear)
+    // 3. Concessions: concession for debtor by creditor reduces pairwise debt
     (trip.concessions || []).forEach(c => {
       const amt = parseFloat(c.amount) || 0;
       const forU = (c.forUser || '').toLowerCase();
       const byU = (c.byUser || '').toLowerCase();
-      balances[forU] = (balances[forU] || 0) + amt;
-      balances[byU] = (balances[byU] || 0) - amt;
+      if (pairwise[forU] && pairwise[forU][byU] !== undefined) {
+        pairwise[forU][byU] -= amt;
+      }
     });
 
-    // Compute pairwise settlement suggestions
-    const creditors = []; // positive
-    const debtors = [];   // negative
-    for (const [un, bal] of Object.entries(balances)) {
-      if (bal > 1) creditors.push({ username: un, amount: bal });
-      else if (bal < -1) debtors.push({ username: un, amount: -bal });
-    }
-    creditors.sort((a,b) => b.amount - a.amount);
-    debtors.sort((a,b) => b.amount - a.amount);
-
-    // Compute proportional settlement suggestions
-    // Every debtor pays EACH creditor proportionally so every friend sees both Amar, Darshan, etc.!
-    const totalCredit = creditors.reduce((sum, c) => sum + c.amount, 0);
+    // 4. Pairwise bilateral netting between each distinct pair (u1, u2)
+    // If u1 owes u2 100 and u2 owes u1 100, they cancel out to 0!
+    // If u1 owes u2 265 and u2 owes u1 77, u1 owes u2 188 net!
     const suggestions = [];
+    for (let i = 0; i < allUsers.length; i++) {
+      for (let j = i + 1; j < allUsers.length; j++) {
+        const u1 = allUsers[i];
+        const u2 = allUsers[j];
+        const u1OwesU2 = pairwise[u1][u2] || 0;
+        const u2OwesU1 = pairwise[u2][u1] || 0;
 
-    if (totalCredit > 0 && creditors.length > 0) {
-      for (const d of debtors) {
-        let debtorRemaining = Math.round(d.amount);
-        for (let i = 0; i < creditors.length; i++) {
-          const c = creditors[i];
-          let settleAmt = 0;
-          if (i === creditors.length - 1) {
-            settleAmt = debtorRemaining;
-          } else {
-            settleAmt = Math.round(d.amount * (c.amount / totalCredit));
-            if (settleAmt > debtorRemaining) settleAmt = debtorRemaining;
-            debtorRemaining -= settleAmt;
-          }
-          if (settleAmt >= 1) {
-            const payeeUser = (db.tripUsers || []).find(u => u.username.toLowerCase() === c.username.toLowerCase());
+        if (u1OwesU2 > u2OwesU1 + 0.5) {
+          const net = Math.round(u1OwesU2 - u2OwesU1);
+          if (net >= 1) {
+            const payeeUser = (db.tripUsers || []).find(u => u.username.toLowerCase() === u2);
             suggestions.push({
-              fromUser: d.username,
-              toUser: c.username,
-              amount: settleAmt,
-              payeeName: payeeUser ? payeeUser.name : c.username,
+              fromUser: u1,
+              toUser: u2,
+              amount: net,
+              payeeName: payeeUser ? payeeUser.name : u2,
+              payeeUpi: payeeUser ? payeeUser.upiId : '',
+              payeeQr: payeeUser ? payeeUser.qrDataUrl : ''
+            });
+          }
+        } else if (u2OwesU1 > u1OwesU2 + 0.5) {
+          const net = Math.round(u2OwesU1 - u1OwesU2);
+          if (net >= 1) {
+            const payeeUser = (db.tripUsers || []).find(u => u.username.toLowerCase() === u1);
+            suggestions.push({
+              fromUser: u2,
+              toUser: u1,
+              amount: net,
+              payeeName: payeeUser ? payeeUser.name : u1,
               payeeUpi: payeeUser ? payeeUser.upiId : '',
               payeeQr: payeeUser ? payeeUser.qrDataUrl : ''
             });
@@ -4319,8 +4349,8 @@ async function hTripAPI(req, env, subpath, method) {
       (trip.bills || []).forEach(b => {
         const amt = parseFloat(b.amount) || 0;
         if ((b.paidBy || '').toLowerCase() === un) paid += amt;
-        const splits = b.splitMembers || (db.tripUsers || []).map(x => x.username);
-        if (splits.map(x => x.toLowerCase()).includes(un)) {
+        const splits = (b.splitMembers && b.splitMembers.length > 0) ? b.splitMembers.map(x => x.toLowerCase()) : allUsers;
+        if (splits.includes(un)) {
           share += (amt / splits.length);
         }
       });
@@ -4351,6 +4381,9 @@ async function hTripAPI(req, env, subpath, method) {
         amount: Math.round(Math.abs(net))
       };
     });
+
+    const balances = {};
+    membersSummary.forEach(m => balances[m.username] = m.netBalance);
 
     return J({
       folderId,
