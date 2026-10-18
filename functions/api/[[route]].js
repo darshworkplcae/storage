@@ -385,7 +385,7 @@ async function hUL(req,env){
   return J({token:t,role:'user',userId:u.id,username:u.username,allowedDrives:u.allowedDrives||'all'});
 }
 async function hAG(req,env){if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);const cid=gGC(env);if(!cid)return J({error:'GOOGLE_CLIENT_ID not set in Cloudflare Pages env vars'},400);const o=new URL(req.url).origin;const u=new URL('https://accounts.google.com/o/oauth2/v2/auth');u.searchParams.set('client_id',cid);u.searchParams.set('redirect_uri',`${o}/api/auth/callback`);u.searchParams.set('response_type','code');u.searchParams.set('scope','https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile');u.searchParams.set('access_type','offline');u.searchParams.set('prompt','consent');return J({url:u.toString()});}
-async function hCB(req,env){const url=new URL(req.url),code=url.searchParams.get('code');if(!code)return new Response('Missing code',{status:400});const toks=await(await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({code,client_id:gGC(env),client_secret:gGS(env),redirect_uri:`${url.origin}/api/auth/callback`,grant_type:'authorization_code'})})).json();if(!toks.refresh_token)return new Response(`<html><body style="background:#0d0d12;color:#eee;font:16px sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center"><div><h2 style="color:#ff453a">No refresh token</h2><p>Revoke TeleDrive from <a href="https://myaccount.google.com/permissions" style="color:#4e86f5" target="_blank">Google Account permissions</a> then retry.</p><a href="/#/settings" style="color:#4e86f5">Back</a></div></body></html>`,{status:400,headers:{'Content-Type':'text/html'}});const user=await(await fetch('https://www.googleapis.com/oauth2/v2/userinfo',{headers:{Authorization:`Bearer ${toks.access_token}`}})).json();const quota=await gDQ(toks.access_token);const rfId=await mkDir(toks.access_token,'TeleDrive',null);const eT=await enc(toks.refresh_token,gEK(env));let db=await uGet(env,'td:db');if(!db)db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};if(!db.drives)db.drives=[];const existingIdx=db.drives.findIndex(d=>d.email===user.email);if(existingIdx>=0){db.drives[existingIdx].encToken=eT;db.drives[existingIdx].rootFolderId=rfId;db.drives[existingIdx].name=user.name||user.email;db.drives[existingIdx].picture=user.picture||db.drives[existingIdx].picture||'';db.drives[existingIdx].capacity=parseInt(quota.storageQuota&&quota.storageQuota.limit)||db.drives[existingIdx].capacity||0;db.drives[existingIdx].usedBytes=parseInt(quota.storageQuota&&quota.storageQuota.usage)||db.drives[existingIdx].usedBytes||0;}else{const cols=['#4e86f5','#30d158','#bf5af2','#ff9f0a','#ff453a','#64d2ff'];db.drives.push({id:uid(),email:user.email,name:user.name||user.email,picture:user.picture||'',color:cols[db.drives.length%cols.length],capacity:parseInt(quota.storageQuota&&quota.storageQuota.limit)||0,usedBytes:parseInt(quota.storageQuota&&quota.storageQuota.usage)||0,rootFolderId:rfId,encToken:eT,createdAt:new Date().toISOString()});}await uSet(env,'td:db',db);return new Response(`<html><head><script>window.opener&&window.opener.postMessage('drive-connected','*');setTimeout(function(){window.close();},1500);<\/script></head><body style="background:#0d0d12;color:#eee;font:16px sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center"><div><h2 style="color:#30d158">Drive Connected!</h2><p>${user.email}</p><p style="opacity:.6">Closing…</p></div></body></html>`,{headers:{'Content-Type':'text/html'}});}
+async function hCB(req,env){const url=new URL(req.url),code=url.searchParams.get('code');if(!code)return new Response('Missing code',{status:400});const toks=await(await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({code,client_id:gGC(env),client_secret:gGS(env),redirect_uri:`${url.origin}/api/auth/callback`,grant_type:'authorization_code'})})).json();if(!toks.refresh_token)return new Response(`<html><body style="background:#0d0d12;color:#eee;font:16px sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center"><div><h2 style="color:#ff453a">No refresh token</h2><p>Revoke TeleDrive from <a href="https://myaccount.google.com/permissions" style="color:#4e86f5" target="_blank">Google Account permissions</a> then retry.</p><a href="/#/settings" style="color:#4e86f5">Back</a></div></body></html>`,{status:400,headers:{'Content-Type':'text/html'}});const user=await(await fetch('https://www.googleapis.com/oauth2/v2/userinfo',{headers:{Authorization:`Bearer ${toks.access_token}`}})).json();const quota=await gDQ(toks.access_token);const rfId=await mkDir(toks.access_token,'TeleDrive',null);const eT=await enc(toks.refresh_token,gEK(env));let db=await uGet(env,'td:db');if(!db)db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};if(!db.drives)db.drives=[];const existingIdx=db.drives.findIndex(d=>d.email===user.email);if(existingIdx>=0){db.drives[existingIdx].encToken=eT;db.drives[existingIdx].rootFolderId=rfId;db.drives[existingIdx].name=db.drives[existingIdx].name||user.name||user.email;db.drives[existingIdx].picture=user.picture||db.drives[existingIdx].picture||'';db.drives[existingIdx].capacity=parseInt(quota.storageQuota&&quota.storageQuota.limit)||db.drives[existingIdx].capacity||0;db.drives[existingIdx].usedBytes=parseInt(quota.storageQuota&&quota.storageQuota.usage)||db.drives[existingIdx].usedBytes||0;}else{const cols=['#4e86f5','#30d158','#bf5af2','#ff9f0a','#ff453a','#64d2ff'];db.drives.push({id:uid(),email:user.email,name:user.name||user.email,picture:user.picture||'',color:cols[db.drives.length%cols.length],capacity:parseInt(quota.storageQuota&&quota.storageQuota.limit)||0,usedBytes:parseInt(quota.storageQuota&&quota.storageQuota.usage)||0,rootFolderId:rfId,encToken:eT,createdAt:new Date().toISOString()});}await uSet(env,'td:db',db);return new Response(`<html><head><script>window.opener&&window.opener.postMessage('drive-connected','*');setTimeout(function(){window.close();},1500);<\/script></head><body style="background:#0d0d12;color:#eee;font:16px sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center"><div><h2 style="color:#30d158">Drive Connected!</h2><p>${user.email}</p><p style="opacity:.6">Closing…</p></div></body></html>`,{headers:{'Content-Type':'text/html'}});}
 async function hVerifySes(req,env){const r=await vSes(req,env,null);if(!r)return J({valid:false},401);return J({valid:true,role:r==='admin'?'admin':'user',userId:r});}
 function syncDriveUsage(db){
   // Preserve real Google Drive quota (do not overwrite with only TeleDrive-uploaded files)
@@ -4298,43 +4298,25 @@ async function hTripAPI(req, env, subpath, method) {
       }
     });
 
-    // 4. Pairwise bilateral netting between each distinct pair (u1, u2)
-    // If u1 owes u2 100 and u2 owes u1 100, they cancel out to 0!
-    // If u1 owes u2 265 and u2 owes u1 77, u1 owes u2 188 net!
+    // 4. Direct 1-by-1 bill share debts (no mutual netting/subtraction so friends pay exact bill amounts)
+    // Every debtor pays their exact share directly to the bill's payer!
     const suggestions = [];
     for (let i = 0; i < allUsers.length; i++) {
-      for (let j = i + 1; j < allUsers.length; j++) {
-        const u1 = allUsers[i];
-        const u2 = allUsers[j];
-        const u1OwesU2 = pairwise[u1][u2] || 0;
-        const u2OwesU1 = pairwise[u2][u1] || 0;
-
-        if (u1OwesU2 > u2OwesU1 + 0.5) {
-          const net = Math.round(u1OwesU2 - u2OwesU1);
-          if (net >= 1) {
-            const payeeUser = (db.tripUsers || []).find(u => u.username.toLowerCase() === u2);
-            suggestions.push({
-              fromUser: u1,
-              toUser: u2,
-              amount: net,
-              payeeName: payeeUser ? payeeUser.name : u2,
-              payeeUpi: payeeUser ? payeeUser.upiId : '',
-              payeeQr: payeeUser ? payeeUser.qrDataUrl : ''
-            });
-          }
-        } else if (u2OwesU1 > u1OwesU2 + 0.5) {
-          const net = Math.round(u2OwesU1 - u1OwesU2);
-          if (net >= 1) {
-            const payeeUser = (db.tripUsers || []).find(u => u.username.toLowerCase() === u1);
-            suggestions.push({
-              fromUser: u2,
-              toUser: u1,
-              amount: net,
-              payeeName: payeeUser ? payeeUser.name : u1,
-              payeeUpi: payeeUser ? payeeUser.upiId : '',
-              payeeQr: payeeUser ? payeeUser.qrDataUrl : ''
-            });
-          }
+      for (let j = 0; j < allUsers.length; j++) {
+        if (i === j) continue;
+        const uFrom = allUsers[i];
+        const uTo = allUsers[j];
+        const dueAmt = Math.round(pairwise[uFrom][uTo] || 0);
+        if (dueAmt >= 1) {
+          const payeeUser = (db.tripUsers || []).find(u => u.username.toLowerCase() === uTo);
+          suggestions.push({
+            fromUser: uFrom,
+            toUser: uTo,
+            amount: dueAmt,
+            payeeName: payeeUser ? payeeUser.name : uTo,
+            payeeUpi: payeeUser ? payeeUser.upiId : '',
+            payeeQr: payeeUser ? payeeUser.qrDataUrl : ''
+          });
         }
       }
     }
