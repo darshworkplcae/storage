@@ -4808,44 +4808,8 @@ async function hTripAPI(req, env, subpath, method) {
 }
 
 
-async function hDiag(req, env) {
-  const url = new URL(req.url);
-  const driveId = url.searchParams.get('driveId') || 'mv3st1820rife';
-  const targetFolderGId = url.searchParams.get('folderGId') || '1GqtTWcrJSpZSqlwh6P-q6ySNYXNW9ICB';
-  const db = await uGet(env, 'td:db');
-  const drv = (db.drives || []).find(d => d.id === driveId);
-  if (!drv) return J({ error: 'Drive not found' });
-  let at;
-  try {
-    at = await gAT(env, drv.encToken);
-  } catch(e) {
-    return J({ error: 'Token error: ' + e.message });
-  }
-  
-  const fMetaResp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(targetFolderGId)}?fields=id,name,mimeType,parents,owners&supportsAllDrives=true`, {
-    headers: { Authorization: `Bearer ${at}` }
-  });
-  const fMeta = await fMetaResp.json().catch(()=>({}));
-
-  const listResp = await fetch(`https://www.googleapis.com/drive/v3/files?q='${encodeURIComponent(targetFolderGId)}'+in+parents+and+trashed=false&fields=files(id,name,mimeType,thumbnailLink,hasThumbnail,size)&pageSize=30&supportsAllDrives=true`, {
-    headers: { Authorization: `Bearer ${at}` }
-  });
-  const listData = await listResp.json().catch(()=>({}));
-
-  const qName = url.searchParams.get('name') || 'VID-20230226-WA0012';
-  const searchResp = await fetch(`https://www.googleapis.com/drive/v3/files?q=name+contains+'${qName}'+and+trashed=false&fields=files(id,name,mimeType,parents,thumbnailLink)&supportsAllDrives=true`, {
-    headers: { Authorization: `Bearer ${at}` }
-  });
-  const searchData = await searchResp.json().catch(()=>({}));
-
-  return J({
-    folderMetadata: fMeta,
-    filesInFolder: listData,
-    searchResult: searchData
-  });
-}
-
 async function hSyncDriveFiles(req, env) {
+  if(!await vSes(req,env,'admin'))return J({error:'Unauthorized'},401);
   const url = new URL(req.url);
   const driveId = url.searchParams.get('driveId') || 'mv3st1820rife';
   let db = await uGet(env, 'td:db');
@@ -4987,8 +4951,7 @@ export async function onRequest(ctx){
   if(request.method==='OPTIONS')return new Response(null,{status:204,headers:COR});
   const url=new URL(request.url),p=url.pathname.replace(/^\/api\/?/,''),m=request.method;
   try{
-    if(p==='diag/sync-drive-files')return hSyncDriveFiles(request,env);
-    if(p==='diag/inspect-drive')return hDiag(request,env);
+    if(p==='admin/sync-drive-files'&&(m==='POST'||m==='GET'))return hSyncDriveFiles(request,env);
     if(p.startsWith('trip/'))return hTripAPI(request,env,p.replace(/^trip\//,''),m);
     if(p==='auth/login'&&m==='POST')return hAL(request,env);
     if(p==='auth/user-login'&&m==='POST')return hUL(request,env);
