@@ -1193,10 +1193,10 @@ async function loadFullTripAdminPanel() {
           ? '<div style="padding:16px;text-align:center;color:var(--text3);font-size:0.8rem">No bills uploaded by ' + esc(u.name) + ' yet.</div>'
           : '<div style="max-height:380px;overflow-y:auto;padding:6px">' +
             uBills.map(function(b) {
-              var dateStr = b.date ? new Date(b.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : 'Unknown date';
-              var proofBtn = b.proofPhoto
-                ? '<button class="btn-ghost xs" style="color:#64d2ff;border-color:rgba(100,210,255,0.3)" onclick="showTripReceiptLightbox(\'' + esc(b.title).replace(/'/g, "\\'") + '\', \'' + esc(b.proofPhoto).replace(/'/g, "\\'") + '\')"><i class="fas fa-receipt"></i> View Receipt</button>'
-                : '<span style="font-size:0.7rem;color:var(--text3)">No receipt photo</span>';
+              var receiptUrl = b.receiptImage || b.proofPhoto;
+              var proofBtn = receiptUrl
+                ? '<a href="' + receiptUrl + '" target="_blank" rel="noopener noreferrer" class="btn-ghost xs" style="color:#00e5ff;border:1px solid rgba(0,229,255,0.3);border-radius:20px;padding:3px 10px;text-decoration:none;display:inline-flex;align-items:center;gap:5px" title="Open receipt in new tab"><i class="fas fa-arrow-up-right-from-square"></i> Open Receipt</a>'
+                : '<span style="font-size:0.72rem;color:var(--text3);font-style:italic">No receipt attached</span>';
 
               return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">' +
                 '<div>' +

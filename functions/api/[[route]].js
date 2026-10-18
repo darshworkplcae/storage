@@ -1942,15 +1942,37 @@ async function hDebugDB(req, env) {
     return doScanDrive(env, drvId, pageToken, db);
   }
 
-  if (action === 'cleanup-drive2-personal') {
+  if (action === 'cleanup-drive2-personal' || action === 'cleanup-drive2-root-files') {
     const drvId = 'mv3txae19acz2';
+    const drv = (db.drives || []).find(d => d.id === drvId);
+    if (!drv) return J({ error: 'Drive 2 not found' }, 404);
+
+    const rootFolderId = drv.rootFolderId || '1o3qP-qwyqgqX17b1skNcLZs6LVL6WuyS';
+    let at;
+    try { at = await gAT(env, drv.encToken); }
+    catch(e) { at = await gAT(env, drv.encToken, true); }
+
+    // 1. Fetch genuine items directly inside the TeleDrive root folder on Google Drive
+    const gdUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${rootFolderId}' in parents and trashed = false`)}&fields=files(id,name,mimeType,size)&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+    const gdResp = await fetch(gdUrl, { headers: { Authorization: `Bearer ${at}` } });
+    const gdData = await gdResp.json();
+    const genuineGoogleItems = gdData.files || [];
+    const genuineGoogleFileIds = new Set(genuineGoogleItems.filter(x => x.mimeType !== 'application/vnd.google-apps.folder').map(x => x.id));
+    const genuineGoogleFolderIds = new Set(genuineGoogleItems.filter(x => x.mimeType === 'application/vnd.google-apps.folder').map(x => x.id));
+
+    // 2. Allowed root folders
     const allowedRootFolders = new Set(['mv3txforb0oog', 'mv3txforwpu2v', 'mvcsx0pq23xxt']);
+    for (const f of (db.folders || [])) {
+      if (f.driveId === drvId && f.googleFolderId && genuineGoogleFolderIds.has(f.googleFolderId)) {
+        allowedRootFolders.add(f.id);
+      }
+    }
+
     const validFolderIds = new Set(allowedRootFolders);
-    
     let added;
     do {
       added = false;
-      for (const f of (db.folders||[])) {
+      for (const f of (db.folders || [])) {
         if (f.driveId === drvId && f.parentId && validFolderIds.has(f.parentId) && !validFolderIds.has(f.id)) {
           validFolderIds.add(f.id);
           added = true;
@@ -1960,7 +1982,7 @@ async function hDebugDB(req, env) {
 
     const removedFolders = [];
     const keptFolders = [];
-    for (const f of (db.folders||[])) {
+    for (const f of (db.folders || [])) {
       if (f.driveId === drvId) {
         if (validFolderIds.has(f.id)) {
           keptFolders.push(f);
@@ -1972,14 +1994,21 @@ async function hDebugDB(req, env) {
       }
     }
 
+    // 3. Keep files inside valid folders, and ONLY keep root files that actually exist in Google Drive's TeleDrive folder!
     const keptFiles = [];
-    let removedFilesCount = 0;
-    for (const fi of (db.files||[])) {
+    const removedFiles = [];
+    for (const fi of (db.files || [])) {
       if (fi.driveId === drvId) {
-        if (!fi.folderId || validFolderIds.has(fi.folderId)) {
-          keptFiles.push(fi);
+        if (fi.folderId) {
+          if (validFolderIds.has(fi.folderId)) keptFiles.push(fi);
+          else removedFiles.push({ id: fi.id, name: fi.name, reason: 'unwanted_folder' });
         } else {
-          removedFilesCount++;
+          // File in root of Drive 2: MUST be in Google Drive's TeleDrive root folder!
+          if (fi.googleFileId && genuineGoogleFileIds.has(fi.googleFileId)) {
+            keptFiles.push(fi);
+          } else {
+            removedFiles.push({ id: fi.id, name: fi.name, reason: 'personal_outside_teledrive' });
+          }
         }
       } else {
         keptFiles.push(fi);
@@ -1992,11 +2021,12 @@ async function hDebugDB(req, env) {
 
     return J({
       ok: true,
-      removedFoldersCount: removedFolders.length,
-      removedFolders: removedFolders.map(x => x.name),
-      removedFilesCount,
+      genuineGoogleItemsInTeleDrive: genuineGoogleItems.map(x => ({ id: x.id, name: x.name, mime: x.mimeType })),
+      removedRootFilesCount: removedFiles.filter(x => x.reason === 'personal_outside_teledrive').length,
+      removedFilesTotal: removedFiles.length,
       remainingDrive2Folders: keptFolders.filter(f => f.driveId === drvId).map(f => f.name),
-      remainingDrive2FilesCount: keptFiles.filter(f => f.driveId === drvId).length
+      remainingDrive2RootFiles: keptFiles.filter(f => f.driveId === drvId && !f.folderId).map(f => f.name),
+      totalDrive2FilesRemaining: keptFiles.filter(f => f.driveId === drvId).length
     });
   }
 
@@ -4246,30 +4276,37 @@ async function hTripAPI(req, env, subpath, method) {
     creditors.sort((a,b) => b.amount - a.amount);
     debtors.sort((a,b) => b.amount - a.amount);
 
+    // Compute proportional settlement suggestions
+    // Every debtor pays EACH creditor proportionally so every friend sees both Amar, Darshan, etc.!
+    const totalCredit = creditors.reduce((sum, c) => sum + c.amount, 0);
     const suggestions = [];
-    let ci = 0, di = 0;
-    const credCopy = creditors.map(c => ({ ...c }));
-    const debtCopy = debtors.map(d => ({ ...d }));
 
-    while (ci < credCopy.length && di < debtCopy.length) {
-      const c = credCopy[ci];
-      const d = debtCopy[di];
-      const settleAmt = Math.min(c.amount, d.amount);
-      if (settleAmt >= 1) {
-        const payeeUser = (db.tripUsers || []).find(u => u.username === c.username);
-        suggestions.push({
-          fromUser: d.username,
-          toUser: c.username,
-          amount: Math.round(settleAmt),
-          payeeName: payeeUser ? payeeUser.name : c.username,
-          payeeUpi: payeeUser ? payeeUser.upiId : '',
-          payeeQr: payeeUser ? payeeUser.qrDataUrl : ''
-        });
+    if (totalCredit > 0 && creditors.length > 0) {
+      for (const d of debtors) {
+        let debtorRemaining = Math.round(d.amount);
+        for (let i = 0; i < creditors.length; i++) {
+          const c = creditors[i];
+          let settleAmt = 0;
+          if (i === creditors.length - 1) {
+            settleAmt = debtorRemaining;
+          } else {
+            settleAmt = Math.round(d.amount * (c.amount / totalCredit));
+            if (settleAmt > debtorRemaining) settleAmt = debtorRemaining;
+            debtorRemaining -= settleAmt;
+          }
+          if (settleAmt >= 1) {
+            const payeeUser = (db.tripUsers || []).find(u => u.username.toLowerCase() === c.username.toLowerCase());
+            suggestions.push({
+              fromUser: d.username,
+              toUser: c.username,
+              amount: settleAmt,
+              payeeName: payeeUser ? payeeUser.name : c.username,
+              payeeUpi: payeeUser ? payeeUser.upiId : '',
+              payeeQr: payeeUser ? payeeUser.qrDataUrl : ''
+            });
+          }
+        }
       }
-      c.amount -= settleAmt;
-      d.amount -= settleAmt;
-      if (c.amount < 1) ci++;
-      if (d.amount < 1) di++;
     }
 
     const folderObj = (db.folders || []).find(f => f.id === folderId);
@@ -4411,7 +4448,17 @@ async function hTripAPI(req, env, subpath, method) {
     const s = trip.settlements.find(x => x.id === settlementId);
     if (!s) return J({ error: 'Payment record not found' }, 404);
 
-    // Only payee or admin can verify
+    if (action === 'delete') {
+      // Payer, payee, or admin can delete a payment record
+      if (!adminSes && s.fromUser.toLowerCase() !== (loggedInUser || '').toLowerCase() && s.toUser.toLowerCase() !== (loggedInUser || '').toLowerCase()) {
+        return J({ error: 'Only payer, payee or admin can delete this payment record' }, 403);
+      }
+      trip.settlements = trip.settlements.filter(x => x.id !== settlementId);
+      await uSet(env, 'td:db', db);
+      return J({ ok: true, deleted: true });
+    }
+
+    // Only payee or admin can verify/reject
     if (!adminSes && s.toUser.toLowerCase() !== loggedInUser.toLowerCase()) {
       return J({ error: 'Only the payee can verify this payment' }, 403);
     }
@@ -4430,6 +4477,19 @@ async function hTripAPI(req, env, subpath, method) {
 
     await uSet(env, 'td:db', db);
     return J({ ok: true, status: s.status });
+  }
+
+  // 9b. POST /api/trip/set-friend-upi — Set or update a friend's UPI ID
+  if (subpath === 'set-friend-upi' && method === 'POST') {
+    if (!loggedInUser && !adminSes) return J({ error: 'Unauthorized' }, 401);
+    const body = await req.json().catch(() => ({}));
+    const { targetUsername, upiId } = body;
+    if (!targetUsername || !upiId) return J({ error: 'Missing target username or UPI' }, 400);
+    const targetUser = (db.tripUsers || []).find(u => u.username.toLowerCase() === targetUsername.toLowerCase());
+    if (!targetUser) return J({ error: 'User not found' }, 404);
+    targetUser.upiId = String(upiId).trim();
+    await uSet(env, 'td:db', db);
+    return J({ ok: true, upiId: targetUser.upiId });
   }
 
   // 10. POST /api/trip/concession — Grant cash or discount concession
@@ -4612,7 +4672,8 @@ async function hTripAPI(req, env, subpath, method) {
           folderId: folderId,
           tripName: tripTitle,
           date: b.date || new Date().toISOString(),
-          proofPhoto: b.proofPhoto || null,
+          receiptImage: b.receiptImage || b.proofPhoto || null,
+          proofPhoto: b.receiptImage || b.proofPhoto || null,
           splitMembers: b.splitMembers || []
         });
       });

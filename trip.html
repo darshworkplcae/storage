@@ -93,6 +93,9 @@
             </h1>
             <i class="fas fa-pen text-[10px] text-[var(--text-muted)] group-hover:text-[var(--clay-light)] transition opacity-60 group-hover:opacity-100" title="Click to rename trip title"></i>
           </div>
+          <button id="navNewTripBtn" onclick="promptCreateNewTrip()" class="hidden tap-active ml-2 px-2.5 py-1 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--card-hover)] border border-[var(--border)] text-[#e0834a] font-bold text-xs flex items-center gap-1.5 transition" title="Start a new trip expense folder">
+            <i class="fas fa-plus-circle"></i> <span class="hidden sm:inline">New Trip</span>
+          </button>
         </div>
       </div>
 
@@ -251,6 +254,9 @@
           <button id="tabBtnMyBills" onclick="switchTab('mybills')" class="px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition">
             <i class="fas fa-user-tag mr-1.5"></i> My Bills (<span id="myBillsBadge">0</span>)
           </button>
+          <button id="tabBtnMyPayments" onclick="switchTab('mypayments')" class="px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition hidden">
+            <i class="fas fa-money-bill-transfer mr-1.5"></i> My Paid Dues (<span id="myPaymentsBadge">0</span>)
+          </button>
           <button id="tabBtnFriends" onclick="switchTab('friends')" class="px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition">
             <i class="fas fa-qrcode mr-1.5"></i> QR Codes
           </button>
@@ -303,6 +309,39 @@
 
         <div id="myBillsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <!-- Injected dynamically -->
+        </div>
+      </div>
+
+      <!-- TAB 5: MY PAID DUES & VERIFICATION REQUESTS RECEIVED -->
+      <div id="tabPanelMyPayments" class="hidden space-y-5">
+        <!-- Verification Requests Received (Friends Paid Me) -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+                <i class="fas fa-inbox text-[#ffd60a]"></i> Payment Verification Requests Received
+              </span>
+              <p class="text-[11px] text-[var(--text-muted)]">When friends pay their due to you, confirm or reject the payment here. All records remain with delete option.</p>
+            </div>
+          </div>
+          <div id="incomingPaymentsList" class="space-y-2">
+            <!-- Dynamic list of payments to current user -->
+          </div>
+        </div>
+
+        <!-- Payments Sent by Me (My Paid Dues) -->
+        <div class="space-y-3 pt-3 border-t border-[var(--border-subtle)]">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+                <i class="fas fa-paper-plane text-emerald-400"></i> My Paid Dues (Payments Sent by You)
+              </span>
+              <p class="text-[11px] text-[var(--text-muted)]">Track status of dues you paid to friends. You can delete completed records anytime.</p>
+            </div>
+          </div>
+          <div id="outgoingPaymentsList" class="space-y-2">
+            <!-- Dynamic list of payments from current user -->
+          </div>
         </div>
       </div>
 
@@ -420,8 +459,17 @@
           </div>
         </div>
 
+        <!-- Inline UPI Setting if recipient has no UPI ID set -->
+        <div id="inlineSetUpiBox" class="hidden p-2.5 bg-stone-900/90 border border-stone-700 rounded-xl text-left space-y-1.5 text-xs">
+          <label class="block text-[11px] font-semibold text-amber-400"><i class="fas fa-pen"></i> Enter <span id="setUpiFriendName">Friend</span>'s UPI ID to enable 1-Click Pay:</label>
+          <div class="flex gap-1.5">
+            <input type="text" id="inlineSetUpiInput" placeholder="e.g. name@oksbi or phone@paytm" class="flex-1 bg-black border border-stone-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs">
+            <button type="button" onclick="saveFriendUpiFromModal()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs">Save</button>
+          </div>
+        </div>
+
         <!-- Direct 1-Click App Opener -->
-        <a id="payAppDeepLink" href="#" class="tap-active w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-2.5 rounded-xl shadow-md flex items-center justify-center gap-2 transition">
+        <a id="payAppDeepLink" href="#" target="_blank" onclick="handleUpiAppClick(event)" class="tap-active w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-2.5 rounded-xl shadow-md flex items-center justify-center gap-2 transition">
           <i class="fas fa-mobile-screen"></i> Open PhonePe / GPay / Paytm
         </a>
 
@@ -429,9 +477,9 @@
         <div class="bg-[var(--bg)] p-3 rounded-xl border border-[var(--border)] text-left space-y-2 text-xs">
           <div class="flex items-center justify-between">
             <span class="text-[11px] font-semibold text-[var(--text-muted)]">Amount You Paid (₹):</span>
-            <button onclick="fillFullPayAmount()" class="text-[10px] text-[var(--clay-light)] hover:underline font-semibold">Pay Full</button>
+            <button type="button" onclick="fillFullPayAmount()" class="text-[10px] text-[var(--clay-light)] hover:underline font-semibold">Pay Full</button>
           </div>
-          <input type="number" id="payCustomAmount" class="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-white font-bold text-emerald-400 text-sm focus:outline-none focus:border-[#c96b32]">
+          <input type="number" id="payCustomAmount" oninput="updatePayDeepLink()" class="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-white font-bold text-emerald-400 text-sm focus:outline-none focus:border-[#c96b32]">
           
           <input type="text" id="payNoteInput" placeholder="UTR or note (e.g. Paid via GPay)" class="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-[#c96b32]">
           
@@ -731,6 +779,7 @@
           renderSettlementsList();
           renderAllBills();
           renderMyBills();
+          renderMyPayments();
           renderFriendsQrVault();
         }
       } catch(e) {
@@ -738,7 +787,28 @@
       }
     }
 
-    // ─── RENAME TRIP ──────────────────────────────────────────────────────────
+    // ─── CREATE & RENAME TRIP ─────────────────────────────────────────────────
+    function promptCreateNewTrip() {
+      if (!state.currentUser) {
+        toast('Please login as yourself to create a new trip', 'warning');
+        openLoginModal();
+        return;
+      }
+      var tripName = prompt('Enter New Trip Title (e.g. Goa Trip 2026, Mahabaleshwar):');
+      if (!tripName || !tripName.trim()) return;
+      var newFolderId = 'trip_' + Date.now().toString(36);
+      apiFetch('rename', {
+        method: 'POST',
+        body: JSON.stringify({ folderId: newFolderId, newName: tripName.trim() })
+      }).then(function(res) {
+        if (res && res.ok) {
+          window.location.href = '/trip?folder=' + encodeURIComponent(newFolderId);
+        } else {
+          toast(res ? (res.error || 'Failed to create trip') : 'Failed', 'error');
+        }
+      });
+    }
+
     async function promptRenameTrip() {
       var current = state.curTripName;
       var newName = prompt('Enter new trip title:', current);
@@ -767,11 +837,15 @@
       var loginBtn = $('navLoginBtn');
       var userBar = $('navUserBar');
       var unauthBanner = $('unauthBanner');
+      var newTripBtn = $('navNewTripBtn');
+      var myPaymentsTab = $('tabBtnMyPayments');
 
       if (state.currentUser) {
         loginBtn.classList.add('hidden');
         userBar.classList.remove('hidden');
         if (unauthBanner) unauthBanner.classList.add('hidden');
+        if (newTripBtn) newTripBtn.classList.remove('hidden');
+        if (myPaymentsTab) myPaymentsTab.classList.remove('hidden');
         $('navUserNameDisplay').textContent = state.currentUser.name;
         $('navAvatarLetter').textContent = state.currentUser.name[0].toUpperCase();
         $('dropdownUserFull').textContent = state.currentUser.name + ' (@' + state.currentUser.username + ')';
@@ -779,6 +853,8 @@
         loginBtn.classList.remove('hidden');
         userBar.classList.add('hidden');
         if (unauthBanner) unauthBanner.classList.remove('hidden');
+        if (newTripBtn) newTripBtn.classList.add('hidden');
+        if (myPaymentsTab) myPaymentsTab.classList.add('hidden');
       }
     }
 
@@ -1183,6 +1259,7 @@
       $('payeeNameText').textContent = toName;
       $('payDueAmtText').textContent = '₹' + dueAmt.toLocaleString();
       $('payCustomAmount').value = dueAmt;
+      $('payNoteInput').value = '';
       $('payUpiHandleText').textContent = upiId ? 'UPI: ' + upiId : 'UPI ID not set by ' + toName;
 
       var qrBox = $('payQrBox');
@@ -1192,16 +1269,75 @@
         qrBox.innerHTML = '<i class="fas fa-qrcode text-7xl text-slate-900"></i><span class="text-[9px] text-slate-600 mt-2">Friend QR Photo</span>';
       }
 
+      var inlineBox = $('inlineSetUpiBox');
+      var friendNameSpan = $('setUpiFriendName');
+      var inlineInp = $('inlineSetUpiInput');
+      if (!upiId) {
+        if (inlineBox) inlineBox.classList.remove('hidden');
+        if (friendNameSpan) friendNameSpan.textContent = toName;
+        if (inlineInp) inlineInp.value = '';
+      } else {
+        if (inlineBox) inlineBox.classList.add('hidden');
+      }
+
+      updatePayDeepLink();
+      $('payModal').classList.remove('hidden');
+    }
+
+    function updatePayDeepLink() {
+      var target = state.currentPayTarget;
+      if (!target) return;
+      var amt = parseFloat($('payCustomAmount').value) || target.dueAmt || 0;
       var deepLink = $('payAppDeepLink');
-      if (upiId) {
-        deepLink.href = 'upi://pay?pa=' + encodeURIComponent(upiId) + '&pn=' + encodeURIComponent(toName) + '&am=' + dueAmt + '&cu=INR';
+      if (target.upiId) {
+        deepLink.href = 'upi://pay?pa=' + encodeURIComponent(target.upiId) + '&pn=' + encodeURIComponent(target.toName) + '&am=' + amt + '&cu=INR&tn=' + encodeURIComponent('Trip Due');
         deepLink.classList.remove('opacity-50', 'pointer-events-none');
+        deepLink.innerHTML = '<i class="fas fa-mobile-screen"></i> Open PhonePe / GPay / Paytm (₹' + amt + ')';
       } else {
         deepLink.removeAttribute('href');
         deepLink.classList.add('opacity-50', 'pointer-events-none');
+        deepLink.innerHTML = '<i class="fas fa-mobile-screen"></i> UPI ID not set yet';
       }
+    }
 
-      $('payModal').classList.remove('hidden');
+    function handleUpiAppClick(e) {
+      var target = state.currentPayTarget;
+      if (!target || !target.upiId) {
+        e.preventDefault();
+        toast('Please enter ' + (target ? target.toName : 'friend') + '\'s UPI ID above first', 'warning');
+        return;
+      }
+      var amt = parseFloat($('payCustomAmount').value) || target.dueAmt || 0;
+      var noteInp = $('payNoteInput');
+      if (noteInp && !noteInp.value) {
+        noteInp.value = 'Paid via UPI App (₹' + amt + ')';
+      }
+      toast('Opening UPI Apps (PhonePe, GPay, Paytm, Kotak)... Submit verification below once paid!', 'info', 5000);
+    }
+
+    async function saveFriendUpiFromModal() {
+      var target = state.currentPayTarget;
+      if (!target) return;
+      var upi = $('inlineSetUpiInput').value.trim();
+      if (!upi) return toast('Please enter a valid UPI ID (e.g. name@oksbi)', 'warning');
+      try {
+        var res = await apiFetch('set-friend-upi', {
+          method: 'POST',
+          body: JSON.stringify({ targetUsername: target.toUser, upiId: upi })
+        });
+        if (res && res.ok) {
+          target.upiId = res.upiId;
+          $('payUpiHandleText').textContent = 'UPI: ' + res.upiId;
+          $('inlineSetUpiBox').classList.add('hidden');
+          updatePayDeepLink();
+          toast('UPI ID set for ' + target.toName + '! 1-Click Pay is now active.', 'success');
+          await loadTripData();
+        } else {
+          toast(res ? (res.error || 'Failed') : 'Error', 'error');
+        }
+      } catch(e) {
+        toast('Error: ' + e.message, 'error');
+      }
     }
 
     function closePayModal() {
@@ -1211,6 +1347,7 @@
     function fillFullPayAmount() {
       if (state.currentPayTarget) {
         $('payCustomAmount').value = state.currentPayTarget.dueAmt;
+        updatePayDeepLink();
       }
     }
 
@@ -1756,17 +1893,127 @@
       }
     }
 
-    // ─── TAB SWITCHER ─────────────────────────────────────────────────────────
+    // ─── TAB SWITCHER & MY PAYMENTS ───────────────────────────────────────────
+    async function deletePaymentRecord(id) {
+      if (!confirm('Are you sure you want to delete this payment record?')) return;
+      try {
+        var res = await apiFetch('verify-payment', {
+          method: 'POST',
+          body: JSON.stringify({ folderId: state.curFolderId, settlementId: id, action: 'delete' })
+        });
+        if (res && res.ok) {
+          toast('Payment record deleted', 'success');
+          await loadTripData();
+        } else {
+          toast(res ? (res.error || 'Failed') : 'Error', 'error');
+        }
+      } catch(e) {
+        toast('Error: ' + e.message, 'error');
+      }
+    }
+
+    function renderMyPayments() {
+      var badge = $('myPaymentsBadge');
+      var incContainer = $('incomingPaymentsList');
+      var outContainer = $('outgoingPaymentsList');
+      if (!incContainer || !outContainer) return;
+      incContainer.innerHTML = '';
+      outContainer.innerHTML = '';
+
+      if (!state.currentUser || !state.tripData) return;
+      var un = state.currentUser.username.toLowerCase();
+      var allSettlements = state.tripData.settlements || [];
+      var incoming = allSettlements.filter(function(s) {
+        return s.toUser && s.toUser.toLowerCase() === un;
+      });
+      var outgoing = allSettlements.filter(function(s) {
+        return s.fromUser && s.fromUser.toLowerCase() === un;
+      });
+
+      if (badge) {
+        var pendingCount = incoming.filter(function(s) { return s.status === 'pending'; }).length;
+        badge.textContent = pendingCount > 0 ? (pendingCount + ' pending') : (incoming.length + outgoing.length);
+      }
+
+      // 1. Incoming (Friends paid me)
+      if (incoming.length === 0) {
+        incContainer.innerHTML = '<div class="p-6 text-center text-[var(--text-muted)] text-xs bg-[var(--card)] rounded-xl border border-[var(--border)]"><p class="font-bold text-white mb-0.5">No Incoming Payment Requests</p><p class="text-[11px]">When a friend marks their due as paid to you, their verification request will appear here.</p></div>';
+      } else {
+        incoming.forEach(function(item) {
+          var row = document.createElement('div');
+          row.className = 'p-3 rounded-xl bg-[var(--card)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs';
+          
+          var statusPill = item.status === 'verified'
+            ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Verified & Settled ✅</span>'
+            : (item.status === 'failed'
+              ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">Cancelled / Failed ❌</span>'
+              : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse">Verification Pending ⏳</span>');
+
+          var actionBtns = '';
+          if (item.status === 'pending') {
+            actionBtns += '<button onclick="verifySettlementPayment(\'' + item.id + '\', \'approve\')" class="tap-active px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow-sm"><i class="fas fa-check"></i> Yes, Received</button>' +
+              '<button onclick="verifySettlementPayment(\'' + item.id + '\', \'reject\')" class="tap-active px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 font-semibold text-xs flex items-center gap-1"><i class="fas fa-times"></i> Reject</button>';
+          }
+          actionBtns += '<button onclick="deletePaymentRecord(\'' + item.id + '\')" class="tap-active px-2.5 py-1.5 rounded-lg bg-[var(--bg)] hover:bg-rose-950/60 text-stone-400 hover:text-rose-400 border border-[var(--border)] text-xs flex items-center gap-1" title="Delete record"><i class="fas fa-trash-alt"></i> Delete</button>';
+
+          row.innerHTML = '<div>' +
+            '<div class="flex items-center gap-2 flex-wrap mb-1">' +
+            '<span class="font-bold text-white text-sm"><b class="text-[#e0834a]">' + esc(item.fromUserName || item.fromUser) + '</b> sent you <b class="text-emerald-400">₹' + (item.amount || 0).toLocaleString() + '</b></span>' +
+            statusPill +
+            '</div>' +
+            '<div class="text-[11px] text-[var(--text-muted)]">' + esc(item.note || 'UPI Payment') + ' · ' + (item.date ? new Date(item.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '') + '</div>' +
+            '</div>' +
+            '<div class="flex items-center gap-2 shrink-0 flex-wrap">' + actionBtns + '</div>';
+          incContainer.appendChild(row);
+        });
+      }
+
+      // 2. Outgoing (Payments I sent)
+      if (outgoing.length === 0) {
+        outContainer.innerHTML = '<div class="p-6 text-center text-[var(--text-muted)] text-xs bg-[var(--card)] rounded-xl border border-[var(--border)]"><p class="font-bold text-white mb-0.5">No Dues Paid Yet</p><p class="text-[11px]">When you pay a friend and submit payment, your receipt records will be listed here.</p></div>';
+      } else {
+        outgoing.forEach(function(item) {
+          var row = document.createElement('div');
+          row.className = 'p-3 rounded-xl bg-[var(--card)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs';
+          
+          var toUserObj = (state.users || []).find(function(u) { return u.username.toLowerCase() === (item.toUser || '').toLowerCase(); });
+          var toDisplayName = toUserObj ? toUserObj.name : item.toUser;
+
+          var statusPill = item.status === 'verified'
+            ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Cleared by ' + esc(toDisplayName) + ' ✅</span>'
+            : (item.status === 'failed'
+              ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">Failed / Rejected ❌</span>'
+              : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">Waiting for ' + esc(toDisplayName) + ' to verify ⏳</span>');
+
+          row.innerHTML = '<div>' +
+            '<div class="flex items-center gap-2 flex-wrap mb-1">' +
+            '<span class="font-bold text-white text-sm">Paid to <b class="text-[#e0834a]">' + esc(toDisplayName) + '</b>: <b class="text-amber-400">₹' + (item.amount || 0).toLocaleString() + '</b></span>' +
+            statusPill +
+            '</div>' +
+            '<div class="text-[11px] text-[var(--text-muted)]">' + esc(item.note || 'UPI') + ' · ' + (item.date ? new Date(item.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '') + '</div>' +
+            '</div>' +
+            '<div class="flex items-center gap-2 shrink-0">' +
+            '<button onclick="deletePaymentRecord(\'' + item.id + '\')" class="tap-active px-2.5 py-1.5 rounded-lg bg-[var(--bg)] hover:bg-rose-950/60 text-stone-400 hover:text-rose-400 border border-[var(--border)] text-xs flex items-center gap-1" title="Delete record"><i class="fas fa-trash-alt"></i> Delete</button>' +
+            '</div>';
+          outContainer.appendChild(row);
+        });
+      }
+    }
+
     function switchTab(t) {
       $('tabBtnSettlements').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition';
       $('tabBtnBills').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition';
       $('tabBtnMyBills').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition';
       $('tabBtnFriends').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition';
+      var mpBtn = $('tabBtnMyPayments');
+      if (mpBtn) mpBtn.className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl text-[var(--text-muted)] hover:text-white transition' + (state.currentUser ? '' : ' hidden');
 
       $('tabPanelSettlements').classList.add('hidden');
       $('tabPanelBills').classList.add('hidden');
       $('tabPanelMyBills').classList.add('hidden');
       $('tabPanelFriends').classList.add('hidden');
+      var mpPanel = $('tabPanelMyPayments');
+      if (mpPanel) mpPanel.classList.add('hidden');
 
       if (t === 'settlements') {
         $('tabBtnSettlements').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl bg-[#c96b32] text-white shadow-sm transition';
@@ -1777,6 +2024,10 @@
       } else if (t === 'mybills') {
         $('tabBtnMyBills').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl bg-[#c96b32] text-white shadow-sm transition';
         $('tabPanelMyBills').classList.remove('hidden');
+      } else if (t === 'mypayments') {
+        if (mpBtn) mpBtn.className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl bg-[#c96b32] text-white shadow-sm transition';
+        if (mpPanel) mpPanel.classList.remove('hidden');
+        renderMyPayments();
       } else if (t === 'friends') {
         $('tabBtnFriends').className = 'px-3.5 py-1.5 text-xs font-bold rounded-xl bg-[#c96b32] text-white shadow-sm transition';
         $('tabPanelFriends').classList.remove('hidden');
