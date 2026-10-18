@@ -607,9 +607,14 @@
           <h4 id="lightboxTitle" class="font-bold text-sm">Receipt</h4>
           <p id="lightboxSubtitle" class="text-xs text-[var(--text-muted)]"></p>
         </div>
-        <button onclick="closeReceiptLightbox()" class="text-[var(--text-muted)] hover:text-white tap-active p-2 text-lg">
-          <i class="fas fa-times"></i>
-        </button>
+        <div class="flex items-center gap-2">
+          <button onclick="openCurrentLightboxInNewTab()" class="text-xs bg-stone-800 hover:bg-stone-700 px-2.5 py-1 rounded-lg text-emerald-400 border border-stone-700 inline-flex items-center gap-1.5 transition">
+            <i class="fas fa-arrow-up-right-from-square"></i> Open Tab
+          </button>
+          <button onclick="closeReceiptLightbox()" class="text-[var(--text-muted)] hover:text-white tap-active p-1.5 text-lg">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
       </div>
       <div class="w-full bg-black/60 rounded-2xl overflow-hidden border border-stone-800 flex items-center justify-center max-h-[75vh]">
         <img id="lightboxImage" src="" class="max-h-[75vh] w-auto object-contain mx-auto" alt="Bill Proof">
@@ -1450,6 +1455,22 @@
 
     function closeReceiptLightbox() {
       $('receiptLightboxModal').classList.add('hidden');
+    }
+
+    function openCurrentLightboxInNewTab() {
+      var src = $('lightboxImage').src;
+      if (!src) return;
+      if (src.startsWith('data:')) {
+        try {
+          var arr = src.split(','), mime = arr[0].match(/:(.*?);/)[1], bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+          while(n--){ u8arr[n] = bstr.charCodeAt(n); }
+          var blob = new Blob([u8arr], {type:mime});
+          var blobUrl = URL.createObjectURL(blob);
+          window.open(blobUrl, '_blank');
+          return;
+        } catch(e) {}
+      }
+      window.open(src, '_blank');
     }
 
     // ─── TAB 3: MY BILLS (USER'S PERSONAL EXPENSES + DELETE) ──────────────────

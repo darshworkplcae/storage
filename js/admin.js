@@ -1193,9 +1193,13 @@ async function loadFullTripAdminPanel() {
           ? '<div style="padding:16px;text-align:center;color:var(--text3);font-size:0.8rem">No bills uploaded by ' + esc(u.name) + ' yet.</div>'
           : '<div style="max-height:380px;overflow-y:auto;padding:6px">' +
             uBills.map(function(b) {
+              var dateStr = b.createdAt ? new Date(b.createdAt).toLocaleDateString() : 'Recent';
               var receiptUrl = b.receiptImage || b.proofPhoto;
+              if (receiptUrl) {
+                window._adminTripReceiptMap[b.id] = receiptUrl;
+              }
               var proofBtn = receiptUrl
-                ? '<a href="' + receiptUrl + '" target="_blank" rel="noopener noreferrer" class="btn-ghost xs" style="color:#00e5ff;border:1px solid rgba(0,229,255,0.3);border-radius:20px;padding:3px 10px;text-decoration:none;display:inline-flex;align-items:center;gap:5px" title="Open receipt in new tab"><i class="fas fa-arrow-up-right-from-square"></i> Open Receipt</a>'
+                ? '<button onclick="viewAdminReceipt(\'' + esc(b.id) + '\', \'' + esc(b.title).replace(/'/g, "\\'") + '\')" class="btn-ghost xs" style="color:#00e5ff;border:1px solid rgba(0,229,255,0.3);border-radius:20px;padding:3px 10px;text-decoration:none;display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Open receipt in new tab"><i class="fas fa-arrow-up-right-from-square"></i> Open Receipt</button>'
                 : '<span style="font-size:0.72rem;color:var(--text3);font-style:italic">No receipt attached</span>';
 
               return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">' +
@@ -1269,6 +1273,27 @@ function toggleFriendBillDrawer(drawerId, arrowId) {
     if (arrow) arrow.style.transform = 'rotate(0deg)';
   }
 }
+
+window._adminTripReceiptMap = {};
+
+window.viewAdminReceipt = function(billId, title) {
+  var url = window._adminTripReceiptMap[billId];
+  if (!url) return;
+  if (url.startsWith('data:')) {
+    try {
+      var arr = url.split(','), mime = arr[0].match(/:(.*?);/)[1], bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+      while(n--){ u8arr[n] = bstr.charCodeAt(n); }
+      var blob = new Blob([u8arr], {type:mime});
+      var blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank');
+      return;
+    } catch(e) {
+      showTripReceiptLightbox(title, url);
+      return;
+    }
+  }
+  window.open(url, '_blank');
+};
 
 function showTripReceiptLightbox(title, imgUrl) {
   var existing = document.getElementById('adminTripReceiptLightbox');
