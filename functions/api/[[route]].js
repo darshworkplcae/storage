@@ -1145,6 +1145,17 @@ async function hDL(req,env,gId){
     else if(/\.gif$/i.test(effectiveName)) cType='image/gif';
     else if(/\.mp4$/i.test(effectiveName)) cType='video/mp4';
     else if(/\.mov$/i.test(effectiveName)) cType='video/quicktime';
+    else if(/\.pdf$/i.test(effectiveName)) cType='application/pdf';
+    else if(/\.mp3$/i.test(effectiveName)) cType='audio/mpeg';
+    else if(/\.wav$/i.test(effectiveName)) cType='audio/wav';
+    else if(/\.m4a$/i.test(effectiveName)) cType='audio/mp4';
+    else if(/\.aac$/i.test(effectiveName)) cType='audio/aac';
+    else if(/\.ogg$/i.test(effectiveName)) cType='audio/ogg';
+    else if(/\.webm$/i.test(effectiveName)) cType='video/webm';
+    else if(/\.mkv$/i.test(effectiveName)) cType='video/x-matroska';
+    else if(/\.txt$/i.test(effectiveName)) cType='text/plain; charset=utf-8';
+    else if(/\.json$/i.test(effectiveName)) cType='application/json';
+    else if(/\.svg$/i.test(effectiveName)) cType='image/svg+xml';
   }
   respHeaders.set('Content-Type',cType);
   if(gResp.headers.get('Content-Length')) respHeaders.set('Content-Length',gResp.headers.get('Content-Length'));

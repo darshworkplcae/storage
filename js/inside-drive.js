@@ -34,8 +34,15 @@
 
   function getRawDownloadUrl(fileId, driveId, fileName, inline) {
     var tok = (typeof S !== 'undefined' && S.ses && S.ses.token) ? S.ses.token : '';
-    var dTok = (typeof getDriveUnlockToken === 'function') ? getDriveUnlockToken(driveId) : '';
-    return `/api/download/${encodeURIComponent(fileId)}?driveId=${encodeURIComponent(driveId || '')}` +
+    if (!tok) {
+      try {
+        var s = JSON.parse(localStorage.getItem('td:ses') || sessionStorage.getItem('td:ses') || '{}');
+        if (s && s.token) tok = s.token;
+      } catch(e) {}
+    }
+    var targetDriveId = driveId || _rawCurrentDriveId || (typeof S !== 'undefined' && S.curDriveId) || (typeof S !== 'undefined' && S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : '');
+    var dTok = (typeof getDriveUnlockToken === 'function') ? getDriveUnlockToken(targetDriveId) : '';
+    return `/api/download/${encodeURIComponent(fileId)}?driveId=${encodeURIComponent(targetDriveId || '')}` +
       (fileName ? `&name=${encodeURIComponent(fileName)}` : '') +
       (inline ? `&inline=1` : '') +
       (tok ? `&token=${encodeURIComponent(tok)}` : '') +
@@ -44,8 +51,15 @@
 
   function getRawThumbUrl(fileId, driveId) {
     var tok = (typeof S !== 'undefined' && S.ses && S.ses.token) ? S.ses.token : '';
-    var dTok = (typeof getDriveUnlockToken === 'function') ? getDriveUnlockToken(driveId) : '';
-    return `/api/thumb/${encodeURIComponent(fileId)}?driveId=${encodeURIComponent(driveId || '')}` +
+    if (!tok) {
+      try {
+        var s = JSON.parse(localStorage.getItem('td:ses') || sessionStorage.getItem('td:ses') || '{}');
+        if (s && s.token) tok = s.token;
+      } catch(e) {}
+    }
+    var targetDriveId = driveId || _rawCurrentDriveId || (typeof S !== 'undefined' && S.curDriveId) || (typeof S !== 'undefined' && S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : '');
+    var dTok = (typeof getDriveUnlockToken === 'function') ? getDriveUnlockToken(targetDriveId) : '';
+    return `/api/thumb/${encodeURIComponent(fileId)}?driveId=${encodeURIComponent(targetDriveId || '')}` +
       (tok ? `&token=${encodeURIComponent(tok)}` : '') +
       (dTok ? `&driveToken=${encodeURIComponent(dTok)}` : '');
   }
@@ -362,7 +376,7 @@
 
       return `
         <div class="raw-file-row">
-          <div class="raw-file-row-main" style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
+          <div class="raw-file-row-main" ${canStream ? `onclick="window._openRawPreview('${_esc(f.id)}', '${_esc(f.name)}', '${_esc(f.mimeType)}', '${_esc(_rawCurrentDriveId)}')"` : ''} style="display:flex;align-items:center;gap:12px;min-width:0;flex:1;${canStream ? 'cursor:pointer' : ''}">
             ${hasThumb ? `
               <div style="width:38px;height:38px;border-radius:8px;overflow:hidden;background:rgba(255,255,255,0.04);flex-shrink:0;display:flex;align-items:center;justify-content:center">
                 <img src="${thumbUrl}" alt="${_esc(f.name)}" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
@@ -379,7 +393,7 @@
             </div>
           </div>
           <div class="raw-file-row-acts" style="display:flex;align-items:center;gap:6px">
-            ${canStream ? `<button class="btn-ghost xs raw-btn-touch" style="color:#00e5ff" onclick="window._openRawPreview('${_esc(f.id)}', '${_esc(f.name)}', '${_esc(f.mimeType)}')"><i class="fas fa-play mr-1"></i> Stream</button>` : ''}
+            ${canStream ? `<button class="btn-ghost xs raw-btn-touch" style="color:#00e5ff" onclick="window._openRawPreview('${_esc(f.id)}', '${_esc(f.name)}', '${_esc(f.mimeType)}', '${_esc(_rawCurrentDriveId)}')"><i class="fas fa-play mr-1"></i> Stream</button>` : ''}
             <a href="${dlUrl}" class="icon-btn xs" download="${_esc(f.name)}" title="Download"><i class="fas fa-download"></i></a>
             ${f.webViewLink ? `<a href="${_esc(f.webViewLink)}" target="_blank" rel="noopener" class="icon-btn xs" title="Open in Google Drive"><i class="fas fa-arrow-up-right-from-square"></i></a>` : ''}
           </div>
@@ -417,7 +431,7 @@
         <div class="fg-card" style="padding:.9rem .8rem;text-align:center;display:flex;flex-direction:column;justify-content:space-between">
           <div>
             ${hasThumb ? `
-              <div class="fg-thumb-wrap" style="height:120px;position:relative;border-radius:10px;overflow:hidden;background:rgba(255,255,255,0.035);display:flex;align-items:center;justify-content:center;margin-bottom:.6rem;cursor:pointer" onclick="window._openRawPreview('${_esc(f.id)}', '${_esc(f.name)}', '${_esc(f.mimeType)}')">
+              <div class="fg-thumb-wrap" style="height:120px;position:relative;border-radius:10px;overflow:hidden;background:rgba(255,255,255,0.035);display:flex;align-items:center;justify-content:center;margin-bottom:.6rem;cursor:pointer" onclick="window._openRawPreview('${_esc(f.id)}', '${_esc(f.name)}', '${_esc(f.mimeType)}', '${_esc(_rawCurrentDriveId)}')">
                 <img class="raw-thumb-img" src="${thumbUrl}" alt="${_esc(f.name)}" loading="lazy" decoding="async" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
                 <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:2.5rem;color:${cfg.col}">
                   <i class="fas ${cfg.icon}"></i>
@@ -425,13 +439,13 @@
                 ${cfg.cat === 'video' ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.3)"><i class="fas fa-play" style="color:#fff;font-size:1.4rem;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.6))"></i></div>` : ''}
               </div>
             ` : `
-              <div style="font-size:2.5rem;color:${cfg.col};margin-bottom:.4rem"><i class="fas ${cfg.icon}"></i></div>
+              <div style="font-size:2.5rem;color:${cfg.col};margin-bottom:.4rem;cursor:pointer" onclick="window._openRawPreview('${_esc(f.id)}', '${_esc(f.name)}', '${_esc(f.mimeType)}', '${_esc(_rawCurrentDriveId)}')"><i class="fas ${cfg.icon}"></i></div>
             `}
-            <div class="fg-name" style="font-weight:600;font-size:.85rem;line-height:1.3" title="${_esc(f.name)}">${_esc(f.name)}</div>
+            <div class="fg-name" style="font-weight:600;font-size:.85rem;line-height:1.3;cursor:pointer" title="${_esc(f.name)}" onclick="window._openRawPreview('${_esc(f.id)}', '${_esc(f.name)}', '${_esc(f.mimeType)}', '${_esc(_rawCurrentDriveId)}')">${_esc(f.name)}</div>
             <div style="font-size:.72rem;color:var(--text3);margin-top:3px">${_fmt(f.size || 0)}</div>
           </div>
           <div style="display:flex;gap:6px;justify-content:center;margin-top:.8rem">
-            ${canStream ? `<button class="btn-ghost xs" style="color:#00e5ff" onclick="window._openRawPreview('${_esc(f.id)}', '${_esc(f.name)}', '${_esc(f.mimeType)}')"><i class="fas fa-play"></i></button>` : ''}
+            ${canStream ? `<button class="btn-ghost xs" style="color:#00e5ff" onclick="window._openRawPreview('${_esc(f.id)}', '${_esc(f.name)}', '${_esc(f.mimeType)}', '${_esc(_rawCurrentDriveId)}')"><i class="fas fa-play"></i></button>` : ''}
             <a href="${dlUrl}" class="icon-btn xs" download="${_esc(f.name)}" title="Download"><i class="fas fa-download"></i></a>
             ${f.webViewLink ? `<a href="${_esc(f.webViewLink)}" target="_blank" rel="noopener" class="icon-btn xs" title="Open in Google Drive"><i class="fas fa-arrow-up-right-from-square"></i></a>` : ''}
           </div>
@@ -467,9 +481,10 @@
     await loadRawFolderData(_rawCurrentDriveId, _rawCurrentFolderId, _rawNextPageToken);
   };
 
-  window._openRawPreview = function (fileId, fileName, mimeType) {
-    var dlUrl = getRawDownloadUrl(fileId, _rawCurrentDriveId, fileName, false);
-    var mediaUrl = getRawDownloadUrl(fileId, _rawCurrentDriveId, fileName, true);
+  window._openRawPreview = function (fileId, fileName, mimeType, driveId) {
+    var activeDriveId = driveId || _rawCurrentDriveId || (typeof S !== 'undefined' && S.curDriveId) || (typeof S !== 'undefined' && S.db && S.db.drives && S.db.drives[0] ? S.db.drives[0].id : '');
+    var dlUrl = getRawDownloadUrl(fileId, activeDriveId, fileName, false);
+    var mediaUrl = getRawDownloadUrl(fileId, activeDriveId, fileName, true);
     var cfg = (typeof ftCfg === 'function') ? ftCfg(fileName, mimeType) : { icon: 'fa-file', col: '#9ca3af', cat: 'file' };
 
     var existingOv = document.querySelector('.media-ov');
@@ -495,7 +510,15 @@
     } else if (cfg.cat === 'audio') {
       bodyHtml = `<audio src="${mediaUrl}" controls autoplay style="width:80%;max-width:500px" onloadeddata="var s=document.getElementById('mediaLoadingSpinner');if(s)s.style.display='none';"></audio>`;
     } else if (/\.pdf$/i.test(fileName) || (mimeType && mimeType.includes('pdf'))) {
-      bodyHtml = `<iframe src="${mediaUrl}#toolbar=1" style="width:100%;max-width:1050px;height:82vh;border:none;border-radius:12px;background:#18181b" allowfullscreen onload="var s=document.getElementById('mediaLoadingSpinner');if(s)s.style.display='none';"></iframe>`;
+      bodyHtml = `
+        <div style="width:100%;max-width:1050px;height:82vh;display:flex;flex-direction:column">
+          <iframe src="${mediaUrl}#toolbar=1" style="width:100%;flex:1;border:none;border-radius:12px;background:#18181b" allowfullscreen onload="var s=document.getElementById('mediaLoadingSpinner');if(s)s.style.display='none';"></iframe>
+          <div style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:6px 10px;background:rgba(255,255,255,0.03);border-radius:8px;margin-top:6px">
+            <span style="font-size:0.75rem;color:var(--text3)"><i class="fas fa-file-pdf mr-1" style="color:#f43f5e"></i> PDF Document</span>
+            <a href="${dlUrl}" class="btn-ghost xs" download="${_esc(fileName)}"><i class="fas fa-download mr-1"></i> Download PDF</a>
+          </div>
+        </div>
+      `;
     } else {
       bodyHtml = `
         <div style="text-align:center;padding:2.5rem;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:16px;max-width:450px">
@@ -516,7 +539,7 @@
         </div>
         <div style="display:flex;gap:.5rem;align-items:center">
           <a href="${dlUrl}" class="icon-btn" download="${_esc(fileName)}" title="Download"><i class="fas fa-download"></i></a>
-          <button class="icon-btn" onclick="this.closest('.media-ov').remove()"><i class="fas fa-times"></i></button>
+          <button class="icon-btn" onclick="var m=this.closest('.media-ov');if(m)m.remove();"><i class="fas fa-times"></i></button>
         </div>
       </div>
       <div class="media-body" style="position:relative">
@@ -529,6 +552,14 @@
         ${bodyHtml}
       </div>
     `;
+
+    function onKeyDown(e) {
+      if (e.key === 'Escape') {
+        if (ov && ov.parentNode) ov.remove();
+        document.removeEventListener('keydown', onKeyDown);
+      }
+    }
+    document.addEventListener('keydown', onKeyDown);
 
     document.body.appendChild(ov);
   };
