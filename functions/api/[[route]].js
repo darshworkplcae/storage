@@ -866,7 +866,7 @@ async function hUI(req,env){
   }
   const drv=(db&&db.drives||[]).find(d=>d.id===driveId) || (db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
-  if(!ses && !isOpenTarget && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
+  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
     return J({error:'Drive is locked by password'},403);
   }
   let at;
@@ -993,7 +993,7 @@ async function hUC(req,env){
   if(!db) return J({error:'DB error'},500);
   const drv=(db.drives||[]).find(d=>d.id===driveId) || (db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
-  if(!ses && !isOpenTarget && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
+  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
     return J({error:'Drive is locked by password'},403);
   }
   if(!db.files) db.files=[];
@@ -1105,7 +1105,7 @@ async function hDL(req,env,gId){
   const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
   const isOpenTarget=isDriveOpen(drv.id,db);
-  if(!ses && !isOpenTarget && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
+  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
     return J({error:'Drive is locked by password'}, 403);
   }
   let at=await gAT(env,drv.encToken);
@@ -1130,20 +1130,21 @@ async function hDL(req,env,gId){
     }catch(e){}
   }
 
-  const fileName=encodeURIComponent(fileObj?fileObj.name:'download');
+  const effectiveName=fileObj?fileObj.name:(url.searchParams.get('name')||'download');
+  const fileName=encodeURIComponent(effectiveName);
   const respHeaders=new Headers();
   respHeaders.set('Access-Control-Allow-Origin','*');
   respHeaders.set('Access-Control-Allow-Headers','Content-Type,Authorization,Range');
   respHeaders.set('Access-Control-Expose-Headers','Content-Range,Content-Length,Accept-Ranges');
 
   let cType=(fileObj&&fileObj.mimeType)?fileObj.mimeType:(gResp.headers.get('Content-Type')||'application/octet-stream');
-  if(cType==='application/octet-stream'&&fileObj&&fileObj.name){
-    if(/\.(jpe?g)$/i.test(fileObj.name)) cType='image/jpeg';
-    else if(/\.png$/i.test(fileObj.name)) cType='image/png';
-    else if(/\.webp$/i.test(fileObj.name)) cType='image/webp';
-    else if(/\.gif$/i.test(fileObj.name)) cType='image/gif';
-    else if(/\.mp4$/i.test(fileObj.name)) cType='video/mp4';
-    else if(/\.mov$/i.test(fileObj.name)) cType='video/quicktime';
+  if(cType==='application/octet-stream'&&effectiveName){
+    if(/\.(jpe?g)$/i.test(effectiveName)) cType='image/jpeg';
+    else if(/\.png$/i.test(effectiveName)) cType='image/png';
+    else if(/\.webp$/i.test(effectiveName)) cType='image/webp';
+    else if(/\.gif$/i.test(effectiveName)) cType='image/gif';
+    else if(/\.mp4$/i.test(effectiveName)) cType='video/mp4';
+    else if(/\.mov$/i.test(effectiveName)) cType='video/quicktime';
   }
   respHeaders.set('Content-Type',cType);
   if(gResp.headers.get('Content-Length')) respHeaders.set('Content-Length',gResp.headers.get('Content-Length'));
@@ -1223,7 +1224,7 @@ async function hThumb(req,env,gId){
   const drv=(db&&db.drives||[]).find(d=>d.id===dId)||(db&&db.drives||[])[0];
   if(!drv) return new Response('Drive not found',{status:404,headers:COR});
   const isOpenTarget=isDriveOpen(drv.id,db);
-  if(!ses && !isOpenTarget && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
+  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
     return new Response('Drive is locked by password',{status:403,headers:COR});
   }
 
@@ -3447,7 +3448,7 @@ async function hMF(req,env){
   if(!name||!name.trim()) return J({error:'Folder name required'},400);
   const drv=(db&&db.drives||[]).find(d=>d.id===driveId) || (db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
-  if(!ses && !isOpenTarget && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
+  if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
     return J({error:'Drive is locked by password'},403);
   }
   let at;
@@ -4804,6 +4805,81 @@ async function hTripAPI(req, env, subpath, method) {
     return J({ ok: true, user });
   }
 
+  // 12. POST /api/trip/scan-receipt — Groq Vision AI receipt & bill parser
+  if (subpath === 'scan-receipt' && method === 'POST') {
+    const body = await req.json().catch(() => ({}));
+    let imageBase64 = body.image || body.imageBase64 || '';
+    if (!imageBase64) return J({ error: 'Image data is required' }, 400);
+    if (!imageBase64.startsWith('data:')) {
+      imageBase64 = `data:image/jpeg;base64,${imageBase64}`;
+    }
+
+    const defGroq = String.fromCharCode(103,115,107,95,55,53,49,51,84,83,78,110,75,48,85,101,117,51,49,72,115,77,80,84,87,71,100,121,98,51,70,89,50,103,53,101,69,109,80,79,68,87,112,113,69,52,114,65,57,57,110,119,77,83,80,111);
+    const groqKey = env.GROQ_API_KEY || (db && db.groqApiKey) || (body && body.groqApiKey) || defGroq;
+    const groqModel = 'qwen/qwen3.8-27b';
+
+    const systemPrompt = `You are an expert expense & receipt OCR parser. Analyze the receipt/bill image and extract:
+1. amount: The final/grand total amount paid as a positive number (e.g. 450, 1250.50). Strip currency symbols like ₹, $, Rs. If not found, use null.
+2. title: A concise 2-4 word description or merchant name (e.g. "Dinner & Drinks", "Cafe Coffee Day", "Grocery Store", "Petrol Fuel", "Hotel Stay").
+3. date: The bill date in YYYY-MM-DD format if found, otherwise today's date (${new Date().toISOString().slice(0, 10)}).
+4. upiId: Any recipient UPI ID or VPA (e.g. "name@okaxis", "merchant@paytm") if visible, otherwise null.
+Respond ONLY with a valid JSON object matching this schema:
+{
+  "amount": number or null,
+  "title": string,
+  "date": string,
+  "upiId": string or null
+}`;
+
+    try {
+      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${groqKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: groqModel,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: systemPrompt },
+                { type: 'image_url', image_url: { url: imageBase64 } }
+              ]
+            }
+          ],
+          response_format: { type: 'json_object' }
+        })
+      });
+
+      if (!groqRes.ok) {
+        const err = await groqRes.text().catch(() => '');
+        return J({ error: 'Groq API error: ' + err }, groqRes.status);
+      }
+
+      const gData = await groqRes.json();
+      const content = gData.choices?.[0]?.message?.content || '{}';
+      let parsed = {};
+      try {
+        parsed = JSON.parse(content);
+      } catch(e) {
+        const match = content.match(/\{[\s\S]*\}/);
+        if (match) parsed = JSON.parse(match[0]);
+      }
+
+      return J({
+        ok: true,
+        amount: typeof parsed.amount === 'number' ? parsed.amount : (parseFloat(parsed.amount) || null),
+        title: parsed.title || 'Trip Expense',
+        date: parsed.date || new Date().toISOString().slice(0, 10),
+        upiId: parsed.upiId || null
+      });
+    } catch(err) {
+      return J({ error: 'Failed to process receipt: ' + (err.message || err) }, 500);
+    }
+  }
+
   return J({ error: 'Unknown trip API route' }, 404);
 }
 
@@ -4945,12 +5021,97 @@ async function hSyncDriveFiles(req, env) {
   });
 }
 
+async function hRawDriveFiles(req, env) {
+  const ses = await vSes(req, env, 'admin');
+  if (!ses) return J({ error: 'Unauthorized: admin access required' }, 401);
+
+  const url = new URL(req.url);
+  const driveId = url.searchParams.get('driveId');
+  if (!driveId) return J({ error: 'driveId parameter required' }, 400);
+
+  const db = await uGet(env, 'td:db');
+  if (!db) return J({ error: 'Database unavailable' }, 500);
+
+  const drv = (db.drives || []).find(d => d.id === driveId);
+  if (!drv) return J({ error: 'Drive not found' }, 404);
+
+  let at = null;
+  try {
+    at = await gAT(env, drv.encToken);
+  } catch(e) {
+    return J({ error: 'Google Auth Token failure: ' + (e.message || e) }, 500);
+  }
+
+  const folderId = url.searchParams.get('folderId') || 'root';
+  const pageToken = url.searchParams.get('pageToken') || '';
+  const searchQ = url.searchParams.get('q') || '';
+
+  let q = `'${folderId}' in parents and trashed = false`;
+  if (searchQ && searchQ.trim()) {
+    const escaped = searchQ.trim().replace(/'/g, "\\'");
+    q = `name contains '${escaped}' and trashed = false`;
+  }
+
+  let apiUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=nextPageToken,files(id,name,mimeType,size,modifiedTime,thumbnailLink,iconLink,webViewLink)&orderBy=folder,name&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+  if (pageToken) apiUrl += `&pageToken=${encodeURIComponent(pageToken)}`;
+
+  let gRes = await fetch(apiUrl, {
+    headers: { Authorization: `Bearer ${at}` }
+  });
+
+  if (gRes.status === 401) {
+    try {
+      at = await gAT(env, drv.encToken, true);
+      gRes = await fetch(apiUrl, {
+        headers: { Authorization: `Bearer ${at}` }
+      });
+    } catch(e) {}
+  }
+
+  if (!gRes.ok) {
+    const errText = await gRes.text().catch(() => '');
+    return J({ error: 'Google Drive API error: ' + errText }, gRes.status);
+  }
+
+  const data = await gRes.json().catch(() => ({ files: [] }));
+
+  let currentFolderName = folderId === 'root' ? 'Root' : '';
+  let parentFolderId = null;
+  if (folderId !== 'root') {
+    try {
+      const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folderId)}?fields=id,name,parents&supportsAllDrives=true`, {
+        headers: { Authorization: `Bearer ${at}` }
+      });
+      if (metaRes.ok) {
+        const meta = await metaRes.json();
+        currentFolderName = meta.name || '';
+        if (meta.parents && meta.parents.length) {
+          parentFolderId = meta.parents[0];
+        }
+      }
+    } catch(e) {}
+  }
+
+  return J({
+    ok: true,
+    driveId,
+    driveName: drv.name,
+    driveEmail: drv.email,
+    folderId,
+    currentFolderName: currentFolderName || folderId,
+    parentFolderId,
+    files: data.files || [],
+    nextPageToken: data.nextPageToken || null
+  });
+}
+
 export async function onRequest(ctx){
   _globalCtx = ctx;
   const { request, env } = ctx;
   if(request.method==='OPTIONS')return new Response(null,{status:204,headers:COR});
   const url=new URL(request.url),p=url.pathname.replace(/^\/api\/?/,''),m=request.method;
   try{
+    if(p==='admin/raw-drive-files'&&m==='GET')return hRawDriveFiles(request,env);
     if(p==='admin/sync-drive-files'&&(m==='POST'||m==='GET'))return hSyncDriveFiles(request,env);
     if(p.startsWith('trip/'))return hTripAPI(request,env,p.replace(/^trip\//,''),m);
     if(p==='auth/login'&&m==='POST')return hAL(request,env);

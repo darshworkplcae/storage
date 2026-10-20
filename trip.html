@@ -560,6 +560,11 @@
             <button type="button" id="receiptRemoveBtn" onclick="clearReceiptSelection()" class="hidden absolute top-2 right-2 bg-black/70 hover:bg-black text-rose-400 rounded-full w-6 h-6 flex items-center justify-center text-xs">
               <i class="fas fa-times"></i>
             </button>
+            <div id="receiptAiScanRow" class="hidden mt-2">
+              <button type="button" id="receiptAiScanBtn" onclick="autoScanAttachedReceipt()" class="text-xs bg-[#c96b32]/20 hover:bg-[#c96b32]/30 border border-[#c96b32]/40 text-[#e0834a] font-semibold py-1 px-3 rounded-lg inline-flex items-center gap-1.5 transition">
+                <i class="fas fa-wand-magic-sparkles text-[var(--amber)]"></i> Auto-fill Bill via Groq AI
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1645,6 +1650,8 @@
       if (prompt) prompt.classList.remove('hidden');
       var remBtn = $('receiptRemoveBtn');
       if (remBtn) remBtn.classList.add('hidden');
+      var aiRow = $('receiptAiScanRow');
+      if (aiRow) aiRow.classList.add('hidden');
       var fi = $('billFileInput');
       if (fi) fi.value = '';
       var ci = $('billCameraInput');
@@ -1673,8 +1680,47 @@
         $('receiptPrompt').classList.add('hidden');
         var remBtn = $('receiptRemoveBtn');
         if (remBtn) remBtn.classList.remove('hidden');
+        var aiRow = $('receiptAiScanRow');
+        if (aiRow) aiRow.classList.remove('hidden');
+
+        // If title or amount are still empty, auto-trigger Groq AI scan!
+        if (!$('addBillAmount').value || !$('addBillTitle').value) {
+          autoScanAttachedReceipt();
+        }
       };
       reader.readAsDataURL(file);
+    }
+
+    async function autoScanAttachedReceipt() {
+      if (!state.uploadedReceiptBase64) return toast('Please attach a receipt photo first', 'warning');
+      var btn = $('receiptAiScanBtn');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning with Groq AI…';
+      }
+      try {
+        var resp = await fetch('/api/trip/scan-receipt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: state.uploadedReceiptBase64 })
+        });
+        var res = await resp.json().catch(function(){ return {}; });
+        if (res.ok) {
+          if (res.amount) $('addBillAmount').value = String(res.amount);
+          if (res.title) $('addBillTitle').value = String(res.title);
+          if (res.date) $('addBillDate').value = String(res.date);
+          toast('Groq AI detected: ' + (res.title || 'Bill') + (res.amount ? ' (₹' + res.amount + ')' : ''), 'success');
+        } else {
+          toast('Groq AI notice: ' + (res.error || 'Could not auto-extract fields, please enter details manually.'), 'info');
+        }
+      } catch (err) {
+        toast('AI Scan error: ' + err.message, 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-wand-magic-sparkles text-[var(--amber)]"></i> Auto-fill Bill via Groq AI';
+        }
+      }
     }
 
     async function submitNewBill() {
@@ -1725,20 +1771,34 @@
       $('aiScanModal').classList.add('hidden');
     }
 
-    function runAiReceiptScan(e) {
+    async function runAiReceiptScan(e) {
       var file = e.target.files[0];
       if (!file) return;
       $('aiScanLoading').classList.remove('hidden');
 
       var reader = new FileReader();
-      reader.onload = function(evt) {
+      reader.onload = async function(evt) {
         var imgData = evt.target.result;
-        setTimeout(function() {
+        try {
+          var resp = await fetch('/api/trip/scan-receipt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: imgData })
+          });
+          var res = await resp.json().catch(function(){ return {}; });
           $('aiScanLoading').classList.add('hidden');
           closeAiScanModal();
           openAddBillModal();
-          $('addBillTitle').value = 'Trip Expense';
-          $('addBillAmount').value = '2450';
+
+          if (res.ok) {
+            if (res.amount) $('addBillAmount').value = String(res.amount);
+            if (res.title) $('addBillTitle').value = String(res.title);
+            if (res.date) $('addBillDate').value = String(res.date);
+            toast('Groq AI scanned bill: ' + (res.title || 'Expense') + (res.amount ? ' (₹' + res.amount + ')' : ''), 'success');
+          } else {
+            toast('Groq AI notice: ' + (res.error || 'Could not auto-extract fields, enter details manually.'), 'info');
+          }
+
           state.uploadedReceiptBase64 = imgData;
           var thumb = $('receiptPreviewThumb');
           thumb.src = imgData;
@@ -1746,8 +1806,21 @@
           $('receiptPrompt').classList.add('hidden');
           var remBtn = $('receiptRemoveBtn');
           if (remBtn) remBtn.classList.remove('hidden');
-          toast('AI detected total: ₹2,450.00! Review & save.', 'success');
-        }, 1100);
+          var aiRow = $('receiptAiScanRow');
+          if (aiRow) aiRow.classList.remove('hidden');
+        } catch (err) {
+          $('aiScanLoading').classList.add('hidden');
+          closeAiScanModal();
+          openAddBillModal();
+          state.uploadedReceiptBase64 = imgData;
+          var thumb = $('receiptPreviewThumb');
+          thumb.src = imgData;
+          thumb.classList.remove('hidden');
+          $('receiptPrompt').classList.add('hidden');
+          var remBtn = $('receiptRemoveBtn');
+          if (remBtn) remBtn.classList.remove('hidden');
+          toast('Photo attached! Enter bill details manually.', 'info');
+        }
       };
       reader.readAsDataURL(file);
     }

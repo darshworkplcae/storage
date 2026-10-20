@@ -2034,7 +2034,7 @@ async function openMedia(fileLocalId) {
     var gPreviewUrl = 'https://drive.google.com/file/d/' + encodeURIComponent(curFile.googleFileId) + '/preview';
     var cfg = ftCfg(curFile.name, curFile.mimeType);
     var isHeic = /\.(heic|heif)$/i.test(curFile.name) || (curFile.mimeType && curFile.mimeType.toLowerCase().includes('heic'));
-    var isMov = /\.mov$/i.test(curFile.name) || (curFile.mimeType && curFile.mimeType.toLowerCase().includes('quicktime'));
+    var isPdf = /\.pdf$/i.test(curFile.name) || (curFile.mimeType && curFile.mimeType.toLowerCase().includes('pdf'));
     var isDoc = cfg.cat === 'doc' || /\.(pdf|docx?|xlsx?|pptx?|odt|ods|odp|txt|csv|rtf|json|html|xml|log|md|py|js|css)$/i.test(curFile.name);
     var displayImgUrl = isHeic ? (mediaUrl + '&thumb=1&sz=s2048') : mediaUrl;
 
@@ -2065,8 +2065,8 @@ async function openMedia(fileLocalId) {
 
     var streamToggleBtnHtml = '';
     if (cfg.cat === 'video') {
-      streamToggleBtnHtml = '<button class="btn-ghost xs" id="mediaFastStreamBtn" onclick="window._toggleFastStream()" style="color:#00e5ff;border:1px solid rgba(0,229,255,0.35);border-radius:20px;padding:3px 10px;font-size:0.75rem;cursor:pointer;display:inline-flex;align-items:center;gap:5px" title="Switch between Direct Stream and Fast Google Cloud Stream">' +
-        (_useCloudStreamForCurrent || isMov ? '<i class="fas fa-bolt" style="color:#ffd60a"></i> Cloud Player' : '<i class="fas fa-bolt"></i> Fast Stream') +
+      streamToggleBtnHtml = '<button class="btn-ghost xs" id="mediaFastStreamBtn" onclick="window._toggleFastStream()" style="color:#00e5ff;border:1px solid rgba(0,229,255,0.35);border-radius:20px;padding:3px 10px;font-size:0.75rem;cursor:pointer;display:inline-flex;align-items:center;gap:5px" title="Switch between Direct Stream and Google Cloud Player">' +
+        (_useCloudStreamForCurrent ? '<i class="fas fa-bolt" style="color:#ffd60a"></i> Cloud Player' : '<i class="fas fa-bolt"></i> Fast Stream') +
         '</button>';
     }
 
@@ -2074,8 +2074,7 @@ async function openMedia(fileLocalId) {
     if (cfg.cat === 'image') {
       bodyContent = '<img class="media-img" src="' + displayImgUrl + '" alt="' + esc(curFile.name) + '" data-fallback="' + mediaUrl + '" onload="var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';" onerror="if(this.src!==this.dataset.fallback&&!this.dataset.triedFallback){this.dataset.triedFallback=\'1\';this.src=this.dataset.fallback;}else{var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';}" oncontextmenu="' + (!canDownload ? 'return false;' : '') + '">';
     } else if (cfg.cat === 'video') {
-      // For iPhone .MOV files or when Cloud Stream is enabled, use Google Drive Preview player
-      if (_useCloudStreamForCurrent || isMov) {
+      if (_useCloudStreamForCurrent) {
         bodyContent = '<div class="media-video-container" style="position:relative;width:100%;max-width:1000px;display:flex;flex-direction:column;align-items:center;justify-content:center">' +
           '<div style="width:100%;height:72vh;border-radius:12px;overflow:hidden;background:#000">' +
           '<iframe id="mediaIframePlayer" src="' + gPreviewUrl + '" onload="var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';" style="width:100%;height:100%;border:none" allow="autoplay; encrypted-media" allowfullscreen></iframe>' +
@@ -2089,17 +2088,31 @@ async function openMedia(fileLocalId) {
           '<video id="mediaVideoPlayer" class="media-vid" src="' + mediaUrl + '" controls ' + noDlAttrs + ' autoplay playsinline ' +
           'onloadeddata="var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';" ' +
           'onerror="window._handleVideoError()"></video>' +
+          '<div id="videoErrorFallback" style="display:none;margin-top:12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:12px;padding:14px 20px;text-align:center;max-width:500px">' +
+          '<div style="font-size:0.86rem;color:var(--text1);font-weight:600;margin-bottom:6px"><i class="fas fa-circle-info" style="color:#ffd60a;margin-right:6px"></i>Video codec not supported by this browser</div>' +
+          '<p style="font-size:0.78rem;color:var(--text3);margin-bottom:12px">This video uses a high-efficiency format (.MOV / HEVC) that your browser cannot decode natively. You can download the video or try Google Preview.</p>' +
+          '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">' +
+          (canDownload ? '<a href="' + dlUrl + '" class="btn-primary sm" download><i class="fas fa-download mr-1"></i> Download Video</a>' : '') +
+          '<a href="' + gPreviewUrl + '" target="_blank" rel="noopener" class="btn-ghost sm" style="color:#00e5ff"><i class="fas fa-arrow-up-right-from-square mr-1"></i> Google Preview</a>' +
+          '</div>' +
+          '</div>' +
           '<div style="margin-top:8px;font-size:0.75rem;color:var(--text3);display:flex;align-items:center;gap:6px">' +
-          '<span>Slow loading?</span> <a href="javascript:void(0)" onclick="window._toggleFastStream()" style="color:#00e5ff;text-decoration:underline">Switch to Google Cloud Preview</a>' +
+          '<span>Preview issue?</span> <a href="javascript:void(0)" onclick="window._toggleFastStream()" style="color:#00e5ff;text-decoration:underline">Try Google Cloud Player</a>' +
           '</div>' +
           '</div>';
       }
     } else if (cfg.cat === 'audio') {
       bodyContent = '<audio src="' + mediaUrl + '" controls ' + noDlAttrs + ' autoplay onloadeddata="var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';" style="width:80%;max-width:500px"></audio>';
     } else if (isDoc) {
-      bodyContent = '<div class="media-doc-container" style="width:100%;max-width:1050px;height:82vh;display:flex;align-items:center;justify-content:center;position:relative">' +
-        '<iframe src="' + gPreviewUrl + '" onload="var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';" style="width:100%;height:100%;border:none;border-radius:12px;background:#18181b;box-shadow:0 12px 40px rgba(0,0,0,0.6)" allow="autoplay" allowfullscreen></iframe>' +
-        '</div>';
+      if (isPdf) {
+        bodyContent = '<div class="media-doc-container" style="width:100%;max-width:1050px;height:82vh;display:flex;align-items:center;justify-content:center;position:relative">' +
+          '<iframe src="' + mediaUrl + '#toolbar=1" onload="var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';" style="width:100%;height:100%;border:none;border-radius:12px;background:#18181b;box-shadow:0 12px 40px rgba(0,0,0,0.6)" allow="fullscreen"></iframe>' +
+          '</div>';
+      } else {
+        bodyContent = '<div class="media-doc-container" style="width:100%;max-width:1050px;height:82vh;display:flex;align-items:center;justify-content:center;position:relative">' +
+          '<iframe src="' + gPreviewUrl + '" onload="var s=document.getElementById(\'mediaLoadingSpinner\');if(s)s.style.display=\'none\';" style="width:100%;height:100%;border:none;border-radius:12px;background:#18181b;box-shadow:0 12px 40px rgba(0,0,0,0.6)" allow="autoplay" allowfullscreen></iframe>' +
+          '</div>';
+      }
     } else {
       bodyContent = '<div style="text-align:center;padding:2.5rem;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:16px;max-width:450px">' +
         '<i class="fas ' + cfg.icon + '" style="font-size:3.5rem;color:' + cfg.col + ';margin-bottom:1rem"></i>' +
@@ -2140,6 +2153,8 @@ async function openMedia(fileLocalId) {
   };
 
   window._handleVideoError = function() {
+    var spinner = document.getElementById('mediaLoadingSpinner');
+    if (spinner) spinner.style.display = 'none';
     var v = document.getElementById('mediaVideoPlayer');
     if (v && !v.dataset.retried) {
       v.dataset.retried = '1';
@@ -2147,9 +2162,8 @@ async function openMedia(fileLocalId) {
       v.load();
       return;
     }
-    _useCloudStreamForCurrent = true;
-    renderCurrentFile(curIdx);
-    toast('Switched to Cloud Stream for smooth playback', 'info', 3000);
+    var fb = document.getElementById('videoErrorFallback');
+    if (fb) fb.style.display = 'block';
   };
 
   window._mediaNavPrev = function() {

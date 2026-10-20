@@ -769,6 +769,19 @@ function folderCard(f){
   </div>`;
 }
 
+const _thumbMemCache = new Map();
+function getCachedThumb(key) {
+  if (!key) return null;
+  if (_thumbMemCache.has(key)) return _thumbMemCache.get(key);
+  try {
+    const val = localStorage.getItem(key);
+    _thumbMemCache.set(key, val);
+    return val;
+  } catch(e) {
+    return null;
+  }
+}
+
 function fileCard(f){
   const cfg=ftCfg(f.name,f.mimeType);
   const isMedia=['image','video','audio'].includes(cfg.cat);
@@ -800,12 +813,12 @@ function fileCard(f){
     </div>
     ${isImage ? `
       <div class="fg-thumb-wrap">
-        <img class="fg-thumb" src="${(localStorage.getItem('td_ithumb_' + f.googleFileId) || localStorage.getItem('td_ithumb_' + f.id)) || thumbUrl}" alt="${esc(f.name)}" loading="lazy" decoding="async" data-col="${cfg.col}" data-icon="${cfg.icon}" onerror="handleImageThumbFallback(this)">
+        <img class="fg-thumb" src="${(getCachedThumb('td_ithumb_' + f.googleFileId) || getCachedThumb('td_ithumb_' + f.id)) || thumbUrl}" alt="${esc(f.name)}" loading="lazy" decoding="async" data-col="${cfg.col}" data-icon="${cfg.icon}" onerror="handleImageThumbFallback(this)">
         <div class="thumb-hover-overlay"><i class="fas fa-eye"></i></div>
       </div>
     ` : isVideo ? `
       <div class="fg-thumb-wrap video-thumb-wrap">
-        <img class="fg-thumb video-fg-thumb" src="${(localStorage.getItem('td_vthumb_' + f.googleFileId) || localStorage.getItem('td_vthumb_' + f.id)) || thumbUrl}" alt="${esc(f.name)}" loading="lazy" decoding="async" data-vid-url="${previewUrl}" data-vid-id="${esc(f.id)}" data-gid="${esc(f.googleFileId)}" onerror="handleVideoThumbFallback(this)">
+        <img class="fg-thumb video-fg-thumb" src="${(getCachedThumb('td_vthumb_' + f.googleFileId) || getCachedThumb('td_vthumb_' + f.id)) || thumbUrl}" alt="${esc(f.name)}" loading="lazy" decoding="async" data-vid-url="${previewUrl}" data-vid-id="${esc(f.id)}" data-gid="${esc(f.googleFileId)}" onerror="handleVideoThumbFallback(this)">
         <div class="video-play-badge"><i class="fas fa-play"></i></div>
         <span class="video-tag-pill">VIDEO</span>
         <div class="thumb-hover-overlay"><i class="fas fa-play"></i></div>

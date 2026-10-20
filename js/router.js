@@ -63,6 +63,7 @@ function navTo(page, driveId, folderId) {
     else if (page==='activity') { if(S.ses.role==='admin') renderActivityPage(); else navTo('files'); }
     else if (page==='settings') { if(S.ses.role==='admin') renderSettingsPage(); else navTo('files'); }
     else if (page==='apikeys')  { if(S.ses.role==='admin') renderApiKeysPage(); else navTo('files'); }
+    else if (page==='inside-drive') { if(S.ses.role==='admin') renderInsideDrivePage(driveId, folderId); else navTo('files'); }
     else if (page==='trip-admin') { if(S.ses.role==='admin') renderTripAdminPage(); else navTo('files'); }
     else if (page==='starred')  renderStarredPage();
     else if (page==='trash')    renderTrashPage();
@@ -77,8 +78,27 @@ function navTo(page, driveId, folderId) {
 
 function updateBreadcrumb(page, driveId, folderId) {
   var el = $('breadcrumb'); if(!el) return;
-  var labels = {files:'All Files',quota:'Quota Tracker',recent:'Recent',starred:'Starred',trash:'Recycle Bin',activity:'Activity Log',settings:'Setting',apikeys:'API Keys'};
+  var labels = {files:'All Files',quota:'Quota Tracker',recent:'Recent',starred:'Starred',trash:'Recycle Bin',activity:'Activity Log',settings:'Setting',apikeys:'API Keys','trip-admin':'TripSplit','inside-drive':'Inside Drive'};
   var parts = [];
+
+  if (page === 'inside-drive') {
+    parts.push('<span class="bc-item' + (!driveId ? ' active' : '') + '" onclick="navTo(\'inside-drive\')" style="color:#00e5ff"><i class="fas fa-hard-drive mr-1"></i> Inside Drive</span>');
+    if (driveId) {
+      var drv = (S.db && S.db.drives || []).find(function(d){ return d.id === driveId; });
+      parts.push('<i class="fas fa-chevron-right bc-sep"></i>');
+      parts.push('<span class="bc-item' + (!folderId || folderId === 'root' ? ' active' : '') + '" onclick="navTo(\'inside-drive\',\'' + esc(driveId) + '\',\'root\')" style="color:' + (drv ? drv.color : '#00e5ff') + '">' + esc(drv ? drv.name : 'Drive') + ' (Root)</span>');
+      if (folderId && folderId !== 'root') {
+        var rawChain = window._rawDriveFolderChain || [];
+        rawChain.forEach(function(item) {
+          parts.push('<i class="fas fa-chevron-right bc-sep"></i>');
+          parts.push('<span class="bc-item' + (item.id === folderId ? ' active' : '') + '" onclick="navTo(\'inside-drive\',\'' + esc(driveId) + '\',\'' + esc(item.id) + '\')">' + esc(item.name) + '</span>');
+        });
+      }
+    }
+    el.innerHTML = parts.join('');
+    return;
+  }
+
   if(driveId) {
     var drive = (S.db&&S.db.drives||[]).find(function(d){return d.id===driveId;});
     parts.push('<span class="bc-item" onclick="navTo(\'files\')" style="color:var(--text2)">All Files</span>');
@@ -103,7 +123,7 @@ function getFolderChain(folderId) {
 function handleInitialHash() {
   var h = window.location.hash.replace('#/','').split('/').filter(Boolean);
   if(!h.length||h[0]==='') { navTo('files'); return; }
-  var valid = ['files','quota','recent','starred','trash','activity','settings','apikeys','trip-admin'];
+  var valid = ['files','quota','recent','starred','trash','activity','settings','apikeys','trip-admin','inside-drive'];
   var page = h[0], driveId = h[1]||null, folderId = h[2]||null;
   navTo(valid.indexOf(page)>=0?page:'files', driveId, folderId);
 }
