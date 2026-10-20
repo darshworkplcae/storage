@@ -32,6 +32,24 @@
     };
   }
 
+  function getRawDownloadUrl(fileId, driveId, fileName, inline) {
+    var tok = (typeof S !== 'undefined' && S.ses && S.ses.token) ? S.ses.token : '';
+    var dTok = (typeof getDriveUnlockToken === 'function') ? getDriveUnlockToken(driveId) : '';
+    return `/api/download/${encodeURIComponent(fileId)}?driveId=${encodeURIComponent(driveId || '')}` +
+      (fileName ? `&name=${encodeURIComponent(fileName)}` : '') +
+      (inline ? `&inline=1` : '') +
+      (tok ? `&token=${encodeURIComponent(tok)}` : '') +
+      (dTok ? `&driveToken=${encodeURIComponent(dTok)}` : '');
+  }
+
+  function getRawThumbUrl(fileId, driveId) {
+    var tok = (typeof S !== 'undefined' && S.ses && S.ses.token) ? S.ses.token : '';
+    var dTok = (typeof getDriveUnlockToken === 'function') ? getDriveUnlockToken(driveId) : '';
+    return `/api/thumb/${encodeURIComponent(fileId)}?driveId=${encodeURIComponent(driveId || '')}` +
+      (tok ? `&token=${encodeURIComponent(tok)}` : '') +
+      (dTok ? `&driveToken=${encodeURIComponent(dTok)}` : '');
+  }
+
   function injectStyles() {
     if (document.getElementById('insideDriveResponsiveStyles')) return;
     var st = document.createElement('style');
@@ -44,6 +62,7 @@
       .raw-file-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:.75rem .9rem; border-radius:10px; background:rgba(255,255,255,0.02); border:1px solid var(--border); transition:all .15s ease; }
       .raw-file-row:hover { background:rgba(255,255,255,0.05); border-color:rgba(0,229,255,0.3); }
       .raw-btn-touch { min-height:36px; padding:6px 12px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; gap:6px; font-weight:600; cursor:pointer; }
+      .raw-thumb-img { width:100%; height:100%; object-fit:cover; display:block; border-radius:8px; }
 
       @media (max-width: 640px) {
         .raw-drives-grid { grid-template-columns:1fr; gap:.9rem; }
@@ -317,7 +336,7 @@
       return `
         <div class="raw-file-row" onclick="navTo('inside-drive', '${_esc(_rawCurrentDriveId)}', '${_esc(f.id)}')" style="cursor:pointer">
           <div class="raw-file-row-main" style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
-            <i class="fas fa-folder" style="font-size:1.4rem;color:#f59e0b;flex-shrink:0"></i>
+            <i class="fas fa-folder" style="font-size:1.5rem;color:#f59e0b;flex-shrink:0"></i>
             <div style="min-width:0;flex:1">
               <div style="font-weight:600;font-size:.88rem;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_esc(f.name)}">${_esc(f.name)}</div>
               <div style="font-size:.72rem;color:var(--text3)">Folder · Modified ${modDate}</div>
@@ -336,13 +355,24 @@
     var filesHtml = files.map(function (f) {
       var cfg = (typeof ftCfg === 'function') ? ftCfg(f.name, f.mimeType) : { icon: 'fa-file', col: '#9ca3af', cat: 'file' };
       var modDate = f.modifiedTime ? new Date(f.modifiedTime).toLocaleDateString() : '—';
-      var dlUrl = `/api/download/${encodeURIComponent(f.id)}?driveId=${encodeURIComponent(_rawCurrentDriveId)}&name=${encodeURIComponent(f.name)}`;
+      var dlUrl = getRawDownloadUrl(f.id, _rawCurrentDriveId, f.name, false);
+      var thumbUrl = getRawThumbUrl(f.id, _rawCurrentDriveId);
       var canStream = ['image', 'video', 'audio', 'doc'].includes(cfg.cat);
+      var hasThumb = ['image', 'video', 'doc'].includes(cfg.cat) || !!f.thumbnailLink;
 
       return `
         <div class="raw-file-row">
           <div class="raw-file-row-main" style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
-            <i class="fas ${cfg.icon}" style="font-size:1.3rem;color:${cfg.col};flex-shrink:0"></i>
+            ${hasThumb ? `
+              <div style="width:38px;height:38px;border-radius:8px;overflow:hidden;background:rgba(255,255,255,0.04);flex-shrink:0;display:flex;align-items:center;justify-content:center">
+                <img src="${thumbUrl}" alt="${_esc(f.name)}" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;color:${cfg.col}">
+                  <i class="fas ${cfg.icon}" style="font-size:1.2rem"></i>
+                </div>
+              </div>
+            ` : `
+              <i class="fas ${cfg.icon}" style="font-size:1.3rem;color:${cfg.col};flex-shrink:0"></i>
+            `}
             <div style="min-width:0;flex:1">
               <div style="font-weight:600;font-size:.88rem;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_esc(f.name)}">${_esc(f.name)}</div>
               <div style="font-size:.72rem;color:var(--text3)">${_fmt(f.size || 0)} · Modified ${modDate}</div>
@@ -378,15 +408,27 @@
 
     var filesHtml = files.map(function (f) {
       var cfg = (typeof ftCfg === 'function') ? ftCfg(f.name, f.mimeType) : { icon: 'fa-file', col: '#9ca3af', cat: 'file' };
-      var dlUrl = `/api/download/${encodeURIComponent(f.id)}?driveId=${encodeURIComponent(_rawCurrentDriveId)}&name=${encodeURIComponent(f.name)}`;
+      var dlUrl = getRawDownloadUrl(f.id, _rawCurrentDriveId, f.name, false);
+      var thumbUrl = getRawThumbUrl(f.id, _rawCurrentDriveId);
       var canStream = ['image', 'video', 'audio', 'doc'].includes(cfg.cat);
+      var hasThumb = ['image', 'video', 'doc'].includes(cfg.cat) || !!f.thumbnailLink;
 
       return `
-        <div class="fg-card" style="padding:1rem .8rem;text-align:center;display:flex;flex-direction:column;justify-content:space-between">
+        <div class="fg-card" style="padding:.9rem .8rem;text-align:center;display:flex;flex-direction:column;justify-content:space-between">
           <div>
-            <div style="font-size:2.5rem;color:${cfg.col};margin-bottom:.4rem"><i class="fas ${cfg.icon}"></i></div>
-            <div class="fg-name" style="font-weight:600;font-size:.85rem">${_esc(f.name)}</div>
-            <div style="font-size:.72rem;color:var(--text3);margin-top:2px">${_fmt(f.size || 0)}</div>
+            ${hasThumb ? `
+              <div class="fg-thumb-wrap" style="height:120px;position:relative;border-radius:10px;overflow:hidden;background:rgba(255,255,255,0.035);display:flex;align-items:center;justify-content:center;margin-bottom:.6rem;cursor:pointer" onclick="window._openRawPreview('${_esc(f.id)}', '${_esc(f.name)}', '${_esc(f.mimeType)}')">
+                <img class="raw-thumb-img" src="${thumbUrl}" alt="${_esc(f.name)}" loading="lazy" decoding="async" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:2.5rem;color:${cfg.col}">
+                  <i class="fas ${cfg.icon}"></i>
+                </div>
+                ${cfg.cat === 'video' ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.3)"><i class="fas fa-play" style="color:#fff;font-size:1.4rem;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.6))"></i></div>` : ''}
+              </div>
+            ` : `
+              <div style="font-size:2.5rem;color:${cfg.col};margin-bottom:.4rem"><i class="fas ${cfg.icon}"></i></div>
+            `}
+            <div class="fg-name" style="font-weight:600;font-size:.85rem;line-height:1.3" title="${_esc(f.name)}">${_esc(f.name)}</div>
+            <div style="font-size:.72rem;color:var(--text3);margin-top:3px">${_fmt(f.size || 0)}</div>
           </div>
           <div style="display:flex;gap:6px;justify-content:center;margin-top:.8rem">
             ${canStream ? `<button class="btn-ghost xs" style="color:#00e5ff" onclick="window._openRawPreview('${_esc(f.id)}', '${_esc(f.name)}', '${_esc(f.mimeType)}')"><i class="fas fa-play"></i></button>` : ''}
@@ -398,7 +440,7 @@
     }).join('');
 
     return `
-      <div class="file-grid" style="grid-template-columns:repeat(auto-fill, minmax(150px, 1fr));gap:1rem">
+      <div class="file-grid" style="grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));gap:1rem">
         ${foldersHtml}
         ${filesHtml}
       </div>
@@ -426,8 +468,8 @@
   };
 
   window._openRawPreview = function (fileId, fileName, mimeType) {
-    var dlUrl = `/api/download/${encodeURIComponent(fileId)}?driveId=${encodeURIComponent(_rawCurrentDriveId)}&name=${encodeURIComponent(fileName)}`;
-    var mediaUrl = `${dlUrl}&inline=1`;
+    var dlUrl = getRawDownloadUrl(fileId, _rawCurrentDriveId, fileName, false);
+    var mediaUrl = getRawDownloadUrl(fileId, _rawCurrentDriveId, fileName, true);
     var cfg = (typeof ftCfg === 'function') ? ftCfg(fileName, mimeType) : { icon: 'fa-file', col: '#9ca3af', cat: 'file' };
 
     var existingOv = document.querySelector('.media-ov');
@@ -442,7 +484,12 @@
     } else if (cfg.cat === 'video') {
       bodyHtml = `
         <div class="media-video-container" style="position:relative;width:100%;max-width:1000px;display:flex;flex-direction:column;align-items:center;justify-content:center">
-          <video id="rawVideoPlayer" class="media-vid" src="${mediaUrl}" controls autoplay playsinline onloadeddata="var s=document.getElementById('mediaLoadingSpinner');if(s)s.style.display='none';"></video>
+          <video id="rawVideoPlayer" class="media-vid" src="${mediaUrl}" controls autoplay playsinline onloadeddata="var s=document.getElementById('mediaLoadingSpinner');if(s)s.style.display='none';" onerror="var fb=document.getElementById('rawVidFallback');if(fb)fb.style.display='block';var s=document.getElementById('mediaLoadingSpinner');if(s)s.style.display='none';"></video>
+          <div id="rawVidFallback" style="display:none;margin-top:12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:12px;padding:14px 20px;text-align:center;max-width:480px">
+            <div style="font-size:0.86rem;color:var(--text1);font-weight:600;margin-bottom:6px"><i class="fas fa-circle-info" style="color:#ffd60a;margin-right:6px"></i>Video codec not supported natively</div>
+            <p style="font-size:0.78rem;color:var(--text3);margin-bottom:12px">This video uses a format (.MOV / HEVC) not natively decoded by this browser. Download it directly to play in VLC or local player.</p>
+            <a href="${dlUrl}" class="btn-primary sm" download="${_esc(fileName)}"><i class="fas fa-download mr-1"></i> Download Video</a>
+          </div>
         </div>
       `;
     } else if (cfg.cat === 'audio') {

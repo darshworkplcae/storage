@@ -24,9 +24,6 @@ function renderSidebarProfile(){
 
 function getAllowedDriveIds(){
   if(!S.ses||!S.ses.token){
-    if (S.db && Array.isArray(S.db.drives) && S.db.drives.length) {
-      return S.db.drives.map(d => d.id);
-    }
     if (typeof getOpenDriveIds === 'function') {
       return getOpenDriveIds(S.db);
     }

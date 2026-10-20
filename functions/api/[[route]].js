@@ -519,15 +519,15 @@ async function hDB(req,env){
     });
   }
 
-  // Guest visitor: Return all connected drives so mobile visitors can view and unlock them!
-  const allDrives = (db.drives||[]).map(sDrv);
-  const guestDrives = allDrives;
+  // Guest visitor: Return only Open Drives (isOpenDrive: true or in openDriveIds)
+  // Private drives (not open) must NEVER be visible to guests.
+  const guestDrives = (db.drives||[]).filter(d => openIds.includes(d.id)).map(sDrv);
   const guestDriveIds = guestDrives.map(d => d.id);
 
-  // Check which guest drives are unlocked (either open, have no password, or token valid)
+  // Check which guest drives are unlocked (either have no password, or token valid)
   const unlockedDriveIds = new Set();
   for (const d of guestDrives) {
-    if (!d.hasPassword || openIds.includes(d.id)) {
+    if (!d.hasPassword) {
       unlockedDriveIds.add(d.id);
     } else {
       const isUnlocked = await vDriveToken(req, env, d.id);
