@@ -63,7 +63,17 @@ function navTo(page, driveId, folderId) {
     else if (page==='activity') { if(S.ses.role==='admin') renderActivityPage(); else navTo('files'); }
     else if (page==='settings') { if(S.ses.role==='admin') renderSettingsPage(); else navTo('files'); }
     else if (page==='apikeys')  { if(S.ses.role==='admin') renderApiKeysPage(); else navTo('files'); }
-    else if (page==='inside-drive') { if(S.ses.role==='admin') renderInsideDrivePage(driveId, folderId); else navTo('files'); }
+    else if (page==='inside-drive') {
+      if(S.ses.role==='admin') {
+        if (typeof renderInsideDrivePage === 'function') {
+          renderInsideDrivePage(driveId, folderId).catch(function(err) {
+            console.error('[Router] Inside Drive error:', err);
+            var el = $('pageContent');
+            if (el) el.innerHTML = '<div class="inner-page" style="text-align:center;padding:3rem 1rem"><div style="color:var(--danger);font-size:2rem;margin-bottom:1rem"><i class="fas fa-triangle-exclamation"></i></div><h3>Error loading Inside Drive</h3><p style="color:var(--text3);font-size:.85rem;margin:8px 0 16px">' + esc(err.message||err) + '</p><button class="btn btn-primary" onclick="navTo(\'inside-drive\')">Retry</button></div>';
+          });
+        }
+      } else navTo('files');
+    }
     else if (page==='trip-admin') { if(S.ses.role==='admin') renderTripAdminPage(); else navTo('files'); }
     else if (page==='starred')  renderStarredPage();
     else if (page==='trash')    renderTrashPage();

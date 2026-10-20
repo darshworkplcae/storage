@@ -10,16 +10,76 @@
   var _rawCurrentFolderId = 'root';
   var _rawIsListMode = true;
 
+  function _fmt(bytes) {
+    if (typeof fmt === 'function') return fmt(bytes);
+    if (!bytes || bytes === 0) return '0 B';
+    var k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  function _esc(s) {
+    if (typeof esc === 'function') return esc(s);
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function _debounce(fn, ms) {
+    var t;
+    return function () {
+      var ctx = this, args = arguments;
+      clearTimeout(t);
+      t = setTimeout(function () { fn.apply(ctx, args); }, ms || 200);
+    };
+  }
+
+  function injectStyles() {
+    if (document.getElementById('insideDriveResponsiveStyles')) return;
+    var st = document.createElement('style');
+    st.id = 'insideDriveResponsiveStyles';
+    st.textContent = `
+      .raw-container { width:100%; max-width:1200px; margin:0 auto; padding:.5rem 0 2rem; }
+      .raw-drives-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); gap:1.2rem; }
+      .raw-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:.75rem; margin-bottom:1.2rem; background:rgba(255,255,255,0.025); border:1px solid var(--border); border-radius:14px; padding:.75rem 1rem; }
+      .raw-search-wrap { position:relative; width:240px; }
+      .raw-file-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:.75rem .9rem; border-radius:10px; background:rgba(255,255,255,0.02); border:1px solid var(--border); transition:all .15s ease; }
+      .raw-file-row:hover { background:rgba(255,255,255,0.05); border-color:rgba(0,229,255,0.3); }
+      .raw-btn-touch { min-height:36px; padding:6px 12px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; gap:6px; font-weight:600; cursor:pointer; }
+
+      @media (max-width: 640px) {
+        .raw-drives-grid { grid-template-columns:1fr; gap:.9rem; }
+        .raw-toolbar { flex-direction:column; align-items:stretch; gap:.65rem; padding:.75rem; }
+        .raw-toolbar-left { display:flex; align-items:center; justify-content:space-between; width:100%; flex-wrap:wrap; gap:8px; }
+        .raw-toolbar-right { display:flex; align-items:center; justify-content:space-between; width:100%; gap:8px; }
+        .raw-search-wrap { width:100%; order:2; }
+        .raw-file-row { flex-direction:column; align-items:flex-start; gap:8px; padding:.75rem; }
+        .raw-file-row-main { width:100%; }
+        .raw-file-row-acts { width:100%; justify-content:flex-end; border-top:1px solid rgba(255,255,255,0.06); padding-top:6px; }
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
   window.renderInsideDrivePage = async function (driveId, folderId) {
+    injectStyles();
     var pc = document.getElementById('pageContent');
     if (!pc) return;
 
     if (!S.ses || S.ses.role !== 'admin') {
-      navTo('files');
+      if (typeof navTo === 'function') navTo('files');
       return;
     }
 
-    // Top action bar buttons (hide regular upload buttons for Inside Drive)
+    // Ensure database is loaded
+    if (typeof loadDB === 'function' && (!S.db || !S.db.drives)) {
+      pc.innerHTML = '<div class="loading-full"><i class="fas fa-spinner fa-spin"></i><p style="margin-top:10px;font-size:.85rem;color:var(--text3)">Connecting to database…</p></div>';
+      try {
+        await loadDB();
+      } catch (e) {
+        console.warn('loadDB error in inside-drive:', e);
+      }
+    }
+
+    // Hide standard upload action buttons in top bar while browsing Inside Drive
     var uploadBtn = document.getElementById('uploadBtn');
     var folderUpBtn = document.getElementById('folderUpBtn');
     var newFolderBtn = document.getElementById('newFolderBtn');
@@ -50,22 +110,23 @@
       var used = d.usedBytes || 0;
       var cap = d.totalBytes || 0;
       var pct = cap ? Math.min(100, Math.round((used / cap) * 100)) : 0;
+      var dColor = d.color || '#00e5ff';
 
       return `
-        <div class="fg-card drive-card-item" onclick="navTo('inside-drive', '${esc(d.id)}', 'root')" style="position:relative;cursor:pointer">
-          <div style="position:absolute;top:10px;right:10px;background:rgba(0,229,255,0.12);border:1px solid rgba(0,229,255,0.3);border-radius:12px;padding:2px 8px;font-size:.68rem;font-weight:700;color:#00e5ff">
+        <div class="fg-card drive-card-item" onclick="navTo('inside-drive', '${_esc(d.id)}', 'root')" style="position:relative;cursor:pointer;padding:1.4rem 1.1rem;border:1px solid rgba(0,229,255,0.22);border-radius:16px;background:rgba(255,255,255,0.02)">
+          <div style="position:absolute;top:12px;right:12px;background:rgba(0,229,255,0.12);border:1px solid rgba(0,229,255,0.3);border-radius:12px;padding:2px 8px;font-size:.68rem;font-weight:700;color:#00e5ff">
             <i class="fas fa-hard-drive"></i> Root Explorer
           </div>
           <div class="fg-icon xl" style="display:flex;align-items:center;justify-content:center;margin-top:2px">
-            <i class="fas fa-database" style="font-size:2.8rem;color:${esc(d.color || '#00e5ff')}"></i>
+            <i class="fas fa-database" style="font-size:2.8rem;color:${_esc(dColor)}"></i>
           </div>
-          <div class="fg-name" style="font-weight:700;font-size:1.05rem;margin-top:.4rem">${esc(d.name)}</div>
-          <div style="font-size:.78rem;color:var(--text3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.email || '')}</div>
-          <div class="fg-meta" style="margin-top:.6rem">${formatBytes(used)} / ${cap ? formatBytes(cap) : '∞'} (${pct}%)</div>
-          <div class="dc-bar" style="margin:.45rem 0 .7rem;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden">
-            <div class="dc-fill" style="height:100%;border-radius:3px;width:${pct}%;background:${esc(d.color || '#00e5ff')};box-shadow:0 0 8px ${esc(d.color || '#00e5ff')}66"></div>
+          <div class="fg-name" style="font-weight:700;font-size:1.1rem;margin-top:.6rem">${_esc(d.name)}</div>
+          <div style="font-size:.78rem;color:var(--text3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(d.email || '')}</div>
+          <div class="fg-meta" style="margin-top:.6rem;font-size:.82rem">${_fmt(used)} / ${cap ? _fmt(cap) : '∞'} (${pct}%)</div>
+          <div class="dc-bar" style="margin:.45rem 0 .8rem;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden">
+            <div class="dc-fill" style="height:100%;border-radius:3px;width:${pct}%;background:${_esc(dColor)};box-shadow:0 0 8px ${_esc(dColor)}66"></div>
           </div>
-          <button class="btn-primary sm" style="width:100%;margin-top:4px" onclick="event.stopPropagation();navTo('inside-drive', '${esc(d.id)}', 'root')">
+          <button class="btn-primary sm raw-btn-touch" style="width:100%;margin-top:4px" onclick="event.stopPropagation();navTo('inside-drive', '${_esc(d.id)}', 'root')">
             <i class="fas fa-folder-tree mr-1"></i> Browse Full Root Drive
           </button>
         </div>
@@ -73,7 +134,7 @@
     }).join('');
 
     pc.innerHTML = `
-      <div class="inner-page">
+      <div class="inner-page raw-container">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1.5rem">
           <div>
             <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,229,255,0.12);border:1px solid rgba(0,229,255,0.3);color:#00e5ff;border-radius:20px;padding:3px 12px;font-size:.74rem;font-weight:700;margin-bottom:6px">
@@ -83,13 +144,13 @@
               <i class="fas fa-hard-drive" style="color:#00e5ff"></i> Inside Drive — Root Explorer
             </h2>
             <p style="color:var(--text3);font-size:.85rem;margin-top:4px">
-              Live Google Drive explorer. Browse all folders, uploaded items, and root files across your connected Google accounts directly via Google APIs.
+              Direct live Google Drive API explorer for administrators. View all account files, root folders, and system directories without affecting normal TeleDrive storage.
             </p>
           </div>
         </div>
 
-        <div class="file-grid" style="grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:1.2rem">
-          ${cardsHtml || '<div class="empty-state">No connected Google Drives found.</div>'}
+        <div class="raw-drives-grid">
+          ${cardsHtml || '<div class="empty-state" style="grid-column:1/-1;text-align:center;padding:3rem 1rem">No connected Google Drives found. Connect a drive in Settings.</div>'}
         </div>
       </div>
     `;
@@ -101,22 +162,22 @@
     var driveColor = drv ? (drv.color || '#00e5ff') : '#00e5ff';
 
     pc.innerHTML = `
-      <div class="inner-page">
+      <div class="inner-page raw-container">
         <!-- Top Toolbar -->
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;margin-bottom:1.2rem;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:14px;padding:.75rem 1rem">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <button class="btn-ghost sm" onclick="navTo('inside-drive')" style="border-radius:10px">
+        <div class="raw-toolbar">
+          <div class="raw-toolbar-left">
+            <button class="btn-ghost sm raw-btn-touch" onclick="navTo('inside-drive')" style="border-radius:10px">
               <i class="fas fa-arrow-left mr-1"></i> All Drives
             </button>
-            <div style="display:inline-flex;align-items:center;gap:6px;background:${esc(driveColor)}18;border:1px solid ${esc(driveColor)}44;border-radius:20px;padding:3px 12px;font-size:.78rem;font-weight:700;color:${esc(driveColor)}">
-              <i class="fas fa-hard-drive"></i> ${esc(driveName)}
+            <div style="display:inline-flex;align-items:center;gap:6px;background:${_esc(driveColor)}18;border:1px solid ${_esc(driveColor)}44;border-radius:20px;padding:3px 12px;font-size:.78rem;font-weight:700;color:${_esc(driveColor)}">
+              <i class="fas fa-hard-drive"></i> ${_esc(driveName)}
             </div>
             <span id="rawItemCountBadge" style="font-size:.78rem;color:var(--text3)"></span>
           </div>
 
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <div style="position:relative;width:220px">
-              <input type="text" id="rawSearchInput" class="inp xs" placeholder="Filter files in folder…" style="width:100%;padding-left:28px;height:32px;font-size:.8rem;border-radius:8px">
+          <div class="raw-toolbar-right">
+            <div class="raw-search-wrap">
+              <input type="text" id="rawSearchInput" class="inp xs" placeholder="Filter files in folder…" style="width:100%;padding-left:28px;height:34px;font-size:.82rem;border-radius:8px">
               <i class="fas fa-search" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:.72rem;color:var(--text3);pointer-events:none"></i>
             </div>
             <button class="icon-btn sm" onclick="window._refreshRawFolder()" title="Refresh Folder">
@@ -136,7 +197,7 @@
 
     var searchInp = document.getElementById('rawSearchInput');
     if (searchInp) {
-      searchInp.addEventListener('input', debounce(function (e) {
+      searchInp.addEventListener('input', _debounce(function (e) {
         _rawSearchTerm = (e.target.value || '').toLowerCase().trim();
         renderRawItems();
       }, 200));
@@ -184,7 +245,9 @@
             window._rawDriveFolderChain.push({ id: folderId, name: res.currentFolderName || folderId });
           }
         }
-        updateBreadcrumb('inside-drive', driveId, folderId);
+        if (typeof updateBreadcrumb === 'function') {
+          updateBreadcrumb('inside-drive', driveId, folderId);
+        }
       }
 
       renderRawItems();
@@ -196,7 +259,7 @@
           <div style="text-align:center;padding:4rem 1rem">
             <div style="font-size:2.5rem;color:var(--danger);margin-bottom:1rem"><i class="fas fa-triangle-exclamation"></i></div>
             <h3 style="font-weight:700;margin-bottom:.5rem">Failed to load Google Drive files</h3>
-            <p style="color:var(--text3);font-size:.85rem;max-width:500px;margin:0 auto 1.5rem">${esc(err.message)}</p>
+            <p style="color:var(--text3);font-size:.85rem;max-width:500px;margin:0 auto 1.5rem">${_esc(err.message)}</p>
             <button class="btn-primary sm" onclick="window._refreshRawFolder()"><i class="fas fa-rotate-right mr-1"></i> Retry</button>
           </div>
         `;
@@ -252,17 +315,17 @@
     var foldersHtml = folders.map(function (f) {
       var modDate = f.modifiedTime ? new Date(f.modifiedTime).toLocaleDateString() : '—';
       return `
-        <div class="file-row" onclick="navTo('inside-drive', '${esc(_rawCurrentDriveId)}', '${esc(f.id)}')" style="cursor:pointer;padding:.65rem .85rem">
-          <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
-            <i class="fas fa-folder" style="font-size:1.3rem;color:#f59e0b;flex-shrink:0"></i>
-            <div style="min-width:0">
-              <div style="font-weight:600;font-size:.88rem;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</div>
+        <div class="raw-file-row" onclick="navTo('inside-drive', '${_esc(_rawCurrentDriveId)}', '${_esc(f.id)}')" style="cursor:pointer">
+          <div class="raw-file-row-main" style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
+            <i class="fas fa-folder" style="font-size:1.4rem;color:#f59e0b;flex-shrink:0"></i>
+            <div style="min-width:0;flex:1">
+              <div style="font-weight:600;font-size:.88rem;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_esc(f.name)}">${_esc(f.name)}</div>
               <div style="font-size:.72rem;color:var(--text3)">Folder · Modified ${modDate}</div>
             </div>
           </div>
-          <div style="display:flex;align-items:center;gap:8px" onclick="event.stopPropagation()">
-            ${f.webViewLink ? `<a href="${esc(f.webViewLink)}" target="_blank" rel="noopener" class="icon-btn xs" title="Open in Google Drive"><i class="fas fa-arrow-up-right-from-square"></i></a>` : ''}
-            <button class="btn-ghost xs" onclick="navTo('inside-drive', '${esc(_rawCurrentDriveId)}', '${esc(f.id)}')">
+          <div class="raw-file-row-acts" style="display:flex;align-items:center;gap:8px" onclick="event.stopPropagation()">
+            ${f.webViewLink ? `<a href="${_esc(f.webViewLink)}" target="_blank" rel="noopener" class="icon-btn xs" title="Open in Google Drive"><i class="fas fa-arrow-up-right-from-square"></i></a>` : ''}
+            <button class="btn-ghost xs raw-btn-touch" onclick="navTo('inside-drive', '${_esc(_rawCurrentDriveId)}', '${_esc(f.id)}')">
               Open <i class="fas fa-chevron-right ml-1"></i>
             </button>
           </div>
@@ -271,32 +334,31 @@
     }).join('');
 
     var filesHtml = files.map(function (f) {
-      var cfg = ftCfg(f.name, f.mimeType);
+      var cfg = (typeof ftCfg === 'function') ? ftCfg(f.name, f.mimeType) : { icon: 'fa-file', col: '#9ca3af', cat: 'file' };
       var modDate = f.modifiedTime ? new Date(f.modifiedTime).toLocaleDateString() : '—';
       var dlUrl = `/api/download/${encodeURIComponent(f.id)}?driveId=${encodeURIComponent(_rawCurrentDriveId)}&name=${encodeURIComponent(f.name)}`;
-      var inlineUrl = `${dlUrl}&inline=1`;
       var canStream = ['image', 'video', 'audio', 'doc'].includes(cfg.cat);
 
       return `
-        <div class="file-row" style="padding:.65rem .85rem">
-          <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
+        <div class="raw-file-row">
+          <div class="raw-file-row-main" style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
             <i class="fas ${cfg.icon}" style="font-size:1.3rem;color:${cfg.col};flex-shrink:0"></i>
-            <div style="min-width:0">
-              <div style="font-weight:600;font-size:.88rem;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</div>
-              <div style="font-size:.72rem;color:var(--text3)">${formatBytes(f.size || 0)} · Modified ${modDate}</div>
+            <div style="min-width:0;flex:1">
+              <div style="font-weight:600;font-size:.88rem;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_esc(f.name)}">${_esc(f.name)}</div>
+              <div style="font-size:.72rem;color:var(--text3)">${_fmt(f.size || 0)} · Modified ${modDate}</div>
             </div>
           </div>
-          <div style="display:flex;align-items:center;gap:6px">
-            ${canStream ? `<button class="btn-ghost xs" style="color:#00e5ff" onclick="window._openRawPreview('${esc(f.id)}', '${esc(f.name)}', '${esc(f.mimeType)}')"><i class="fas fa-play mr-1"></i> Stream</button>` : ''}
-            <a href="${dlUrl}" class="icon-btn xs" download="${esc(f.name)}" title="Download"><i class="fas fa-download"></i></a>
-            ${f.webViewLink ? `<a href="${esc(f.webViewLink)}" target="_blank" rel="noopener" class="icon-btn xs" title="Open in Google Drive"><i class="fas fa-arrow-up-right-from-square"></i></a>` : ''}
+          <div class="raw-file-row-acts" style="display:flex;align-items:center;gap:6px">
+            ${canStream ? `<button class="btn-ghost xs raw-btn-touch" style="color:#00e5ff" onclick="window._openRawPreview('${_esc(f.id)}', '${_esc(f.name)}', '${_esc(f.mimeType)}')"><i class="fas fa-play mr-1"></i> Stream</button>` : ''}
+            <a href="${dlUrl}" class="icon-btn xs" download="${_esc(f.name)}" title="Download"><i class="fas fa-download"></i></a>
+            ${f.webViewLink ? `<a href="${_esc(f.webViewLink)}" target="_blank" rel="noopener" class="icon-btn xs" title="Open in Google Drive"><i class="fas fa-arrow-up-right-from-square"></i></a>` : ''}
           </div>
         </div>
       `;
     }).join('');
 
     return `
-      <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;flex-direction:column;gap:8px">
         ${foldersHtml}
         ${filesHtml}
       </div>
@@ -306,16 +368,16 @@
   function renderGridView(folders, files) {
     var foldersHtml = folders.map(function (f) {
       return `
-        <div class="fg-card" onclick="navTo('inside-drive', '${esc(_rawCurrentDriveId)}', '${esc(f.id)}')" style="cursor:pointer;padding:1.2rem .8rem;text-align:center">
+        <div class="fg-card" onclick="navTo('inside-drive', '${_esc(_rawCurrentDriveId)}', '${_esc(f.id)}')" style="cursor:pointer;padding:1.2rem .8rem;text-align:center">
           <div style="font-size:2.8rem;color:#f59e0b;margin-bottom:.5rem"><i class="fas fa-folder"></i></div>
-          <div class="fg-name" style="font-weight:600;font-size:.88rem">${esc(f.name)}</div>
+          <div class="fg-name" style="font-weight:600;font-size:.88rem">${_esc(f.name)}</div>
           <div style="font-size:.72rem;color:var(--text3);margin-top:2px">Folder</div>
         </div>
       `;
     }).join('');
 
     var filesHtml = files.map(function (f) {
-      var cfg = ftCfg(f.name, f.mimeType);
+      var cfg = (typeof ftCfg === 'function') ? ftCfg(f.name, f.mimeType) : { icon: 'fa-file', col: '#9ca3af', cat: 'file' };
       var dlUrl = `/api/download/${encodeURIComponent(f.id)}?driveId=${encodeURIComponent(_rawCurrentDriveId)}&name=${encodeURIComponent(f.name)}`;
       var canStream = ['image', 'video', 'audio', 'doc'].includes(cfg.cat);
 
@@ -323,20 +385,20 @@
         <div class="fg-card" style="padding:1rem .8rem;text-align:center;display:flex;flex-direction:column;justify-content:space-between">
           <div>
             <div style="font-size:2.5rem;color:${cfg.col};margin-bottom:.4rem"><i class="fas ${cfg.icon}"></i></div>
-            <div class="fg-name" style="font-weight:600;font-size:.85rem">${esc(f.name)}</div>
-            <div style="font-size:.72rem;color:var(--text3);margin-top:2px">${formatBytes(f.size || 0)}</div>
+            <div class="fg-name" style="font-weight:600;font-size:.85rem">${_esc(f.name)}</div>
+            <div style="font-size:.72rem;color:var(--text3);margin-top:2px">${_fmt(f.size || 0)}</div>
           </div>
           <div style="display:flex;gap:6px;justify-content:center;margin-top:.8rem">
-            ${canStream ? `<button class="btn-ghost xs" style="color:#00e5ff" onclick="window._openRawPreview('${esc(f.id)}', '${esc(f.name)}', '${esc(f.mimeType)}')"><i class="fas fa-play"></i></button>` : ''}
-            <a href="${dlUrl}" class="icon-btn xs" download="${esc(f.name)}" title="Download"><i class="fas fa-download"></i></a>
-            ${f.webViewLink ? `<a href="${esc(f.webViewLink)}" target="_blank" rel="noopener" class="icon-btn xs" title="Open in Google Drive"><i class="fas fa-arrow-up-right-from-square"></i></a>` : ''}
+            ${canStream ? `<button class="btn-ghost xs" style="color:#00e5ff" onclick="window._openRawPreview('${_esc(f.id)}', '${_esc(f.name)}', '${_esc(f.mimeType)}')"><i class="fas fa-play"></i></button>` : ''}
+            <a href="${dlUrl}" class="icon-btn xs" download="${_esc(f.name)}" title="Download"><i class="fas fa-download"></i></a>
+            ${f.webViewLink ? `<a href="${_esc(f.webViewLink)}" target="_blank" rel="noopener" class="icon-btn xs" title="Open in Google Drive"><i class="fas fa-arrow-up-right-from-square"></i></a>` : ''}
           </div>
         </div>
       `;
     }).join('');
 
     return `
-      <div class="file-grid" style="grid-template-columns:repeat(auto-fill, minmax(170px, 1fr));gap:1rem">
+      <div class="file-grid" style="grid-template-columns:repeat(auto-fill, minmax(150px, 1fr));gap:1rem">
         ${foldersHtml}
         ${filesHtml}
       </div>
@@ -364,17 +426,9 @@
   };
 
   window._openRawPreview = function (fileId, fileName, mimeType) {
-    var rawFile = {
-      id: fileId,
-      googleFileId: fileId,
-      name: fileName,
-      mimeType: mimeType || 'application/octet-stream',
-      driveId: _rawCurrentDriveId
-    };
-
     var dlUrl = `/api/download/${encodeURIComponent(fileId)}?driveId=${encodeURIComponent(_rawCurrentDriveId)}&name=${encodeURIComponent(fileName)}`;
     var mediaUrl = `${dlUrl}&inline=1`;
-    var cfg = ftCfg(fileName, mimeType);
+    var cfg = (typeof ftCfg === 'function') ? ftCfg(fileName, mimeType) : { icon: 'fa-file', col: '#9ca3af', cat: 'file' };
 
     var existingOv = document.querySelector('.media-ov');
     if (existingOv) existingOv.remove();
@@ -384,7 +438,7 @@
 
     var bodyHtml = '';
     if (cfg.cat === 'image') {
-      bodyHtml = `<img class="media-img" src="${mediaUrl}" alt="${esc(fileName)}" onload="var s=document.getElementById('mediaLoadingSpinner');if(s)s.style.display='none';">`;
+      bodyHtml = `<img class="media-img" src="${mediaUrl}" alt="${_esc(fileName)}" onload="var s=document.getElementById('mediaLoadingSpinner');if(s)s.style.display='none';">`;
     } else if (cfg.cat === 'video') {
       bodyHtml = `
         <div class="media-video-container" style="position:relative;width:100%;max-width:1000px;display:flex;flex-direction:column;align-items:center;justify-content:center">
@@ -399,9 +453,9 @@
       bodyHtml = `
         <div style="text-align:center;padding:2.5rem;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:16px;max-width:450px">
           <i class="fas ${cfg.icon}" style="font-size:3.5rem;color:${cfg.col};margin-bottom:1rem"></i>
-          <div style="font-weight:700;font-size:1.1rem;color:var(--text1);margin-bottom:.4rem">${esc(fileName)}</div>
+          <div style="font-weight:700;font-size:1.1rem;color:var(--text1);margin-bottom:.4rem">${_esc(fileName)}</div>
           <div style="display:flex;gap:8px;justify-content:center;margin-top:1.2rem">
-            <a href="${dlUrl}" class="btn-primary sm" download="${esc(fileName)}"><i class="fas fa-download mr-1"></i> Download File</a>
+            <a href="${dlUrl}" class="btn-primary sm" download="${_esc(fileName)}"><i class="fas fa-download mr-1"></i> Download File</a>
           </div>
         </div>
       `;
@@ -411,10 +465,10 @@
       <div class="media-hd">
         <div class="media-title">
           <i class="fas ${cfg.icon}" style="color:${cfg.col}"></i>
-          <span class="truncate" style="max-width:calc(100vw - 200px)">${esc(fileName)}</span>
+          <span class="truncate" style="max-width:calc(100vw - 160px)">${_esc(fileName)}</span>
         </div>
         <div style="display:flex;gap:.5rem;align-items:center">
-          <a href="${dlUrl}" class="icon-btn" download="${esc(fileName)}" title="Download"><i class="fas fa-download"></i></a>
+          <a href="${dlUrl}" class="icon-btn" download="${_esc(fileName)}" title="Download"><i class="fas fa-download"></i></a>
           <button class="icon-btn" onclick="this.closest('.media-ov').remove()"><i class="fas fa-times"></i></button>
         </div>
       </div>
