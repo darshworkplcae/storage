@@ -103,6 +103,10 @@
       <div class="flex items-center gap-2 shrink-0">
         
         <!-- Logged Out State -->
+        <button id="navCreateUserBtn" onclick="openCreateUserModal()" class="tap-active px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-white font-semibold text-xs flex items-center gap-1.5 border border-white/10 transition shadow-sm">
+          <i class="fas fa-user-plus text-[#e0834a] text-xs"></i>
+          <span>Create User</span>
+        </button>
         <button id="navLoginBtn" onclick="openLoginModal()" class="tap-active px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#c96b32] to-[#b35922] hover:from-[#d6763a] hover:to-[#c26228] text-white font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-[#c96b32]/20 transition">
           <i class="fas fa-arrow-right-to-bracket text-xs"></i>
           <span>Login</span>
@@ -207,10 +211,15 @@
 
       <!-- MEMBER STATUS BAR (Image 4 exact horizontal straight layout) -->
       <div class="mt-5 pt-4 border-t border-[var(--border-subtle)] space-y-2">
-        <div class="flex items-center justify-between text-xs">
-          <span class="font-bold uppercase tracking-wider text-[var(--text-muted)] text-[11px]">
-            Group Members Status (<span id="membersCountSummaryText">7</span> Friends)
-          </span>
+        <div class="flex items-center justify-between text-xs flex-wrap gap-2">
+          <div class="flex items-center gap-2">
+            <span class="font-bold uppercase tracking-wider text-[var(--text-muted)] text-[11px]">
+              Group Members Status (<span id="membersCountSummaryText">0</span> Friends)
+            </span>
+            <button id="btnHeaderAddMember" onclick="openAddMemberModal()" class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl bg-white/5 hover:bg-white/10 text-[#e0834a] font-bold text-[11px] border border-white/10 transition" title="Add another friend to this trip">
+              <i class="fas fa-user-plus text-[10px]"></i> + Add Friend
+            </button>
+          </div>
           <span id="whoAreYouHint" class="text-[11px] text-[var(--clay-light)]">Tap any member to view their status</span>
         </div>
 
@@ -370,6 +379,86 @@
 
   <!-- ==================== MODALS ==================== -->
 
+  <!-- MODAL: CREATE USER / REGISTER -->
+  <div id="createUserModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-4 sm:p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll my-auto">
+      <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-[#c96b32]/20 text-[#e0834a] flex items-center justify-center text-xs font-bold"><i class="fas fa-user-plus"></i></span>
+          <h3 class="font-bold text-white text-sm">Create Trip Account</h3>
+        </div>
+        <button onclick="closeCreateUserModal()" class="text-[var(--text-muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
+      </div>
+
+      <form onsubmit="handleCreateUser(event)" class="space-y-3">
+        <div>
+          <label class="block text-[11px] font-bold text-[var(--text-muted)] uppercase mb-1">Full Name (Display Name)</label>
+          <input type="text" id="regName" required placeholder="e.g. Rohan Bendre" class="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl px-3 py-2 text-xs text-white placeholder-[var(--text-muted)] focus:outline-none focus:border-[#c96b32]">
+        </div>
+        <div>
+          <label class="block text-[11px] font-bold text-[var(--text-muted)] uppercase mb-1">Username (No spaces / lowercase)</label>
+          <input type="text" id="regUsername" required placeholder="e.g. rohan" class="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl px-3 py-2 text-xs text-white placeholder-[var(--text-muted)] focus:outline-none focus:border-[#c96b32]">
+        </div>
+        <div>
+          <label class="block text-[11px] font-bold text-[var(--text-muted)] uppercase mb-1">Password</label>
+          <input type="password" id="regPassword" required placeholder="Choose a password" class="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl px-3 py-2 text-xs text-white placeholder-[var(--text-muted)] focus:outline-none focus:border-[#c96b32]">
+        </div>
+        <div>
+          <label class="block text-[11px] font-bold text-[var(--text-muted)] uppercase mb-1">UPI ID (Optional)</label>
+          <input type="text" id="regUpi" placeholder="e.g. rohan@okaxis" class="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl px-3 py-2 text-xs text-white placeholder-[var(--text-muted)] focus:outline-none focus:border-[#c96b32]">
+        </div>
+        <button type="submit" id="regSubmitBtn" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#c96b32] to-[#b35922] hover:from-[#d6763a] hover:to-[#c26228] text-white font-bold text-xs shadow-md transition flex items-center justify-center gap-1.5 mt-2">
+          <i class="fas fa-check"></i> <span>Create Account & Sign In</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: SELECT TRIP MEMBERS (ATTENDANCE) -->
+  <div id="selectTripMembersModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-4 sm:p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll my-auto">
+      <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-[#c96b32]/20 text-[#e0834a] flex items-center justify-center text-xs font-bold"><i class="fas fa-users"></i></span>
+          <h3 class="font-bold text-white text-sm">Who Joined this Trip?</h3>
+        </div>
+        <button onclick="closeSelectTripMembersModal()" class="text-[var(--text-muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
+      </div>
+      <p class="text-xs text-[var(--text-muted)]">Check all friends who came on this trip. Bills and shares will be divided only among these members.</p>
+      
+      <div class="flex items-center justify-between text-xs pb-1">
+        <button type="button" onclick="selectAllTripMembers(true)" class="text-[#e0834a] hover:underline font-semibold text-[11px]">Select All</button>
+        <button type="button" onclick="selectAllTripMembers(false)" class="text-[var(--text-muted)] hover:underline font-semibold text-[11px]">Clear All</button>
+      </div>
+
+      <div id="selectTripMembersList" class="space-y-1.5 max-h-56 overflow-y-auto custom-scroll pr-1">
+        <!-- Checkboxes injected dynamically -->
+      </div>
+
+      <button onclick="submitTripMembersSelection()" id="btnSubmitTripMembers" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#c96b32] to-[#b35922] hover:from-[#d6763a] hover:to-[#c26228] text-white font-bold text-xs shadow-md transition flex items-center justify-center gap-1.5 mt-2">
+        <i class="fas fa-check"></i> <span>Confirm Trip Members</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD A FRIEND TO TRIP -->
+  <div id="addMemberModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-4 sm:p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll my-auto">
+      <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-[#c96b32]/20 text-[#e0834a] flex items-center justify-center text-xs font-bold"><i class="fas fa-user-plus"></i></span>
+          <h3 class="font-bold text-white text-sm">Add Friend to Trip</h3>
+        </div>
+        <button onclick="closeAddMemberModal()" class="text-[var(--text-muted)] hover:text-white tap-active p-1"><i class="fas fa-times"></i></button>
+      </div>
+      <p class="text-xs text-[var(--text-muted)]">Select any friend who arrived late or was left out to add them to this trip's split.</p>
+
+      <div id="addMemberList" class="space-y-1.5 max-h-60 overflow-y-auto custom-scroll pr-1">
+        <!-- Friends not currently in trip injected dynamically -->
+      </div>
+    </div>
+  </div>
+
   <!-- MODAL: LOGIN -->
   <div id="loginModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl max-w-sm w-full p-4 sm:p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll my-auto">
@@ -402,6 +491,10 @@
         <button onclick="submitLogin()" id="loginSubmitBtn" class="tap-active w-full bg-gradient-to-r from-[#c96b32] to-[#b35922] hover:from-[#d6763a] hover:to-[#c26228] text-white font-bold py-2.5 rounded-xl shadow-lg transition flex items-center justify-center gap-2">
           <span>Sign In</span>
         </button>
+
+        <p class="text-center text-[11px] text-[var(--text-muted)] pt-1">
+          New here? <a href="javascript:void(0)" onclick="closeLoginModal(); openCreateUserModal();" class="text-[#e0834a] hover:underline font-bold">Create User Account</a>
+        </p>
       </div>
     </div>
   </div>
@@ -852,26 +945,79 @@
     // ─── AUTH & LOGIN ─────────────────────────────────────────────────────────
     function updateAuthUI() {
       var loginBtn = $('navLoginBtn');
+      var createUserBtn = $('navCreateUserBtn');
       var userBar = $('navUserBar');
       var unauthBanner = $('unauthBanner');
       var newTripBtn = $('navNewTripBtn');
       var myPaymentsTab = $('tabBtnMyPayments');
 
       if (state.currentUser) {
-        loginBtn.classList.add('hidden');
-        userBar.classList.remove('hidden');
+        if (loginBtn) loginBtn.classList.add('hidden');
+        if (createUserBtn) createUserBtn.classList.add('hidden');
+        if (userBar) userBar.classList.remove('hidden');
         if (unauthBanner) unauthBanner.classList.add('hidden');
         if (newTripBtn) newTripBtn.classList.remove('hidden');
         if (myPaymentsTab) myPaymentsTab.classList.remove('hidden');
-        $('navUserNameDisplay').textContent = state.currentUser.name;
+        var isDarshan = state.currentUser.isAdmin || (state.currentUser.username && state.currentUser.username.toLowerCase() === 'darshan');
+        $('navUserNameDisplay').textContent = state.currentUser.name + (isDarshan ? ' 👑' : '');
         $('navAvatarLetter').textContent = state.currentUser.name[0].toUpperCase();
-        $('dropdownUserFull').textContent = state.currentUser.name + ' (@' + state.currentUser.username + ')';
+        $('dropdownUserFull').textContent = state.currentUser.name + ' (@' + state.currentUser.username + ')' + (isDarshan ? ' [Admin]' : '');
       } else {
-        loginBtn.classList.remove('hidden');
-        userBar.classList.add('hidden');
+        if (loginBtn) loginBtn.classList.remove('hidden');
+        if (createUserBtn) createUserBtn.classList.remove('hidden');
+        if (userBar) userBar.classList.add('hidden');
         if (unauthBanner) unauthBanner.classList.remove('hidden');
         if (newTripBtn) newTripBtn.classList.add('hidden');
         if (myPaymentsTab) myPaymentsTab.classList.add('hidden');
+      }
+    }
+
+    function openCreateUserModal() {
+      $('createUserModal').classList.remove('hidden');
+      setTimeout(function() {
+        var el = $('regName');
+        if (el) el.focus();
+      }, 50);
+    }
+    function closeCreateUserModal() {
+      $('createUserModal').classList.add('hidden');
+    }
+    async function handleCreateUser(e) {
+      if (e) e.preventDefault();
+      var name = $('regName').value.trim();
+      var username = $('regUsername').value.trim();
+      var password = $('regPassword').value;
+      var upiId = ($('regUpi').value || '').trim();
+
+      if (!name || !username || !password) {
+        return toast('Please enter name, username, and password', 'warning');
+      }
+
+      var btn = $('regSubmitBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating account…';
+
+      try {
+        var res = await apiFetch('create-user', {
+          method: 'POST',
+          body: JSON.stringify({ name: name, username: username, password: password, upiId: upiId })
+        });
+        if (res && res.ok && res.token) {
+          state.token = res.token;
+          state.currentUser = res.user;
+          localStorage.setItem('td_trip_token', res.token);
+          closeCreateUserModal();
+          updateAuthUI();
+          toast('Account created! Welcome, ' + res.user.name + ' 🎉', 'success');
+          await loadTripData();
+        } else {
+          toast(res ? (res.error || 'Failed to create user') : 'Error', 'error');
+        }
+      } catch(err) {
+        toast('Error creating account: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check"></i> <span>Create Account & Sign In</span>';
       }
     }
 
@@ -1023,19 +1169,38 @@
       $('allBillsBadge').textContent = (d.bills || []).length;
     }
 
-    // ─── HORIZONTAL MEMBER BAR (IMAGE 4 EXACT MATCH) ──────────────────────────
+    // ─── HORIZONTAL MEMBER BAR & ATTENDANCE ─────────────────────────────────────
     function renderHorizontalMemberBar() {
       var row = $('membersHorizontalRow');
       row.innerHTML = '';
-      if (!state.tripData || !state.tripData.membersSummary) return;
+      if (!state.tripData) return;
 
-      var members = state.tripData.membersSummary;
+      // If this trip hasn't had members selected yet and no bills exist
+      if (state.tripData.hasSelectedMembers === false) {
+        var setupBox = document.createElement('div');
+        setupBox.className = 'w-full col-span-full p-4 rounded-2xl border-2 border-dashed border-[#c96b32]/60 bg-[#c96b32]/10 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left';
+        setupBox.innerHTML = '<div>' +
+          '<h4 class="font-bold text-white text-sm flex items-center justify-center sm:justify-start gap-2">' +
+            '<i class="fas fa-users-gear text-[#e0834a]"></i> Who came on this trip?' +
+          '</h4>' +
+          '<p class="text-xs text-[var(--text-muted)] mt-1">Some friends might not have joined! Select who joined to start splitting bills accurately.</p>' +
+        '</div>' +
+        '<button onclick="openSelectTripMembersModal()" class="tap-active px-4 py-2 rounded-xl bg-gradient-to-r from-[#c96b32] to-[#b35922] hover:from-[#d6763a] hover:to-[#c26228] text-white font-bold text-xs shrink-0 shadow-lg flex items-center gap-1.5 transition">' +
+          '<i class="fas fa-user-check"></i> Choose Trip Members' +
+        '</button>';
+        row.appendChild(setupBox);
+        return;
+      }
+
+      var members = state.tripData.membersSummary || [];
+      var isDarshan = state.currentUser && (state.currentUser.isAdmin || (state.currentUser.username && state.currentUser.username.toLowerCase() === 'darshan'));
+
       members.forEach(function(m) {
         var isMe = state.currentUser && state.currentUser.username.toLowerCase() === m.username.toLowerCase();
         var card = document.createElement('div');
         
         var borderClass = isMe ? 'border-[#c96b32] bg-[#c96b32]/15 shadow-md' : 'border-[var(--border)] bg-[var(--bg)]/90 hover:border-[#c96b32]/50';
-        card.className = 'tap-active p-2.5 rounded-2xl border transition flex items-center gap-2 cursor-pointer min-w-[130px] sm:min-w-0 sm:flex-1 shrink-0 snap-item ' + borderClass;
+        card.className = 'tap-active p-2.5 rounded-2xl border transition flex items-center justify-between gap-2 cursor-pointer min-w-[130px] sm:min-w-0 sm:flex-1 shrink-0 snap-item relative group ' + borderClass;
         
         var avatarBg = m.status === 'gets' ? 'bg-emerald-600' : (m.status === 'owes' ? 'bg-[#c96b32]' : 'bg-stone-700');
         var statusBadge = '';
@@ -1047,9 +1212,16 @@
           statusBadge = '<span class="text-[10px] text-emerald-400 font-semibold block truncate">Settled ✅</span>';
         }
 
-        card.innerHTML = '<div class="w-7 h-7 rounded-full ' + avatarBg + ' text-white flex items-center justify-center font-bold text-xs shrink-0">' + m.name[0] + '</div>' +
-          '<div class="min-w-0 text-left"><div class="font-bold text-xs text-white truncate">' + m.name + (isMe ? ' <span class="text-[#e0834a]">(You)</span>' : '') + '</div>' +
-          statusBadge + '</div>';
+        var removeBtnHtml = '';
+        if (isDarshan) {
+          removeBtnHtml = '<button onclick="event.stopPropagation(); confirmRemoveMemberFromTrip(\'' + m.username + '\', \'' + m.name.replace(/'/g, "\\'") + '\')" title="Remove member from trip" class="w-5 h-5 rounded-full bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white flex items-center justify-center text-[10px] shrink-0 transition" style="z-index: 2;"><i class="fas fa-times"></i></button>';
+        }
+
+        card.innerHTML = '<div class="flex items-center gap-2 min-w-0 flex-1">' +
+            '<div class="w-7 h-7 rounded-full ' + avatarBg + ' text-white flex items-center justify-center font-bold text-xs shrink-0">' + m.name[0] + '</div>' +
+            '<div class="min-w-0 text-left flex-1"><div class="font-bold text-xs text-white truncate">' + m.name + (isMe ? ' <span class="text-[#e0834a]">(You)</span>' : '') + '</div>' +
+            statusBadge + '</div>' +
+          '</div>' + removeBtnHtml;
 
         card.onclick = function() {
           if (!state.currentUser) {
@@ -1064,6 +1236,173 @@
 
         row.appendChild(card);
       });
+
+      // Append '+ Friend' button to quickly add anyone left behind
+      var addCard = document.createElement('div');
+      addCard.className = 'tap-active p-2 rounded-2xl border border-dashed border-[var(--border)] hover:border-[#c96b32] bg-[var(--bg)]/50 hover:bg-[#c96b32]/10 transition flex items-center justify-center gap-1.5 cursor-pointer min-w-[95px] sm:min-w-0 sm:flex-1 shrink-0 snap-item text-[var(--text-muted)] hover:text-[#e0834a]';
+      addCard.innerHTML = '<i class="fas fa-user-plus text-xs"></i><span class="text-[11px] font-bold">+ Friend</span>';
+      addCard.title = 'Add friend who joined later';
+      addCard.onclick = openAddMemberModal;
+      row.appendChild(addCard);
+    }
+
+    // ─── ATTENDANCE & MEMBER MODALS ───────────────────────────────────────────
+    function openSelectTripMembersModal() {
+      var allUsers = (state.tripData && state.tripData.allRegisteredUsers) ? state.tripData.allRegisteredUsers : state.users;
+      var currentMembers = (state.tripData && Array.isArray(state.tripData.tripMembers)) ? state.tripData.tripMembers.map(function(m){ return m.toLowerCase(); }) : [];
+      
+      var list = $('selectTripMembersList');
+      list.innerHTML = '';
+      
+      (allUsers || []).forEach(function(u) {
+        var un = u.username.toLowerCase();
+        var isChecked = currentMembers.length ? currentMembers.includes(un) : true;
+        var row = document.createElement('label');
+        row.className = 'flex items-center gap-2.5 p-2 rounded-xl bg-[var(--bg)] border border-[var(--border)] hover:border-[#c96b32]/50 cursor-pointer transition';
+        row.innerHTML = '<input type="checkbox" value="' + u.username + '" ' + (isChecked ? 'checked' : '') + ' class="trip-member-select-chk w-4 h-4 rounded text-[#c96b32] focus:ring-0 focus:outline-none accent-[#c96b32]">' +
+          '<div class="w-6 h-6 rounded-full bg-[#c96b32]/20 text-[#e0834a] flex items-center justify-center font-bold text-[10px]">' + u.name[0] + '</div>' +
+          '<div class="min-w-0 flex-1">' +
+            '<div class="text-xs font-bold text-white truncate">' + u.name + '</div>' +
+            '<div class="text-[10px] text-[var(--text-muted)] truncate">@' + u.username + '</div>' +
+          '</div>';
+        list.appendChild(row);
+      });
+
+      $('selectTripMembersModal').classList.remove('hidden');
+    }
+
+    function closeSelectTripMembersModal() {
+      $('selectTripMembersModal').classList.add('hidden');
+    }
+
+    function selectAllTripMembers(checked) {
+      var chks = document.querySelectorAll('.trip-member-select-chk');
+      chks.forEach(function(c) { c.checked = !!checked; });
+    }
+
+    async function submitTripMembersSelection() {
+      if (!state.currentUser) {
+        toast('Please login to confirm trip members', 'warning');
+        openLoginModal();
+        return;
+      }
+      var chks = document.querySelectorAll('.trip-member-select-chk:checked');
+      var selected = Array.from(chks).map(function(c) { return c.value; });
+      if (!selected.length) {
+        return toast('Please select at least 1 member who joined', 'warning');
+      }
+
+      var btn = $('btnSubmitTripMembers');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving members…';
+
+      try {
+        var res = await apiFetch('members', {
+          method: 'POST',
+          body: JSON.stringify({ folderId: state.curFolderId, members: selected })
+        });
+        if (res && res.ok) {
+          toast('Trip members updated successfully! ✅', 'success');
+          closeSelectTripMembersModal();
+          await loadTripData();
+        } else {
+          toast(res ? (res.error || 'Failed to update members') : 'Error', 'error');
+        }
+      } catch(err) {
+        toast('Error updating members: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check"></i> <span>Confirm Trip Members</span>';
+      }
+    }
+
+    function openAddMemberModal() {
+      var allUsers = (state.tripData && state.tripData.allRegisteredUsers) ? state.tripData.allRegisteredUsers : state.users;
+      var currentMembers = (state.tripData && Array.isArray(state.tripData.tripMembers)) ? state.tripData.tripMembers.map(function(m){ return m.toLowerCase(); }) : [];
+      var missing = (allUsers || []).filter(function(u) { return !currentMembers.includes(u.username.toLowerCase()); });
+
+      var list = $('addMemberList');
+      list.innerHTML = '';
+
+      if (!missing.length) {
+        list.innerHTML = '<div class="p-4 text-center text-xs text-[var(--text-muted)] bg-[var(--bg)] rounded-xl border border-[var(--border)]"><i class="fas fa-check-double text-emerald-400 mb-1 block text-base"></i>All registered friends are already in this trip!</div>';
+      } else {
+        missing.forEach(function(u) {
+          var item = document.createElement('div');
+          item.className = 'p-2.5 rounded-xl bg-[var(--bg)] border border-[var(--border)] flex items-center justify-between gap-2';
+          item.innerHTML = '<div class="flex items-center gap-2 min-w-0">' +
+            '<div class="w-7 h-7 rounded-full bg-[#c96b32]/20 text-[#e0834a] flex items-center justify-center font-bold text-xs shrink-0">' + u.name[0] + '</div>' +
+            '<div class="min-w-0">' +
+              '<div class="text-xs font-bold text-white truncate">' + u.name + '</div>' +
+              '<div class="text-[10px] text-[var(--text-muted)] truncate">@' + u.username + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<button onclick="addSingleMemberToTrip(\'' + u.username + '\', \'' + u.name.replace(/'/g, "\\'") + '\')" class="tap-active px-3 py-1.5 rounded-lg bg-[#c96b32] hover:bg-[#d6763a] text-white font-bold text-xs shrink-0 flex items-center gap-1 transition">' +
+            '<i class="fas fa-plus"></i> Add' +
+          '</button>';
+          list.appendChild(item);
+        });
+      }
+
+      $('addMemberModal').classList.remove('hidden');
+    }
+
+    function closeAddMemberModal() {
+      $('addMemberModal').classList.add('hidden');
+    }
+
+    async function addSingleMemberToTrip(username, name) {
+      if (!state.currentUser) {
+        toast('Please login to add a member', 'warning');
+        openLoginModal();
+        return;
+      }
+      try {
+        var res = await apiFetch('members/add', {
+          method: 'POST',
+          body: JSON.stringify({ folderId: state.curFolderId, username: username })
+        });
+        if (res && res.ok) {
+          toast(name + ' added to this trip! ✅', 'success');
+          closeAddMemberModal();
+          await loadTripData();
+        } else {
+          toast(res ? (res.error || 'Failed to add member') : 'Error', 'error');
+        }
+      } catch(err) {
+        toast('Error adding member: ' + err.message, 'error');
+      }
+    }
+
+    async function confirmRemoveMemberFromTrip(username, name) {
+      if (!state.currentUser) {
+        toast('Please login as Admin to remove members', 'warning');
+        openLoginModal();
+        return;
+      }
+      var isDarshan = state.currentUser.isAdmin || (state.currentUser.username && state.currentUser.username.toLowerCase() === 'darshan');
+      if (!isDarshan) {
+        return toast('Only Admin or Darshan can remove a member from this trip', 'error');
+      }
+
+      if (!confirm('Are you sure you want to remove ' + name + ' from this trip?')) {
+        return;
+      }
+
+      try {
+        var res = await apiFetch('members/remove', {
+          method: 'POST',
+          body: JSON.stringify({ folderId: state.curFolderId, username: username })
+        });
+        if (res && res.ok) {
+          toast(name + ' removed from this trip', 'info');
+          await loadTripData();
+        } else {
+          toast(res ? (res.error || 'Failed to remove member') : 'Error', 'error');
+        }
+      } catch(err) {
+        toast('Error removing member: ' + err.message, 'error');
+      }
     }
 
     // ─── USER ALERTS & VERIFICATION ───────────────────────────────────────────
@@ -1619,7 +1958,17 @@
       var container = $('addBillMembersCheckboxes');
       container.innerHTML = '';
       state.splitCheckboxes.clear();
-      (state.users || []).forEach(function(u) {
+
+      var tripMembers = (state.tripData && Array.isArray(state.tripData.tripMembers) && state.tripData.tripMembers.length > 0)
+        ? state.tripData.tripMembers.map(function(m){ return m.toLowerCase(); })
+        : null;
+
+      var usersToShow = (state.users || []);
+      if (tripMembers && tripMembers.length > 0) {
+        usersToShow = usersToShow.filter(function(u) { return tripMembers.includes(u.username.toLowerCase()); });
+      }
+
+      usersToShow.forEach(function(u) {
         state.splitCheckboxes.add(u.username);
         var label = document.createElement('label');
         label.className = 'flex items-center gap-1.5 p-1.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--card-hover)] cursor-pointer text-[11px] text-white';

@@ -57,6 +57,36 @@ async function verifyDriveToken(token, driveId, secret) {
   return sig === expectedSig;
 }
 
+function sanitizeDBFolders(db) {
+  if (!db || !Array.isArray(db.folders)) return false;
+  const seen = new Map();
+  const deduped = [];
+  let changed = false;
+  for (const f of db.folders) {
+    if (!f || !f.id) continue;
+    if (!seen.has(f.id)) {
+      seen.set(f.id, f);
+      deduped.push(f);
+    } else {
+      changed = true;
+      const prev = seen.get(f.id);
+      // Keep the one that has password/protection
+      if ((!prev.isLocked && f.isLocked) || (!prev.passwordHash && f.passwordHash)) {
+        const idx = deduped.indexOf(prev);
+        if (idx !== -1) {
+          deduped[idx] = f;
+          seen.set(f.id, f);
+        }
+      }
+    }
+  }
+  if (changed) {
+    db.folders = deduped;
+    return true;
+  }
+  return false;
+}
+
 async function uGet(env,key){
   const kv=getKV(env);
   if(kv){
@@ -248,7 +278,41 @@ async function gAT(env,rt,forceRefresh=false){
   return x.access_token;
 }
 async function gDQ(at){return(await fetch('https://www.googleapis.com/drive/v3/about?fields=storageQuota,user',{headers:{Authorization:`Bearer ${at}`}})).json();}
-async function mkDir(at,n,pid){const q=`name='${n}' and mimeType='application/vnd.google-apps.folder' and trashed=false${pid?` and '${pid}' in parents`:''}`;const s=await(await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,{headers:{Authorization:`Bearer ${at}`}})).json();if(s.files&&s.files.length)return s.files[0].id;const c=await(await fetch('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{Authorization:`Bearer ${at}`,'Content-Type':'application/json'},body:JSON.stringify({name:n,mimeType:'application/vnd.google-apps.folder',...(pid?{parents:[pid]}:{})})})).json();return c.id;}
+async function mkDir(at,n,pid){
+  try {
+    const q=`name='${n}' and mimeType='application/vnd.google-apps.folder' and trashed=false${pid?` and '${pid}' in parents`:''}`;
+    let sResp = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&supportsAllDrives=true&includeItemsFromAllDrives=true`,{headers:{Authorization:`Bearer ${at}`}});
+    if (sResp.ok) {
+      const s = await sResp.json().catch(() => ({}));
+      if (s.files && s.files.length) return s.files[0].id;
+    }
+    let cResp = await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true',{
+      method:'POST',
+      headers:{Authorization:`Bearer ${at}`,'Content-Type':'application/json'},
+      body:JSON.stringify({name:n,mimeType:'application/vnd.google-apps.folder',...(pid?{parents:[pid]}:{})})
+    });
+    if (cResp.ok) {
+      const c = await cResp.json().catch(() => ({}));
+      return c.id || null;
+    }
+    // If rate limited or 503, brief wait and retry once
+    if (cResp.status === 503 || cResp.status === 429) {
+      await new Promise(r => setTimeout(r, 600));
+      cResp = await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true',{
+        method:'POST',
+        headers:{Authorization:`Bearer ${at}`,'Content-Type':'application/json'},
+        body:JSON.stringify({name:n,mimeType:'application/vnd.google-apps.folder',...(pid?{parents:[pid]}:{})})
+      });
+      if (cResp.ok) {
+        const c = await cResp.json().catch(() => ({}));
+        return c.id || null;
+      }
+    }
+  } catch(e) {
+    console.warn('mkDir exception:', e);
+  }
+  return null;
+}
 
 // ─── Google Drive DB Persistence Backup ───
 // When Cloudflare KV exceeds daily put limits, Google Drive is our reliable storage.
@@ -370,6 +434,9 @@ async function hAL(req,env){
       try{ await uSet(env,'td:db',db); }catch(e){}
     }
   }
+  if(db && sanitizeDBFolders(db)){
+    try{ await uSet(env,'td:db',db); }catch(e){}
+  }
   if(await sha256(password)!==db.adminHash)return J({error:'Wrong password'},401);
   const t = await makeSignedToken('admin', gEK(env));
   _memSesCache.set(t,'admin');
@@ -463,6 +530,9 @@ async function hDB(req,env){
       db={v:3,adminHash:await sha256('admin123'),drives:[],files:[],folders:[],activityLog:[],users:[]};
       try{ await uSet(env,'td:db',db); }catch(e){}
     }
+  }
+  if(db && sanitizeDBFolders(db)){
+    try{ await uSet(env,'td:db',db); }catch(e){}
   }
   // Only check Google Drive if explicitly requested with ?refresh=gdrive or ?sync=1
   const dbUrl = new URL(req.url);
@@ -1935,6 +2005,51 @@ async function hDebugDB(req, env) {
       teraChildren: teraChildren.map(f => ({id:f.id, name:f.name, parentId:f.parentId, googleFolderId:f.googleFolderId, files:(db.files||[]).filter(x=>x.folderId===f.id).length})),
       teraFiles: teraFiles.map(f => ({id:f.id, name:f.name, size:f.size})),
       allFolders: (db.folders||[]).map(f => ({id:f.id, name:f.name, parentId:f.parentId, googleFolderId:f.googleFolderId}))
+    });
+  }
+
+  if (action === 'cleanup-drive2-dead-files') {
+    sanitizeDBFolders(db);
+    const drvId = 'mv3txae19acz2';
+    const drv = (db.drives || []).find(d => d.id === drvId);
+    if (!drv) return J({ error: 'Drive 2 not found' }, 404);
+
+    let at;
+    try { at = await gAT(env, drv.encToken); }
+    catch(e) { at = await gAT(env, drv.encToken, true); }
+
+    // Fetch all genuine files from Google Drive for this drive
+    const allGFiles = [];
+    let pageTok = '';
+    do {
+      const u = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType != 'application/vnd.google-apps.folder' and trashed = false")}&fields=nextPageToken,files(id,name)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true${pageTok ? `&pageToken=${pageTok}` : ''}`;
+      const resp = await fetch(u, { headers: { Authorization: `Bearer ${at}` } });
+      if (!resp.ok) break;
+      const data = await resp.json();
+      if (data.files) allGFiles.push(...data.files);
+      pageTok = data.nextPageToken || '';
+    } while (pageTok);
+
+    const genuineIds = new Set(allGFiles.map(f => f.id));
+    const beforeCount = (db.files || []).length;
+    const removedFiles = [];
+    db.files = (db.files || []).filter(f => {
+      if (f.driveId !== drvId) return true;
+      if (!f.googleFileId || !genuineIds.has(f.googleFileId)) {
+        removedFiles.push({ id: f.id, name: f.name, folderId: f.folderId });
+        return false;
+      }
+      return true;
+    });
+
+    await uSet(env, 'td:db', db);
+    return J({
+      ok: true,
+      beforeCount,
+      afterCount: db.files.length,
+      removedCount: removedFiles.length,
+      removedFiles,
+      remainingDrive2Files: db.files.filter(f => f.driveId === drvId).length
     });
   }
 
@@ -3456,7 +3571,21 @@ async function hMF(req,env){
   const isOpenTarget=isDriveOpen(driveId,db);
   const ses=await vSes(req,env,null);
   if(!ses&&!isOpenTarget) return J({error:'Unauthorized'},401);
-  if(!name||!name.trim()) return J({error:'Folder name required'},400);
+  const cleanName = (name || '').trim();
+  if(!cleanName) return J({error:'Folder name required'},400);
+
+  // Safety check: if folder with same name already exists in this parent, reuse it to prevent duplicates
+  if(!db.folders) db.folders = [];
+  const existingFolder = db.folders.find(f => 
+    f.driveId === driveId &&
+    (f.parentId || null) === (parentFolderId || null) &&
+    (f.name || '').trim().toLowerCase() === cleanName.toLowerCase() &&
+    !f.trashed && !f.destroyed
+  );
+  if (existingFolder) {
+    return J({ok:true, folderId:existingFolder.id, googleFolderId:existingFolder.googleFolderId, name:existingFolder.name, reused:true});
+  }
+
   const drv=(db&&db.drives||[]).find(d=>d.id===driveId) || (db&&db.drives||[])[0];
   if(!drv) return J({error:'Drive not found'},404);
   if(!ses && drv.passwordHash && !await vDriveToken(req, env, drv.id)){
@@ -3486,10 +3615,10 @@ async function hMF(req,env){
     if(pf&&pf.adminOnly) parentAdminOnly = true;
     if(pf&&Array.isArray(pf.allowedUsers)&&pf.allowedUsers.length) parentAllowedUsers = [...pf.allowedUsers];
   }
-  let gFid=await mkDir(at,name.trim(),gPid);
+  let gFid=await mkDir(at,cleanName,gPid);
   if(!gFid){
     at=await gAT(env,drv.encToken,true);
-    gFid=await mkDir(at,name.trim(),gPid);
+    gFid=await mkDir(at,cleanName,gPid);
   }
   const fId=uid();
   if(!db.folders) db.folders=[];
@@ -3497,7 +3626,7 @@ async function hMF(req,env){
     id:fId,
     driveId,
     parentId:parentFolderId||null,
-    name:name.trim(),
+    name:cleanName,
     googleFolderId:gFid,
     date:new Date().toISOString(),
     createdBy:ses||'guest',
@@ -3505,11 +3634,9 @@ async function hMF(req,env){
   };
   if(parentAllowedUsers) newFolder.allowedUsers = parentAllowedUsers;
   db.folders.push(newFolder);
-  if(_memDBCache && _memDBCache.folders) {
-    _memDBCache.folders.push(newFolder);
-  }
+  sanitizeDBFolders(db);
   await uSet(env,'td:db',db);
-  return J({ok:true,folderId:fId,googleFolderId:gFid,name:name.trim()});
+  return J({ok:true,folderId:fId,googleFolderId:gFid,name:cleanName});
 }
 
 async function hRF(req,env,fId){
@@ -4183,6 +4310,7 @@ async function hTripAPI(req, env, subpath, method) {
       return J({ error: 'Incorrect password' }, 401);
     }
 
+    const isDarshan = user.username.toLowerCase() === 'darshan' || !!adminSes;
     const tToken = await makeTripToken(user.username, gEK(env));
     return J({
       ok: true,
@@ -4192,7 +4320,56 @@ async function hTripAPI(req, env, subpath, method) {
         name: user.name,
         username: user.username,
         upiId: user.upiId || '',
-        qrDataUrl: user.qrDataUrl || ''
+        qrDataUrl: user.qrDataUrl || '',
+        isAdmin: isDarshan,
+        role: isDarshan ? 'admin' : 'user'
+      }
+    });
+  }
+
+  // 2b. POST /api/trip/create-user (or /api/trip/register)
+  if ((subpath === 'create-user' || subpath === 'register') && method === 'POST') {
+    const body = await req.json().catch(() => ({}));
+    const { name, username, password, upiId } = body;
+    if (!name || !name.trim()) return J({ error: 'Name is required' }, 400);
+    if (!username || !username.trim()) return J({ error: 'Username is required' }, 400);
+    if (!password || !password.trim()) return J({ error: 'Password is required' }, 400);
+
+    const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (!cleanUsername) return J({ error: 'Username must contain letters or numbers' }, 400);
+
+    if (!db.tripUsers) db.tripUsers = [];
+    const existing = db.tripUsers.find(u => (u.username||'').toLowerCase() === cleanUsername);
+    if (existing) {
+      return J({ error: 'Username already taken. Please choose another username or log in.' }, 409);
+    }
+
+    const newUser = {
+      id: uid(),
+      name: name.trim(),
+      username: cleanUsername,
+      passwordHash: await sha256(password.trim()),
+      rawPasswordHint: password.trim(),
+      upiId: (upiId || '').trim(),
+      qrDataUrl: '',
+      dateCreated: new Date().toISOString()
+    };
+    db.tripUsers.push(newUser);
+    await uSet(env, 'td:db', db);
+
+    const tToken = await makeTripToken(cleanUsername, gEK(env));
+    const isDarshan = cleanUsername === 'darshan' || !!adminSes;
+    return J({
+      ok: true,
+      token: tToken,
+      user: {
+        id: newUser.id,
+        name: newUser.name,
+        username: newUser.username,
+        upiId: newUser.upiId,
+        qrDataUrl: '',
+        isAdmin: isDarshan,
+        role: isDarshan ? 'admin' : 'user'
       }
     });
   }
@@ -4202,6 +4379,7 @@ async function hTripAPI(req, env, subpath, method) {
     if (!loggedInUser) return J({ error: 'Not logged in' }, 401);
     const user = (db.tripUsers || []).find(u => u.username === loggedInUser);
     if (!user) return J({ error: 'User not found' }, 404);
+    const isDarshan = user.username.toLowerCase() === 'darshan' || !!adminSes;
     return J({
       ok: true,
       user: {
@@ -4209,7 +4387,9 @@ async function hTripAPI(req, env, subpath, method) {
         name: user.name,
         username: user.username,
         upiId: user.upiId || '',
-        qrDataUrl: user.qrDataUrl || ''
+        qrDataUrl: user.qrDataUrl || '',
+        isAdmin: isDarshan,
+        role: isDarshan ? 'admin' : 'user'
       }
     });
   }
@@ -4271,8 +4451,30 @@ async function hTripAPI(req, env, subpath, method) {
       }
     }
 
+    // Determine attending members for this trip
+    let tripMemberUsernames = null;
+    let hasSelectedMembers = true;
+    if (Array.isArray(trip.members) && trip.members.length > 0) {
+      tripMemberUsernames = trip.members.map(m => m.toLowerCase());
+    } else {
+      // If no members set yet, check if there are existing bills
+      const billUsers = new Set();
+      (trip.bills || []).forEach(b => {
+        if (b.paidBy) billUsers.add(b.paidBy.toLowerCase());
+        if (Array.isArray(b.splitMembers)) b.splitMembers.forEach(m => billUsers.add(m.toLowerCase()));
+      });
+      if (billUsers.size > 0) {
+        tripMemberUsernames = Array.from(billUsers);
+        trip.members = tripMemberUsernames;
+      } else {
+        // New or empty trip: no members selected yet
+        hasSelectedMembers = false;
+        tripMemberUsernames = (db.tripUsers || []).map(u => u.username.toLowerCase());
+      }
+    }
+
     // Direct Pairwise Debt Matrix: pairwise[debtor][creditor]
-    const allUsers = (db.tripUsers || []).map(u => u.username.toLowerCase());
+    const allUsers = tripMemberUsernames;
     const pairwise = {};
     for (const u1 of allUsers) {
       pairwise[u1] = {};
@@ -4380,7 +4582,8 @@ async function hTripAPI(req, env, subpath, method) {
     const folderObj = (db.folders || []).find(f => f.id === folderId);
     const tripCustomName = (trip && trip.tripName) ? trip.tripName : null;
 
-    const membersSummary = (db.tripUsers || []).map(u => {
+    const activeTripUsers = (db.tripUsers || []).filter(u => allUsers.includes(u.username.toLowerCase()));
+    const membersSummary = activeTripUsers.map(u => {
       const un = u.username.toLowerCase();
       let paid = 0;
       let share = 0;
@@ -4426,6 +4629,9 @@ async function hTripAPI(req, env, subpath, method) {
     return J({
       folderId,
       folderName: tripCustomName || (folderObj ? folderObj.name : 'Trip Expenses'),
+      hasSelectedMembers,
+      tripMembers: allUsers,
+      allRegisteredUsers: (db.tripUsers || []).map(u => ({ id: u.id, name: u.name, username: u.username, upiId: u.upiId || '' })),
       totalExpenses: Math.round(totalExpenses),
       totalSettled: Math.round(totalSettled),
       remainingDue: Math.max(0, Math.round(totalExpenses - totalSettled)),
@@ -4441,9 +4647,68 @@ async function hTripAPI(req, env, subpath, method) {
         name: u.name,
         username: u.username,
         upiId: u.upiId || '',
+        hasQr: !!u.qrDataUrl,
         qrDataUrl: u.qrDataUrl || ''
       }))
     });
+  }
+
+  // 6b. POST /api/trip/members — Set trip members list
+  if (subpath === 'members' && method === 'POST') {
+    if (!loggedInUser && !adminSes) return J({ error: 'Please login to manage members' }, 401);
+    const body = await req.json().catch(() => ({}));
+    const { folderId, members } = body;
+    if (!folderId) return J({ error: 'folderId required' }, 400);
+    if (!Array.isArray(members)) return J({ error: 'members must be an array' }, 400);
+
+    if (!db.tripData[folderId]) {
+      db.tripData[folderId] = { folderId, bills: [], settlements: [], concessions: [] };
+    }
+    db.tripData[folderId].members = members.map(m => String(m).trim().toLowerCase()).filter(Boolean);
+    await uSet(env, 'td:db', db);
+    return J({ ok: true, members: db.tripData[folderId].members });
+  }
+
+  // 6c. POST /api/trip/members/add — Add single member to trip
+  if (subpath === 'members/add' && method === 'POST') {
+    if (!loggedInUser && !adminSes) return J({ error: 'Please login to add a member' }, 401);
+    const body = await req.json().catch(() => ({}));
+    const { folderId, username } = body;
+    if (!folderId || !username) return J({ error: 'folderId and username required' }, 400);
+    const un = String(username).trim().toLowerCase();
+
+    if (!db.tripData[folderId]) {
+      db.tripData[folderId] = { folderId, bills: [], settlements: [], concessions: [] };
+    }
+    if (!Array.isArray(db.tripData[folderId].members) || !db.tripData[folderId].members.length) {
+      db.tripData[folderId].members = (db.tripUsers || []).map(u => u.username.toLowerCase());
+    }
+    if (!db.tripData[folderId].members.includes(un)) {
+      db.tripData[folderId].members.push(un);
+    }
+    await uSet(env, 'td:db', db);
+    return J({ ok: true, members: db.tripData[folderId].members });
+  }
+
+  // 6d. POST /api/trip/members/remove — Remove member from trip (Darshan or Admin only)
+  if (subpath === 'members/remove' && method === 'POST') {
+    const isDarshan = (loggedInUser && loggedInUser.toLowerCase() === 'darshan');
+    if (!adminSes && !isDarshan) {
+      return J({ error: 'Only Admin or Darshan can remove members from this trip' }, 403);
+    }
+    const body = await req.json().catch(() => ({}));
+    const { folderId, username } = body;
+    if (!folderId || !username) return J({ error: 'folderId and username required' }, 400);
+    const un = String(username).trim().toLowerCase();
+
+    if (!db.tripData[folderId]) {
+      return J({ error: 'Trip not found' }, 404);
+    }
+    if (Array.isArray(db.tripData[folderId].members)) {
+      db.tripData[folderId].members = db.tripData[folderId].members.filter(m => m !== un);
+    }
+    await uSet(env, 'td:db', db);
+    return J({ ok: true, members: db.tripData[folderId].members });
   }
 
   // 7. POST /api/trip/bill — Add a new bill

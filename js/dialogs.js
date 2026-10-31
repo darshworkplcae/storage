@@ -2271,6 +2271,7 @@ function confirmDeleteFolder(folderId, name) {
 }
 
 function showNewFolderDialog() {
+  if (window._isCreatingFolder) return;
   var isOpenTarget = (_driveId && S.db && isDriveOpen(_driveId, S.db));
   var isAuth = (S.ses && S.ses.token);
   if (!isAuth && !isOpenTarget) {
@@ -2284,6 +2285,7 @@ function showNewFolderDialog() {
   }
   var name = prompt('Enter folder name:');
   if (!name || !name.trim()) return;
+  window._isCreatingFolder = true;
   toast('Creating folder…', 'info');
   apiCreateFolder({ driveId: _driveId, parentFolderId: _folderId || null, name: name.trim() }).then(async function (r) {
     if (r.ok) {
@@ -2293,6 +2295,10 @@ function showNewFolderDialog() {
     } else {
       toast(r.error || 'Failed to create folder', 'error');
     }
+  }).catch(function(e) {
+    toast(e.message || 'Failed to create folder', 'error');
+  }).finally(function() {
+    window._isCreatingFolder = false;
   });
 }
 

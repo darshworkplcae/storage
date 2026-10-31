@@ -94,10 +94,15 @@ function authHdr() {
   return h;
 }
 
-async function apiFetch(path, opts) {
+async function apiFetch(path, opts, retries) {
   opts = opts || {};
+  retries = (typeof retries === 'number') ? retries : 2;
   try {
     var r = await fetch(API + '/' + path, Object.assign({ headers: authHdr() }, opts));
+    if ((r.status === 503 || r.status === 429) && retries > 0) {
+      await new Promise(function(resolve) { setTimeout(resolve, 600); });
+      return await apiFetch(path, opts, retries - 1);
+    }
     var ct = r.headers.get('Content-Type') || '';
     if (!ct.includes('application/json')) {
       var raw = await r.text().catch(function(){return '';});
@@ -108,7 +113,13 @@ async function apiFetch(path, opts) {
       return { ok: r.ok, status: r.status, error: r.ok ? null : errMsg, _raw: raw };
     }
     return await r.json();
-  } catch(e) { return { error: e.message }; }
+  } catch(e) {
+    if (retries > 0) {
+      await new Promise(function(resolve) { setTimeout(resolve, 600); });
+      return await apiFetch(path, opts, retries - 1);
+    }
+    return { error: e.message };
+  }
 }
 
 try { sessionStorage.removeItem('_td_db_override'); } catch(e) {}
